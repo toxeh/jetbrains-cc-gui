@@ -37,6 +37,8 @@ import {
   setCachedQueryFn,
   touchRuntime,
   createTurnSink,
+  emitSessionUpdated,
+  waitForCliQuiet,
 } from './runtime-lifecycle.js';
 import {
   SESSION_CLEANUP_INTERVAL_MS,
@@ -249,7 +251,7 @@ const _sessionCleanupTimer = setInterval(async () => {
 // unref() so the timer does not prevent natural process exit
 _sessionCleanupTimer.unref();
 
-  async function executeTurn(runtime, requestContext, turnMeta) {
+async function executeTurn(runtime, requestContext, turnMeta) {
   if (!runtime || runtime.closed) {
     const err = new Error('Runtime is closed');
     err.runtimeTerminated = true;
@@ -268,12 +270,40 @@ _sessionCleanupTimer.unref();
   try {
     beginRuntimeTurn(runtime);
 
+    // A previous turn can still be in flight on the CLI when this one starts:
+    // a CLI-initiated background turn (e.g. a background-task completion
+    // notification, #1305) or a late-finishing turn whose events are still in
+    // the pipe. The turnSink routes by existence, not by message identity, so
+    // opening it now would attribute that turn's output — and, worse, its
+    // closing `result` — to this turn. Consuming a foreign result ends this
+    // turn early, the real answer then completes unobserved between turns,
+    // and every later answer shifts back by one ("answer to the previous
+    // phrase"). Wait for the in-flight turn's result instead: its events take
+    // the inter-turn path (background rendering) where they belong. The CLI
+    // would queue our message behind that turn anyway, so this adds no real
+    // latency. Interruptible: abort disposes the runtime, which resolves the
+    // wait; we re-check `closed` after waking.
+    if (runtime.cliTurnInFlight) {
+      console.log('[LIFECYCLE] In-flight CLI turn detected — deferring new turn until its result arrives');
+      await waitForCliQuiet(runtime);
+      if (runtime.closed) {
+        const err = new Error('Runtime closed while waiting for an in-flight CLI turn to finish');
+        err.runtimeTerminated = true;
+        throw err;
+      }
+    }
+
     // Create and register turnSink after beginRuntimeTurn to avoid race
     // (ensures executeTurn is ready to consume before perpetual reader can push)
     runtime.turnSink = createTurnSink();
 
     console.log('[MESSAGE_START]');
     runtime.inputStream.enqueue(requestContext.userMessage);
+
+    // Guards the foreign-result check below: flips true once ANY message of
+    // this turn has been observed. A successful turn always produces output
+    // (at minimum one assistant message) before its result.
+    let sawTurnMessage = false;
 
     while (true) {
       let next;
@@ -295,6 +325,9 @@ _sessionCleanupTimer.unref();
 
       touchRuntime(runtime);
       const msg = next.value;
+      if (msg?.type !== 'result') {
+        sawTurnMessage = true;
+      }
 
       if (turnState.streamingEnabled && !turnState.streamStarted) {
         process.stdout.write('[STREAM_START]\n');
@@ -339,18 +372,29 @@ _sessionCleanupTimer.unref();
 
       if (msg?.type === 'result') {
         if (msg.is_error) {
+          // NOTE: error results are accepted even as the first message of the
+          // turn — an immediately-failing request (auth, rate limit, invalid
+          // model) legitimately produces a bare error result with no prior
+          // output. Only SUCCESS results are subject to the foreign check.
           throw new Error(msg.result || msg.message || 'API request failed');
         }
-        // A task_notification for a background (run_in_background) Agent that
-        // settles AFTER this result cannot ride the in-turn [MESSAGE] stream:
-        // executeTurn breaks here and clears turnSink in the finally below
-        // (synchronously, before the perpetual reader's next query.next()
-        // resolves), so the perpetual reader routes that late event to the
-        // inter-turn daemon path (emitTaskEvent -> DaemonBridge "task_event"
-        // -> window.onTaskEvent). task_notification that settles BEFORE the
-        // result is still processed above in the in-turn [MESSAGE] stream.
-        // Both paths converge on window.onTaskEvent, which dedups by
-        // tool_use_id + observable fields - see DaemonBridge.handleDaemonEvent.
+        if (!sawTurnMessage) {
+          // A successful turn always produces messages (at minimum one
+          // assistant snapshot) before its result, so a success result
+          // arriving as the FIRST message of this turn must be the closing
+          // result of a previous/background turn that slipped past the
+          // in-flight gate above (read only after this turn's sink opened).
+          // Consuming it as ours would end this turn before it produced
+          // anything, leave the real answer to complete unobserved between
+          // turns, and shift every later answer back by one. Skip it — this
+          // turn's real messages follow. session_updated still lets the UI
+          // render the background turn this result actually closed.
+          console.log('[LIFECYCLE] Skipping foreign result that closed a background turn');
+          if (runtime.sessionId) {
+            emitSessionUpdated(runtime.sessionId);
+          }
+          continue;
+        }
         break;
       }
     }
