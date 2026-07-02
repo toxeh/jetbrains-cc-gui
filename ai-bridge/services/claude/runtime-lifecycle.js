@@ -177,7 +177,11 @@ async function createRuntime(requestContext, callbacks) {
     // an unfinished message run — substantive output seen, closing `result`
     // not yet. executeTurn defers opening its sink while this is set.
     cliTurnInFlight: false,
-    cliQuietWaiters: []
+    cliQuietWaiters: [],
+    // Monotonic count of messages the perpetual reader has pulled from the SDK
+    // iterator. waitForReaderQuiescent watches this to tell when the reader has
+    // drained everything already in the pipe and parked on query.next().
+    readerReadCount: 0
   };
 
   const options = {
@@ -334,6 +338,47 @@ export function waitForCliQuiet(runtime, capMs = 120_000) {
   });
 }
 
+/**
+ * Wait until the perpetual reader has drained everything already in the SDK
+ * pipe and is parked on query.next() — i.e. no CLI turn is in flight AND the
+ * reader made no progress across a macrotask.
+ *
+ * Called by executeTurn BEFORE it opens its turnSink and enqueues the user
+ * message. At that point the user message has not been sent, so nothing the
+ * pipe holds can be a response to it: anything still buffered is prior-turn
+ * tail (a late summary, a background turn's assistant/result, #1305). Letting
+ * the reader consume it via the inter-turn path first keeps it out of this
+ * turn's sink — which routes by existence and would otherwise misattribute it,
+ * ending the turn on a foreign result and shifting every later answer back by
+ * one ("answer to the previous phrase").
+ *
+ * waitForCliQuiet only parks on a result and cannot see a not-yet-closed tail
+ * that arrives in the gap after the previous result; the progress-tick check
+ * closes that gap. Bounded by capMs so a chatty background task cannot starve
+ * turn start; abort resolves it immediately via the closed check.
+ */
+export async function waitForReaderQuiescent(runtime, capMs = 120_000) {
+  if (!runtime || runtime.closed) return;
+  const deadline = Date.now() + capMs;
+  let lastCount = -1;
+  while (!runtime.closed) {
+    // Park cheaply on the in-flight turn's closing result instead of spinning.
+    if (runtime.cliTurnInFlight) {
+      await waitForCliQuiet(runtime, Math.max(0, deadline - Date.now()));
+      if (runtime.closed) return;
+    }
+    const count = runtime.readerReadCount || 0;
+    // No progress across a macrotask and no turn in flight → pipe drained.
+    if (count === lastCount && !runtime.cliTurnInFlight) return;
+    lastCount = count;
+    if (Date.now() >= deadline) {
+      console.warn('[LIFECYCLE] waitForReaderQuiescent cap (' + capMs + 'ms) hit — opening sink with the pipe possibly non-empty');
+      return;
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 export function startPerpetualReader(runtime, callbacks) {
   // Start the perpetual reader loop; return the promise so callers (and tests)
   // can await its completion.
@@ -365,6 +410,11 @@ export function startPerpetualReader(runtime, callbacks) {
         }
 
         const msg = next.value;
+
+        // Progress tick for waitForReaderQuiescent: a change means the reader
+        // pulled a message this round; a steady value means it is parked on
+        // query.next() with an empty pipe.
+        runtime.readerReadCount = (runtime.readerReadCount || 0) + 1;
 
         // Keep the runtime's idle timer fresh while it actively produces output.
         // cleanupStaleSessionRuntimes reaps runtimes idle past SESSION_RUNTIME_MAX_IDLE_MS

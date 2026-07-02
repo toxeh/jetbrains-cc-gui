@@ -323,6 +323,63 @@ test('abort while gated on an in-flight CLI turn fails the turn instead of hangi
   assert.equal(runtime.closed, true);
 });
 
+test('a background-turn tail already in the pipe does not contaminate the next user turn', async () => {
+  // The scheduler-race that survives the level-triggered in-flight gate: turn 1
+  // ends, then the CLI emits a background turn (assistant + its OWN result,
+  // #1305) whose events are already buffered in the pipe — but the reader has
+  // not yet been scheduled to consume them into the inter-turn path. Turn 2
+  // starts in that window.
+  //
+  // Without deferring the sink until the pipe is quiet, turn 2 would open its
+  // sink, receive the background assistant (arming sawTurnMessage), then take
+  // the background *result* as its own — ending turn 2 before its real answer,
+  // which then completes unobserved between turns. Every later answer shifts
+  // back by one ("answer to the previous / pre-previous phrase").
+  const turn1 = [messageStart(), streamTextDelta('answer ONE'), assistantText('answer ONE'), RESULT_OK];
+
+  let query;
+  __testing.setQueryFn((args) => {
+    query = createScriptedQuery(args, [turn1]);
+    return query;
+  });
+
+  const params = baseParams('bg-tail');
+  const ctx1 = await __testing.buildRequestContext({ ...params, message: 'q1' }, false, OVERRIDES);
+  const runtime = await __testing.acquireRuntime(ctx1);
+  const meta1 = { state: null };
+  await __testing.executeTurn(runtime, ctx1, meta1);
+  assert.equal(meta1.state.lastAssistantContent, 'answer ONE');
+  await query.waitForInput(); // consume turn 1's user message from the FIFO tracker
+
+  // A complete CLI-initiated background turn lands in the pipe.
+  query.channel.enqueue(assistantText('BACKGROUND task summary — not an answer the user asked for'));
+  query.channel.enqueue(RESULT_OK);
+
+  // Turn 2 begins immediately — NO settleReader, so the reader has not drained
+  // the background turn yet. executeTurn must defer its sink until quiescent.
+  const ctx2 = await __testing.buildRequestContext({ ...params, message: 'q2' }, false, OVERRIDES);
+  const runtime2 = await __testing.acquireRuntime(ctx2);
+  assert.equal(runtime2, runtime, 'runtime is reused across turns');
+  const meta2 = { state: null };
+  const turn2 = __testing.executeTurn(runtime2, ctx2, meta2);
+
+  // Deliver turn 2's real answer only AFTER the CLI has read our user message —
+  // mirroring real ordering, where a response cannot precede its request.
+  await query.waitForInput();
+  query.channel.enqueue(messageStart());
+  query.channel.enqueue(streamTextDelta('answer TWO'));
+  query.channel.enqueue(assistantText('answer TWO'));
+  query.channel.enqueue(RESULT_OK);
+
+  await turn2;
+
+  assert.equal(meta2.state.lastAssistantContent, 'answer TWO');
+  assert.ok(
+    !meta2.state.lastAssistantContent.includes('BACKGROUND'),
+    'the background turn must not be attributed to turn 2'
+  );
+});
+
 test('the perpetual reader is the only query.next() consumer across turns', async () => {
   // Architectural invariant that makes swallowed events impossible: native
   // async generators serve queued next() callers in FIFO order, so ANY second
