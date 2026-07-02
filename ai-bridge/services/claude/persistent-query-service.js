@@ -38,7 +38,7 @@ import {
   touchRuntime,
   createTurnSink,
   emitSessionUpdated,
-  waitForCliQuiet,
+  waitForReaderQuiescent,
 } from './runtime-lifecycle.js';
 import {
   SESSION_CLEANUP_INTERVAL_MS,
@@ -278,19 +278,24 @@ async function executeTurn(runtime, requestContext, turnMeta) {
     // closing `result` — to this turn. Consuming a foreign result ends this
     // turn early, the real answer then completes unobserved between turns,
     // and every later answer shifts back by one ("answer to the previous
-    // phrase"). Wait for the in-flight turn's result instead: its events take
-    // the inter-turn path (background rendering) where they belong. The CLI
-    // would queue our message behind that turn anyway, so this adds no real
-    // latency. Interruptible: abort disposes the runtime, which resolves the
-    // wait; we re-check `closed` after waking.
-    if (runtime.cliTurnInFlight) {
-      console.log('[LIFECYCLE] In-flight CLI turn detected — deferring new turn until its result arrives');
-      await waitForCliQuiet(runtime);
-      if (runtime.closed) {
-        const err = new Error('Runtime closed while waiting for an in-flight CLI turn to finish');
-        err.runtimeTerminated = true;
-        throw err;
-      }
+    // phrase").
+    //
+    // Wait until the reader has drained the pipe and parked on query.next().
+    // This covers not just a turn that is mid-flight now (waitForCliQuiet), but
+    // also a tail that lands in the gap after the previous result — a bare
+    // in-flight check is level-triggered on a flag the closing result already
+    // cleared, so a late background `assistant` (no result yet) would slip past
+    // it and contaminate this turn. We do this BEFORE enqueueing our user
+    // message: nothing in the pipe yet can be a response to it, so anything
+    // buffered is prior-turn tail and belongs on the inter-turn (background
+    // render) path. The CLI would queue our message behind that turn anyway, so
+    // this adds no real latency. Interruptible: abort disposes the runtime,
+    // which resolves the wait; we re-check `closed` after waking.
+    await waitForReaderQuiescent(runtime);
+    if (runtime.closed) {
+      const err = new Error('Runtime closed while waiting for an in-flight CLI turn to finish');
+      err.runtimeTerminated = true;
+      throw err;
     }
 
     // Create and register turnSink after beginRuntimeTurn to avoid race
@@ -382,13 +387,15 @@ async function executeTurn(runtime, requestContext, turnMeta) {
           // A successful turn always produces messages (at minimum one
           // assistant snapshot) before its result, so a success result
           // arriving as the FIRST message of this turn must be the closing
-          // result of a previous/background turn that slipped past the
-          // in-flight gate above (read only after this turn's sink opened).
-          // Consuming it as ours would end this turn before it produced
-          // anything, leave the real answer to complete unobserved between
-          // turns, and shift every later answer back by one. Skip it — this
-          // turn's real messages follow. session_updated still lets the UI
-          // render the background turn this result actually closed.
+          // result of a previous/background turn. The quiescence wait above
+          // drains anything already in the pipe before the sink opens, so this
+          // now only fires for the residual network window — a foreign run
+          // whose result lands after the sink opened. Consuming it as ours
+          // would end this turn before it produced anything, leave the real
+          // answer to complete unobserved between turns, and shift every later
+          // answer back by one. Skip it — this turn's real messages follow.
+          // session_updated still lets the UI render the background turn this
+          // result actually closed.
           console.log('[LIFECYCLE] Skipping foreign result that closed a background turn');
           if (runtime.sessionId) {
             emitSessionUpdated(runtime.sessionId);
