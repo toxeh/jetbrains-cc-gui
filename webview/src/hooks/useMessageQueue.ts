@@ -8,6 +8,17 @@ export interface QueuedMessage {
   queuedAt: number;
 }
 
+/**
+ * Queue items that are NOT already rendered as a transcript bubble and so still
+ * need the queue chip. A queued message WITH text is shown in the transcript as
+ * an optimistic "queued" bubble (App enqueue path), so its chip would duplicate
+ * it. An attachment-only message (empty text) has no bubble, so it must still
+ * surface in the chip to stay visible and removable.
+ */
+export function queueItemsNeedingChip(queue: QueuedMessage[]): QueuedMessage[] {
+  return queue.filter((item) => !item.content.trim());
+}
+
 export interface UseMessageQueueOptions {
   /** Whether AI is currently processing */
   isLoading: boolean;

@@ -3,6 +3,7 @@ import type { Attachment, SelectedAgent, QueuedMessage } from './types.js';
 import { AttachmentList } from './AttachmentList.js';
 import { ContextBar } from './ContextBar.js';
 import { MessageQueue } from './MessageQueue.js';
+import { queueItemsNeedingChip } from '../../hooks/useMessageQueue';
 import { useUIState } from '../../contexts/UIStateContext';
 import { copyToClipboard } from '../../utils/copyUtils';
 
@@ -74,6 +75,10 @@ export function ChatInputBoxHeader({
     }
   };
 
+  // Only attachment-only queued messages (no transcript bubble) get a chip;
+  // text messages are already shown as queued bubbles in the transcript.
+  const chipQueue = queueItemsNeedingChip(messageQueue ?? []);
+
   return (
     <>
       {/* Open source banner */}
@@ -134,10 +139,16 @@ export function ChatInputBoxHeader({
         </div>
       )}
 
-      {/* Message queue */}
-      {messageQueue && messageQueue.length > 0 && (
+      {/* Message queue.
+          Only messages with NO text bubble are shown here: a queued message
+          with text is already rendered in the transcript as an optimistic
+          "queued" bubble (see App enqueue path + reconcileOptimisticUserMessage),
+          so showing it here too would duplicate it. Attachment-only queued
+          messages (empty text, no bubble) still surface here so they remain
+          visible and removable. */}
+      {chipQueue.length > 0 && (
         <MessageQueue
-          queue={messageQueue}
+          queue={chipQueue}
           onRemove={onRemoveFromQueue ?? (() => {})}
         />
       )}
