@@ -1,3 +1,7 @@
+// Redirect HOME to a temp CLI-login config BEFORE importing modules that call
+// setupApiKey(), so buildRequestContext() does not throw on a credential-less CI
+// runner. Must stay the first import (see testing/cli-login-home.js).
+import './testing/cli-login-home.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
