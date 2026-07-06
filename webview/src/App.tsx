@@ -375,11 +375,30 @@ const App = () => {
     }
     // If loading, add to queue
     if (loading) {
+      // Render the message immediately as a queued optimistic bubble so the
+      // user sees it was accepted (instead of only a small queue chip). It is
+      // flagged isQueued; executeMessage activates this exact bubble when the
+      // queue drains (dedup by text), so it is never duplicated. A blank message
+      // still only goes to the queue (executeMessage would drop it anyway).
+      const queuedText = content.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+      if (queuedText) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'user',
+            content: queuedText,
+            timestamp: new Date().toISOString(),
+            isOptimistic: true,
+            isQueued: true,
+            raw: { message: { content: [{ type: 'text', text: queuedText }] } },
+          },
+        ]);
+      }
       enqueueMessage(content, attachments);
       return;
     }
     hookHandleSubmit(content, attachments);
-  }, [loading, enqueueMessage, hookHandleSubmit, forceCreateNewSession, currentProvider, handleModeSelect, setCurrentView, addToast, t]);
+  }, [loading, enqueueMessage, hookHandleSubmit, forceCreateNewSession, currentProvider, handleModeSelect, setCurrentView, addToast, t, setMessages]);
 
   // ── Chat-view computations (stage 5 of TASK-P1-01) ──
   const {

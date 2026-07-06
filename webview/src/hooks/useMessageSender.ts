@@ -20,6 +20,44 @@ export const CONTEXT_COMMANDS = new Set(['/context']);
 // Hoisted regex to avoid creating new RegExp on every call
 const WHITESPACE_REGEX = /\s+/;
 
+/**
+ * Reconcile the optimistic user bubble when a message is actually sent.
+ *
+ * If the message was already rendered as a QUEUED optimistic bubble (the App
+ * enqueue path shows it immediately while a turn is loading, so the user sees
+ * their message instead of only a queue chip), activate that exact bubble
+ * (clear isQueued, refresh timestamp + raw blocks) instead of appending a
+ * duplicate when the queue drains. The earliest queued bubble with matching
+ * trimmed text is chosen, mirroring the FIFO queue drain order. When there is
+ * no queued bubble (a normal immediate send), the message is appended as usual.
+ *
+ * Exported for unit testing.
+ */
+export function reconcileOptimisticUserMessage(
+  prev: ClaudeMessage[],
+  userMessage: ClaudeMessage,
+  text: string,
+  userContentBlocks: ClaudeContentBlock[],
+): ClaudeMessage[] {
+  const queuedIdx = prev.findIndex(
+    (m) => m.type === 'user'
+      && m.isOptimistic
+      && (m as { isQueued?: boolean }).isQueued === true
+      && (m.content ?? '').trim() === text,
+  );
+  if (queuedIdx >= 0) {
+    const updated = [...prev];
+    updated[queuedIdx] = {
+      ...updated[queuedIdx],
+      isQueued: false,
+      timestamp: userMessage.timestamp,
+      raw: { message: { content: userContentBlocks } },
+    };
+    return updated;
+  }
+  return [...prev, userMessage];
+}
+
 function createContextUsageRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -354,7 +392,7 @@ export function useMessageSender({
       })));
     }
 
-    // Create and add user message (optimistic update)
+    // Create and add user message (optimistic update).
     const userMessage: ClaudeMessage = {
       type: 'user',
       content: text || '',
@@ -362,7 +400,7 @@ export function useMessageSender({
       isOptimistic: true,
       raw: { message: { content: userContentBlocks } },
     };
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => reconcileOptimisticUserMessage(prev, userMessage, text || '', userContentBlocks));
 
     // Set loading state
     setLoading(true);
