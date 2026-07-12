@@ -738,4 +738,117 @@ public class ProjectConfigHandler {
             LOG.error("[ProjectConfigHandler] Failed to dispatch code font config: " + e.getMessage(), e);
         }
     }
+
+    /** Get usage statistics. Supports both Claude and Codex providers. */
+    public void handleGetUsageStatistics(String content) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                String projectPath = "all";
+                String provider = "claude";
+                long cutoffTime = 0;
+                if (content != null && !content.isEmpty() && !content.equals("{}")) {
+                    try {
+                        JsonObject json = gson.fromJson(content, JsonObject.class);
+                        if (json.has("scope")) {
+                            projectPath = "current".equals(json.get("scope").getAsString())
+                                ? context.getProject().getBasePath() : "all";
+                        }
+                        if (json.has("provider")) {
+                            provider = json.get("provider").getAsString();
+                        }
+                        if (json.has("dateRange")) {
+                            String dateRange = json.get("dateRange").getAsString();
+                            long now = System.currentTimeMillis();
+                            if ("7d".equals(dateRange)) { cutoffTime = now - 7L * 24 * 60 * 60 * 1000; }
+                            else if ("30d".equals(dateRange)) { cutoffTime = now - 30L * 24 * 60 * 60 * 1000; }
+                        }
+                    } catch (Exception e) {
+                        projectPath = "current".equals(content) ? context.getProject().getBasePath() : content;
+                    }
+                }
+                String json;
+                if ("codex".equals(provider)) {
+                    CodexHistoryReader reader = new CodexHistoryReader();
+                    CodexHistoryReader.ProjectStatistics stats = reader.getProjectStatistics(projectPath, cutoffTime);
+                    LOG.info("[ProjectConfigHandler] Codex statistics - sessions: " + stats.totalSessions +
+                             ", cost: " + stats.estimatedCost + ", total tokens: " + stats.totalUsage.totalTokens);
+                    json = gson.toJson(stats);
+                } else {
+                    ClaudeHistoryReader reader = new ClaudeHistoryReader();
+                    json = gson.toJson(reader.getProjectStatistics(projectPath, cutoffTime));
+                }
+                final String statsJson = json;
+                ApplicationManager.getApplication().invokeLater(() ->
+                    context.callJavaScript("window.updateUsageStatistics", context.escapeJs(statsJson)));
+            } catch (Exception e) {
+                LOG.error("[ProjectConfigHandler] Failed to get usage statistics: " + e.getMessage(), e);
+                showError("Failed to get statistics: " + e.getMessage());
+            }
+        });
+    }
+
+    // ---- Grok auth method --------------------------------------------------
+
+    public void handleGetGrokAuthConfig() {
+        respondWithJson("window.updateGrokAuthConfig",
+            () -> {
+                JsonObject payload = new JsonObject();
+                payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
+                String key = settingsService.getGrokApiKey();
+                payload.addProperty("hasApiKey", key != null && !key.isEmpty());
+                // For editing, frontend may request separately — send empty placeholder.
+                payload.addProperty("apiKey", key != null ? key : "");
+                payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
+                payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
+                payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
+                return payload;
+            },
+            jsonOf("authMethod", CodemossSettingsService.DEFAULT_GROK_AUTH_METHOD),
+            "Failed to get Grok auth config");
+    }
+
+    public void handleSetGrokAuthConfig(String content) {
+        try {
+            JsonObject json = gson.fromJson(content, JsonObject.class);
+            if (json == null) {
+                showError("Invalid Grok auth config");
+                return;
+            }
+            if (json.has("authMethod") && !json.get("authMethod").isJsonNull()) {
+                settingsService.setGrokAuthMethod(json.get("authMethod").getAsString());
+            }
+            if (json.has("apiKey") && !json.get("apiKey").isJsonNull()) {
+                settingsService.setGrokApiKey(json.get("apiKey").getAsString());
+            }
+            if (json.has("apiBaseUrl") && !json.get("apiBaseUrl").isJsonNull()) {
+                settingsService.setGrokApiBaseUrl(json.get("apiBaseUrl").getAsString());
+            }
+            if (json.has("oauthBaseUrl") && !json.get("oauthBaseUrl").isJsonNull()) {
+                settingsService.setGrokOauthBaseUrl(json.get("oauthBaseUrl").getAsString());
+            }
+            if (json.has("gatewayOrigin") && !json.get("gatewayOrigin").isJsonNull()) {
+                settingsService.setGrokGatewayOrigin(json.get("gatewayOrigin").getAsString());
+            }
+            JsonObject payload = new JsonObject();
+            payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
+            String key = settingsService.getGrokApiKey();
+            payload.addProperty("hasApiKey", key != null && !key.isEmpty());
+            payload.addProperty("apiKey", key != null ? key : "");
+            payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
+            payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
+            payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
+            LOG.info("[ProjectConfigHandler] Set Grok authMethod=" + payload.get("authMethod").getAsString()
+                    + " apiBaseUrl=" + payload.get("apiBaseUrl").getAsString()
+                    + " oauthBaseUrl=" + payload.get("oauthBaseUrl").getAsString());
+            ApplicationManager.getApplication().invokeLater(() -> {
+                context.callJavaScript("window.updateGrokAuthConfig",
+                    context.escapeJs(gson.toJson(payload)));
+                context.callJavaScript("window.showSuccessI18n", "toast.saveSuccess");
+            });
+        } catch (Exception e) {
+            LOG.error("[ProjectConfigHandler] Failed to set Grok auth config: " + e.getMessage(), e);
+            showError("Failed to save Grok auth config: " + e.getMessage());
+        }
+    }
+
 }

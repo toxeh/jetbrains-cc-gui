@@ -36,16 +36,16 @@ export interface MessageItemProps {
   onNavigateToProviderSettings?: () => void;
   onNavigateToDependencySettings?: () => void;
   toolResultSignature?: string;
-  /** Current active provider id (e.g. 'claude', 'codex'); drives the streaming-connect label. */
+  /** Current active provider id (e.g. 'claude', 'codex', 'grok'); drives the streaming-connect label. */
   currentProvider?: string;
   /** Show opt-in detailed footer extras such as turn cost and cache-hit ratio. */
   detailedOutputEnabled?: boolean;
 }
 
-/** Map provider id to a human-readable label used in UI text. */
-function getProviderDisplayName(providerId?: string): string {
-  if (providerId === 'codex') return 'Codex';
-  return 'Claude';
+/** Map provider id to a localized label (see `providers.*.label` in i18n). */
+function getProviderDisplayName(providerId: string | undefined, t: TFunction): string {
+  const id = providerId || 'claude';
+  return t(`providers.${id}.label`);
 }
 
 type GroupedBlock =
@@ -541,7 +541,7 @@ export const MessageItem = memo(function MessageItem({
       return (
         <div className="streaming-connect-status">
           <span className="streaming-connect-text">
-            {t('chat.streamingConnected', { provider: getProviderDisplayName(currentProvider) })}
+            {t('chat.streamingConnected', { provider: getProviderDisplayName(currentProvider, t) })}
           </span>
         </div>
       );

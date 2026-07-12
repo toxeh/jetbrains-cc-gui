@@ -35,6 +35,7 @@ import com.github.claudecodegui.handler.file.UndoFileHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.SessionLifecycleManager;
@@ -76,6 +77,7 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        default GrokSDKBridge getGrokSDKBridge() { return null; }
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
         JPanel getMainPanel();
@@ -208,11 +210,15 @@ public class ChatWindowDelegate {
     public String setupPermissionService() {
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
         Project project = host.getProject();
         String sessionId = claudeSDKBridge.getSessionId();
 
         if ((sessionId == null || sessionId.isEmpty()) && codexSDKBridge != null) {
             sessionId = codexSDKBridge.getSessionId();
+        }
+        if ((sessionId == null || sessionId.isEmpty()) && grokSDKBridge != null) {
+            sessionId = grokSDKBridge.getSessionId();
         }
 
         if (sessionId == null || sessionId.isEmpty()) {
@@ -223,6 +229,9 @@ public class ChatWindowDelegate {
         claudeSDKBridge.setSessionId(sessionId);
         if (codexSDKBridge != null) {
             codexSDKBridge.setSessionId(sessionId);
+        }
+        if (grokSDKBridge != null) {
+            grokSDKBridge.setSessionId(sessionId);
         }
         LOG.info("Unified bridge sessionId for PermissionService routing: " + sessionId);
 

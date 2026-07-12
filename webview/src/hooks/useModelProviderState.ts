@@ -10,6 +10,7 @@ import type { PermissionMode } from '../components/ChatInputBox/types';
 import { isSpecialProviderId } from '../types/provider';
 import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
+import { useGrokProvider } from './providers/useGrokProvider';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
 import { useModelStatePersistence } from './providers/useModelStatePersistence';
@@ -65,13 +66,21 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     codexFastMode, setCodexFastMode,
   } = codex;
 
+  const grok = useGrokProvider();
+  const {
+    selectedGrokModel, setSelectedGrokModel,
+    grokPermissionMode, setGrokPermissionMode,
+  } = grok;
+
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
     setCurrentProvider,
     setSelectedClaudeModel,
     setSelectedCodexModel,
+    setSelectedGrokModel,
     setClaudePermissionMode,
     setCodexPermissionMode,
+    setGrokPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -79,15 +88,22 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
+    selectedGrokModel,
     claudePermissionMode,
     codexPermissionMode,
+    grokPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
   });
 
   // ── Computed values ──
-  const selectedModel = currentProvider === 'codex' ? selectedCodexModel : selectedClaudeModel;
+  const selectedModel =
+    currentProvider === 'codex'
+      ? selectedCodexModel
+      : currentProvider === 'grok'
+        ? selectedGrokModel
+        : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
@@ -107,10 +123,16 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       sendBridgeEvent('set_mode', codexMode);
       return;
     }
+    if (currentProvider === 'grok') {
+      setPermissionMode(mode);
+      setGrokPermissionMode(mode);
+      sendBridgeEvent('set_mode', mode);
+      return;
+    }
     setPermissionMode(mode);
     setClaudePermissionMode(mode);
     sendBridgeEvent('set_mode', mode);
-  }, [currentProvider, setCodexPermissionMode, setClaudePermissionMode]);
+  }, [currentProvider, setCodexPermissionMode, setClaudePermissionMode, setGrokPermissionMode]);
 
   const handleModelSelect = useCallback((modelId: string) => {
     if (currentProvider === 'claude') {
@@ -121,28 +143,41 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'codex') {
       setSelectedCodexModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'grok') {
+      setSelectedGrokModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
-  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel]);
+  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel, setSelectedGrokModel]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
     setCurrentProvider(providerId);
     sendBridgeEvent('set_provider', providerId);
 
-    const modeToSet: PermissionMode = providerId === 'codex'
-      ? (codexPermissionMode === 'plan' ? 'default' : codexPermissionMode)
-      : claudePermissionMode;
+    let modeToSet: PermissionMode;
+    if (providerId === 'codex') {
+      modeToSet = codexPermissionMode === 'plan' ? 'default' : codexPermissionMode;
+    } else if (providerId === 'grok') {
+      modeToSet = grokPermissionMode;
+    } else {
+      modeToSet = claudePermissionMode;
+    }
     setPermissionMode(modeToSet);
     sendBridgeEvent('set_mode', modeToSet);
 
-    const newModel = providerId === 'codex'
-      ? selectedCodexModel
-      : apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
+    const newModel =
+      providerId === 'codex'
+        ? selectedCodexModel
+        : providerId === 'grok'
+          ? selectedGrokModel
+          : apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
     codexPermissionMode,
+    grokPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
+    selectedGrokModel,
     longContextEnabled,
   ]);
 
@@ -151,6 +186,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     if (currentProvider === 'claude') {
       sendBridgeEvent('set_model', apply1MContextSuffix(selectedClaudeModel, enabled));
     }
+    // Grok and Codex do not use the 1M suffix toggle for now
   }, [currentProvider, selectedClaudeModel, setLongContextEnabled]);
 
   const handleToggleThinking = useCallback((enabled: boolean) => {
@@ -195,6 +231,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   return {
     ...claude,
     ...codex,
+    ...grok,
     ...usage,
     ...settings,
     sdkStatus,

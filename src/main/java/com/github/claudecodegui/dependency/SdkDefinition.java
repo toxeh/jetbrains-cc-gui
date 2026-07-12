@@ -35,6 +35,22 @@ public enum SdkDefinition {
         Arrays.asList("0.117.0", "0.116.0", "0.115.0"),
         "Codex AI 提供商所需。",
         null // minRequiredVersion — no enforced minimum
+    ),
+
+    /**
+     * Grok is not an npm SDK under ~/.codemoss/dependencies.
+     * It is a local CLI binary ({@code grok}) used via ACP stdio.
+     * npmPackage is a marker; installation status is resolved by CLI path detection.
+     */
+    GROK_CLI(
+        "grok-cli",
+        "Grok CLI",
+        "grok-cli-binary",
+        "latest",
+        Collections.emptyList(),
+        Collections.emptyList(),
+        "Grok (xAI) provider requires the local Grok CLI (e.g. @vibe-kit/grok-cli). Prefer OAuth via `grok login`.",
+        null // minRequiredVersion — no enforced minimum for CLI binary
     );
 
     private final String id;
@@ -118,6 +134,13 @@ public enum SdkDefinition {
     }
 
     /**
+     * Whether this entry is a local CLI binary rather than an npm SDK package.
+     */
+    public boolean isCliBinary() {
+        return this == GROK_CLI;
+    }
+
+    /**
      * Finds an SDK definition by its ID.
      */
     public static SdkDefinition fromId(String id) {
@@ -137,6 +160,8 @@ public enum SdkDefinition {
             return CLAUDE_SDK;
         } else if ("codex".equalsIgnoreCase(provider)) {
             return CODEX_SDK;
+        } else if ("grok".equalsIgnoreCase(provider)) {
+            return GROK_CLI;
         }
         return null;
     }

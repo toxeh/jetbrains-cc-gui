@@ -4,6 +4,7 @@ import type { ProviderConfig, CodexProviderConfig } from '../../../types/provide
 import { STORAGE_KEYS } from '../../../types/provider';
 import ProviderManageSection from '../ProviderManageSection';
 import CodexProviderSection from '../CodexProviderSection';
+import GrokProviderSection from '../GrokProviderSection';
 import CustomModelDialog from '../CustomModelDialog';
 import { usePluginModels } from '../hooks/usePluginModels';
 import { useConfiguredClaudeModelPricing } from '../hooks/useConfiguredModelPricing';
@@ -54,9 +55,11 @@ const ProviderTabSection = ({
 }: ProviderTabSectionProps) => {
   const { t } = useTranslation();
 
-  const [activeTab, setActiveTab] = useState<'claude' | 'codex'>(
-    () => currentProvider === 'codex' ? 'codex' : 'claude'
-  );
+  const [activeTab, setActiveTab] = useState<'claude' | 'codex' | 'grok'>(() => {
+    if (currentProvider === 'codex') return 'codex';
+    if (currentProvider === 'grok') return 'grok';
+    return 'claude';
+  });
 
   // Plugin-level custom model management
   const claudeModels = usePluginModels(STORAGE_KEYS.CLAUDE_CUSTOM_MODELS);
@@ -107,6 +110,16 @@ const ProviderTabSection = ({
         >
           <span className="codicon codicon-terminal" aria-hidden="true" />
           {t('settings.providerTab.codex')}
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'grok'}
+          aria-controls="panel-grok-providers"
+          className={`${styles.tabBtn} ${activeTab === 'grok' ? styles.active : ''}`}
+          onClick={() => setActiveTab('grok')}
+        >
+          <span className="codicon codicon-rocket" aria-hidden="true" />
+          {t('settings.providerTab.grok')}
         </button>
       </div>
 
@@ -180,6 +193,10 @@ const ProviderTabSection = ({
           addToast={addToast}
           showHeader={false}
         />
+      </div>
+
+      <div id="panel-grok-providers" role="tabpanel" style={activeTab === 'grok' ? BLOCK_STYLE : NONE_STYLE}>
+        <GrokProviderSection />
       </div>
 
       {/* Shared model management dialog */}

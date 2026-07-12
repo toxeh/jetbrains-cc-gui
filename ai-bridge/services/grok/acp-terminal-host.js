@@ -1,0 +1,359 @@
+/**
+ * ACP Terminal Host — client-side implementation of:
+ *   terminal/create | terminal/output | terminal/wait_for_exit | terminal/kill | terminal/release
+ *
+ * Spec: https://agentclientprotocol.com/protocol/terminals
+ * Schema: agentclientprotocol typescript-sdk schema.json
+ */
+
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+
+const DEFAULT_OUTPUT_BYTE_LIMIT = 1024 * 1024; // 1 MiB soft default if agent omits limit
+const MAX_TERMINALS = 32;
+
+export function isTerminalMethod(method) {
+  if (!method) return false;
+  const m = String(method);
+  return (
+    m === 'terminal/create' ||
+    m === 'terminal/output' ||
+    m === 'terminal/wait_for_exit' ||
+    m === 'terminal/waitForExit' ||
+    m === 'terminal/kill' ||
+    m === 'terminal/release' ||
+    m.startsWith('terminal/')
+  );
+}
+
+function normalizeMethod(method) {
+  const m = String(method || '');
+  if (m === 'terminal/waitForExit') return 'terminal/wait_for_exit';
+  return m;
+}
+
+/**
+ * Truncate from the beginning so retained suffix stays within byteLimit,
+ * cutting at a UTF-8 character boundary (approx via Buffer).
+ */
+export function truncateOutputFromStart(text, byteLimit) {
+  if (byteLimit == null || byteLimit <= 0) {
+    return { text: text || '', truncated: false };
+  }
+  const buf = Buffer.from(text || '', 'utf8');
+  if (buf.length <= byteLimit) {
+    return { text: text || '', truncated: false };
+  }
+  // Keep the last byteLimit bytes, then re-decode safely
+  let start = buf.length - byteLimit;
+  // skip incomplete leading UTF-8 sequence
+  while (start < buf.length && (buf[start] & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return { text: buf.subarray(start).toString('utf8'), truncated: true };
+}
+
+function buildEnv(baseEnv, envList) {
+  const env = { ...baseEnv };
+  if (Array.isArray(envList)) {
+    for (const item of envList) {
+      if (!item || typeof item !== 'object') continue;
+      const name = item.name ?? item.key;
+      if (name == null || name === '') continue;
+      env[String(name)] = item.value == null ? '' : String(item.value);
+    }
+  } else if (envList && typeof envList === 'object') {
+    for (const [k, v] of Object.entries(envList)) {
+      env[k] = v == null ? '' : String(v);
+    }
+  }
+  return env;
+}
+
+function formatCommandLine(command, args) {
+  const parts = [command, ...(Array.isArray(args) ? args : [])].map(String);
+  return parts.join(' ');
+}
+
+export class AcpTerminalHost {
+  /**
+   * @param {object} opts
+   * @param {string} [opts.defaultCwd]
+   * @param {NodeJS.ProcessEnv} [opts.env]
+   * @param {(event: string, data?: any) => void} [opts.onEvent]
+   * @param {(info: {command:string,args:string[],cwd:string,sessionId:string}) => Promise<boolean>} [opts.authorizeCreate]
+   */
+  constructor({ defaultCwd = process.cwd(), env = process.env, onEvent, authorizeCreate } = {}) {
+    this.defaultCwd = defaultCwd || process.cwd();
+    this.env = env || process.env;
+    this.onEvent = onEvent || (() => {});
+    this.authorizeCreate = authorizeCreate || (async () => true);
+    /** @type {Map<string, any>} */
+    this.terminals = new Map();
+  }
+
+  size() {
+    return this.terminals.size;
+  }
+
+  /**
+   * Dispatch an ACP terminal/* method.
+   * @returns {Promise<object>} JSON-RPC result object
+   */
+  async handle(method, params = {}) {
+    const m = normalizeMethod(method);
+    switch (m) {
+      case 'terminal/create':
+        return this.create(params);
+      case 'terminal/output':
+        return this.output(params);
+      case 'terminal/wait_for_exit':
+        return this.waitForExit(params);
+      case 'terminal/kill':
+        return this.kill(params);
+      case 'terminal/release':
+        return this.release(params);
+      default:
+        throw Object.assign(new Error(`Unsupported terminal method: ${method}`), {
+          code: -32601,
+        });
+    }
+  }
+
+  async create(params = {}) {
+    const command = params.command;
+    if (!command || !String(command).trim()) {
+      throw Object.assign(new Error('command is required'), { code: -32602 });
+    }
+    if (this.terminals.size >= MAX_TERMINALS) {
+      throw Object.assign(new Error(`Too many open terminals (max ${MAX_TERMINALS})`), {
+        code: -32000,
+      });
+    }
+
+    const args = Array.isArray(params.args) ? params.args.map(String) : [];
+    const sessionId = params.sessionId || params.session_id || '';
+    let cwd = params.cwd || this.defaultCwd;
+    if (cwd && !path.isAbsolute(cwd)) {
+      cwd = path.resolve(this.defaultCwd, cwd);
+    }
+    cwd = cwd || this.defaultCwd;
+
+    const outputByteLimit =
+      params.outputByteLimit == null || params.outputByteLimit === ''
+        ? DEFAULT_OUTPUT_BYTE_LIMIT
+        : Number(params.outputByteLimit);
+
+    const allowed = await this.authorizeCreate({
+      command: String(command),
+      args,
+      cwd,
+      sessionId,
+      commandLine: formatCommandLine(command, args),
+    });
+    if (!allowed) {
+      throw Object.assign(new Error('Terminal create denied by user'), { code: -32000 });
+    }
+
+    const terminalId = randomUUID();
+    const env = buildEnv(this.env, params.env);
+
+    // ACP provides argv-style command+args. If the agent packs a full shell
+    // line into `command` with empty args, run via shell so tools still work.
+    const cmd = String(command);
+    const useShell =
+      args.length === 0 &&
+      (/[\s|&;<>$`"']/.test(cmd) || cmd.includes('\n'));
+    const child = useShell
+      ? spawn(cmd, {
+          cwd,
+          env,
+          shell: true,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      : spawn(cmd, args, {
+          cwd,
+          env,
+          shell: false,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+    const state = {
+      terminalId,
+      sessionId,
+      command: String(command),
+      args,
+      cwd,
+      outputByteLimit: Number.isFinite(outputByteLimit) ? outputByteLimit : DEFAULT_OUTPUT_BYTE_LIMIT,
+      chunks: [],
+      byteLength: 0,
+      truncated: false,
+      exitCode: null,
+      signal: null,
+      exited: false,
+      released: false,
+      child,
+      exitPromise: null,
+    };
+
+    state.exitPromise = new Promise((resolve) => {
+      const finish = (code, signal) => {
+        if (state.exited) return;
+        state.exited = true;
+        state.exitCode = code == null ? null : Number(code);
+        state.signal = signal || null;
+        this.onEvent('exit', {
+          terminalId,
+          exitCode: state.exitCode,
+          signal: state.signal,
+        });
+        resolve({ exitCode: state.exitCode, signal: state.signal });
+      };
+      child.on('error', (err) => {
+        this.#append(state, `[spawn error] ${err.message || String(err)}\n`);
+        finish(1, null);
+      });
+      child.on('close', (code, signal) => finish(code, signal));
+    });
+
+    const onData = (buf) => {
+      this.#append(state, buf.toString('utf8'));
+    };
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+
+    this.terminals.set(terminalId, state);
+    this.onEvent('create', {
+      terminalId,
+      command: state.command,
+      args,
+      cwd,
+      sessionId,
+    });
+
+    return { terminalId };
+  }
+
+  #append(state, text) {
+    if (state.released || !text) return;
+    state.chunks.push(text);
+    state.byteLength += Buffer.byteLength(text, 'utf8');
+    // Eager trim if over 2x limit to bound memory; final view uses truncateOutputFromStart
+    const hard = Math.max(state.outputByteLimit * 2, state.outputByteLimit + 4096);
+    if (state.byteLength > hard) {
+      const joined = state.chunks.join('');
+      const { text: kept, truncated } = truncateOutputFromStart(joined, state.outputByteLimit);
+      state.chunks = [kept];
+      state.byteLength = Buffer.byteLength(kept, 'utf8');
+      state.truncated = state.truncated || truncated;
+    }
+  }
+
+  #get(terminalId) {
+    const id = terminalId || '';
+    const state = this.terminals.get(id);
+    if (!state || state.released) {
+      throw Object.assign(new Error(`Unknown terminalId: ${id}`), { code: -32000 });
+    }
+    return state;
+  }
+
+  #snapshotOutput(state) {
+    const joined = state.chunks.join('');
+    const { text, truncated } = truncateOutputFromStart(joined, state.outputByteLimit);
+    return {
+      output: text,
+      truncated: truncated || state.truncated,
+      exitStatus: state.exited
+        ? { exitCode: state.exitCode, signal: state.signal }
+        : null,
+    };
+  }
+
+  async output(params = {}) {
+    const state = this.#get(params.terminalId || params.terminal_id);
+    return this.#snapshotOutput(state);
+  }
+
+  async waitForExit(params = {}) {
+    const state = this.#get(params.terminalId || params.terminal_id);
+    if (!state.exited) {
+      await state.exitPromise;
+    }
+    return {
+      exitCode: state.exitCode,
+      signal: state.signal,
+    };
+  }
+
+  async kill(params = {}) {
+    const state = this.#get(params.terminalId || params.terminal_id);
+    if (!state.exited && state.child && !state.child.killed) {
+      try {
+        state.child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      // Force kill shortly after if still running
+      setTimeout(() => {
+        if (!state.exited && state.child && !state.child.killed) {
+          try {
+            state.child.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
+        }
+      }, 500).unref?.();
+    }
+    // Wait briefly for exit so subsequent output has status
+    if (!state.exited) {
+      await Promise.race([
+        state.exitPromise,
+        new Promise((r) => setTimeout(r, 1000)),
+      ]);
+    }
+    this.onEvent('kill', { terminalId: state.terminalId });
+    return {};
+  }
+
+  async release(params = {}) {
+    const id = params.terminalId || params.terminal_id;
+    const state = this.terminals.get(id);
+    if (!state) {
+      // Idempotent release
+      return {};
+    }
+    if (!state.exited && state.child && !state.child.killed) {
+      try {
+        state.child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      try {
+        state.child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+    }
+    state.released = true;
+    this.terminals.delete(id);
+    this.onEvent('release', { terminalId: id });
+    return {};
+  }
+
+  async disposeAll() {
+    const ids = [...this.terminals.keys()];
+    for (const id of ids) {
+      try {
+        await this.release({ terminalId: id });
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+export default AcpTerminalHost;

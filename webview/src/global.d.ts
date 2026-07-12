@@ -416,6 +416,8 @@ interface Window {
    * Update permission dialog timeout setting
    */
   updatePermissionDialogTimeout?: (json: string) => void;
+  /** Grok auth method + optional API key (Settings → Grok). */
+  updateGrokAuthConfig?: (json: string) => void;
 
   /**
    * Update current Claude config

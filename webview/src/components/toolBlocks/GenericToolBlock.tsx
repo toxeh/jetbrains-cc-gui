@@ -121,6 +121,7 @@ const getToolDisplayName = (t: any, name?: string, input?: ToolInput) => {
     'replace_string': 'tools.replaceString',
     'bash': 'tools.runCommand',
     'run_terminal_cmd': 'tools.runCommand',
+    'run_terminal_command': 'tools.runCommand',
     'execute_command': 'tools.executeCommand',
     'executecommand': 'tools.executeCommand',
     'shell_command': 'tools.runCommand',

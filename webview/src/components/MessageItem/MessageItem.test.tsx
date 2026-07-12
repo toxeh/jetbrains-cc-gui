@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClaudeContentBlock, ClaudeMessage, ToolResultBlock } from '../../types';
 import { extractMarkdownContent } from '../../utils/copyUtils';
@@ -33,7 +33,10 @@ const t = ((key: string, opts?: Record<string, string>) => {
   const translations: Record<string, string> = {
     'markdown.copyMessage': '复制消息',
     'markdown.copySuccess': '已复制',
-    'chat.streamingConnected': '已连接',
+    'chat.streamingConnected': '{{provider}} connected',
+    'providers.claude.label': 'Claude Code',
+    'providers.codex.label': 'Codex',
+    'providers.grok.label': 'Grok',
     'chat.totalDuration': '本次耗时',
     'chat.tokenUsage': '输入 {{input}} / 输出 {{output}}',
     'chat.tokenUsageDetail': '本轮合计 — 输入 {{input}} · 缓存写入 {{cacheWrite}} · 缓存读取 {{cacheRead}} · 输出 {{output}}',
@@ -85,6 +88,36 @@ function renderMessageItem(message: ClaudeMessage, options: { detailedOutputEnab
     />
   );
 }
+
+describe('MessageItem streaming connect label', () => {
+  it('uses the active provider name in the connect hint (e.g. Grok, not Claude)', () => {
+    vi.useFakeTimers();
+    const message: ClaudeMessage = { type: 'assistant', content: '' };
+
+    render(
+      <MessageItem
+        message={message}
+        messageIndex={0}
+        messageKey="message-0"
+        isLast
+        streamingActive
+        isThinking={false}
+        t={t}
+        getMessageText={getMessageText}
+        getContentBlocks={getContentBlocks}
+        findToolResult={findToolResult}
+        extractMarkdownContent={extractMarkdownContent}
+        currentProvider="grok"
+      />
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    expect(screen.getByText('Grok connected')).toBeTruthy();
+    vi.useRealTimers();
+  });
+});
 
 describe('MessageItem copy button visibility', () => {
   it('hides the assistant copy button for tool-only messages', () => {

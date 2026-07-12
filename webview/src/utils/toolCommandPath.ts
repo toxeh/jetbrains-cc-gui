@@ -282,7 +282,7 @@ export interface ParsedCommandInfo {
 /** Tool names that execute shell commands (shared across components). */
 export const COMMAND_TOOL_NAMES = new Set([
   'shell_command', 'exec_command', 'execute_command',
-  'executecommand', 'bash', 'run_terminal_cmd',
+  'executecommand', 'bash', 'run_terminal_cmd', 'run_terminal_command',
 ]);
 
 /** Check if a tool name represents a command-executing tool. */

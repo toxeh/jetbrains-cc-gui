@@ -8,6 +8,7 @@ import com.github.claudecodegui.cache.SessionIndexCache;
 import com.github.claudecodegui.cache.SessionIndexManager;
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.grok.GrokHistoryReader;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -58,13 +59,16 @@ class HistoryLoadService {
 
                 // Choose a different reader based on the provider
                 if ("codex".equals(provider)) {
-                    // Use CodexHistoryReader to read Codex sessions (filtered by project)
                     LOG.info("[HistoryHandler] 使用 CodexHistoryReader 读取 Codex 会话 (项目: " + projectPath + ")");
                     CodexHistoryReader codexReader = new CodexHistoryReader();
                     historyJson = codexReader.getSessionsForProjectAsJson(projectPath);
                     LOG.info("[HistoryHandler] CodexHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("grok".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 GrokHistoryReader 读取 Grok 会话 (项目: " + projectPath + ")");
+                    GrokHistoryReader grokReader = new GrokHistoryReader();
+                    historyJson = grokReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] GrokHistoryReader 返回的 JSON 长度: " + historyJson.length());
                 } else {
-                    // Default: use ClaudeHistoryReader to read Claude sessions
                     LOG.info("[HistoryHandler] 使用 ClaudeHistoryReader 读取 Claude 会话");
                     ClaudeHistoryReader historyReader = new ClaudeHistoryReader();
                     historyJson = historyReader.getProjectDataAsJson(projectPath);
