@@ -5,6 +5,7 @@ import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -29,6 +30,7 @@ public class SessionSendService {
     private final Gson gson;
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GrokSDKBridge grokSDKBridge;
     private final SessionContextService contextService;
 
     public SessionSendService(
@@ -40,6 +42,7 @@ public class SessionSendService {
             Gson gson,
             ClaudeSDKBridge claudeSDKBridge,
             CodexSDKBridge codexSDKBridge,
+            GrokSDKBridge grokSDKBridge,
             SessionContextService contextService
     ) {
         this.project = project;
@@ -50,6 +53,7 @@ public class SessionSendService {
         this.gson = gson;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
+        this.grokSDKBridge = grokSDKBridge;
         this.contextService = contextService;
     }
 
@@ -131,6 +135,19 @@ public class SessionSendService {
                     effectivePermissionMode,
                     normalizedRequestedEffort,
                     effectiveCodexServiceTier
+            );
+        }
+
+        if ("grok".equals(currentProvider)) {
+            return sendToGrok(
+                    channelId,
+                    input,
+                    attachments,
+                    openedFilesJson,
+                    agentPrompt,
+                    fileTagPaths,
+                    effectivePermissionMode,
+                    normalizedRequestedEffort
             );
         }
 
@@ -275,6 +292,47 @@ public class SessionSendService {
                 agentPrompt,
                 requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
                 effectiveCodexServiceTier,
+                handler
+        ).thenApply(result -> null);
+    }
+
+    private CompletableFuture<Void> sendToGrok(
+            String channelId,
+            String input,
+            List<ClaudeSession.Attachment> attachments,
+            JsonObject openedFilesJson,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String effectivePermissionMode,
+            String requestedReasoningEffort
+    ) {
+        GrokMessageHandler handler = new GrokMessageHandler(state, callbackFacade.getCallbackHandler());
+
+        // Claude-shaped context: pass openedFiles structured to the bridge (not Codex string append).
+        // fileTagPaths can be folded into openedFiles later if needed; avoid Codex contamination.
+        Boolean streaming = readStreamingEnabled();
+        final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
+        final String currentModel = state.getModel();
+        LOG.info("[Lifecycle] sendToGrok sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", epoch=" + runtimeSessionEpoch
+                + ", cwd=" + state.getCwd()
+                + ", model=" + currentModel
+                + ", fileTags=" + (fileTagPaths != null ? fileTagPaths.size() : 0));
+
+        return grokSDKBridge.sendMessage(
+                channelId,
+                input,
+                state.getSessionId(),
+                runtimeSessionEpoch,
+                state.getCwd(),
+                attachments,
+                effectivePermissionMode,
+                currentModel,
+                openedFilesJson,
+                agentPrompt,
+                streaming,
+                false,
+                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
                 handler
         ).thenApply(result -> null);
     }

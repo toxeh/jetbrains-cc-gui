@@ -108,6 +108,11 @@ public class DependencyManager {
             return false;
         }
 
+        // Grok uses a local CLI binary, not ~/.codemoss/dependencies npm packages.
+        if (sdk.isCliBinary()) {
+            return resolveGrokCliPath() != null;
+        }
+
         // Check if the main package exists in node_modules
         Path packageDir = getPackageDir(sdkId, sdk.getNpmPackage());
         if (!Files.exists(packageDir)) {
@@ -129,6 +134,65 @@ public class DependencyManager {
         }
 
         return true;
+    }
+
+    /**
+     * Resolve Grok CLI binary path (same candidates as ai-bridge/services/grok/grok-utils.js).
+     * @return absolute path if found, otherwise null
+     */
+    public String resolveGrokCliPath() {
+        String explicit = System.getenv("GROK_CLI_PATH");
+        if (explicit != null && !explicit.isBlank()) {
+            Path p = Paths.get(explicit.trim());
+            if (Files.isRegularFile(p) && Files.isExecutable(p)) {
+                return p.toAbsolutePath().toString();
+            }
+        }
+
+        String home = PlatformUtils.getHomeDirectory();
+        String[] candidates = new String[] {
+                Paths.get(home, ".grok", "bin", "grok").toString(),
+                Paths.get(home, ".local", "bin", "grok").toString(),
+                "/usr/local/bin/grok",
+                "/opt/homebrew/bin/grok"
+        };
+        for (String candidate : candidates) {
+            try {
+                Path p = Paths.get(candidate);
+                if (Files.isRegularFile(p) && Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+            } catch (Exception ignored) {
+                // continue
+            }
+        }
+
+        // PATH lookup via `which` / `where`
+        try {
+            boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+            ProcessBuilder pb = isWindows
+                    ? new ProcessBuilder("where", "grok")
+                    : new ProcessBuilder("which", "grok");
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line = reader.readLine();
+                boolean finished = process.waitFor(3, TimeUnit.SECONDS);
+                if (finished && process.exitValue() == 0 && line != null && !line.isBlank()) {
+                    Path p = Paths.get(line.trim());
+                    if (Files.isRegularFile(p)) {
+                        return p.toAbsolutePath().toString();
+                    }
+                }
+            } finally {
+                process.destroyForcibly();
+            }
+        } catch (Exception e) {
+            LOG.debug("[DependencyManager] Grok CLI PATH lookup failed: " + e.getMessage());
+        }
+
+        return null;
     }
 
     /**
@@ -175,7 +239,35 @@ public class DependencyManager {
             return null;
         }
 
+        if (sdk.isCliBinary()) {
+            return getGrokCliVersion(resolveGrokCliPath());
+        }
+
         return getInstalledVersionFromPackage(sdkId, sdk.getNpmPackage());
+    }
+
+    private String getGrokCliVersion(String cliPath) {
+        if (cliPath == null || cliPath.isBlank()) {
+            return null;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder(cliPath, "--version");
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line = reader.readLine();
+                boolean finished = process.waitFor(5, TimeUnit.SECONDS);
+                if (finished && line != null && !line.isBlank()) {
+                    return line.trim();
+                }
+            } finally {
+                process.destroyForcibly();
+            }
+        } catch (Exception e) {
+            LOG.debug("[DependencyManager] Failed to read Grok CLI version: " + e.getMessage());
+        }
+        return "installed";
     }
 
     /**
@@ -328,6 +420,18 @@ public class DependencyManager {
         SdkDefinition sdk = SdkDefinition.fromId(sdkId);
         if (sdk == null) {
             return InstallResult.failure(sdkId, "Unknown SDK: " + sdkId, "");
+        }
+
+        if (sdk.isCliBinary()) {
+            String path = resolveGrokCliPath();
+            if (path != null) {
+                return InstallResult.success(sdkId, getGrokCliVersion(path), "Grok CLI already available at: " + path);
+            }
+            return InstallResult.failure(
+                    sdkId,
+                    "Grok CLI is not managed as an npm SDK. Install it with: npm install -g @vibe-kit/grok-cli  then run: grok login",
+                    ""
+            );
         }
 
         StringBuilder logs = new StringBuilder();
@@ -530,6 +634,12 @@ public class DependencyManager {
      */
     public boolean uninstallSdk(String sdkId) {
         try {
+            SdkDefinition sdk = SdkDefinition.fromId(sdkId);
+            if (sdk != null && sdk.isCliBinary()) {
+                LOG.info("[DependencyManager] Grok CLI is external; skip uninstall of managed dependencies dir");
+                return true;
+            }
+
             Path sdkDir = getSdkDir(sdkId);
             if (!Files.exists(sdkDir)) {
                 return true;
@@ -573,6 +683,13 @@ public class DependencyManager {
             status.addProperty("installed", installed);
             // Add the status field for frontend consumption
             status.addProperty("status", installed ? "installed" : "not_installed");
+
+            if (sdk.isCliBinary()) {
+                String cliPath = resolveGrokCliPath();
+                if (cliPath != null) {
+                    status.addProperty("installPath", cliPath);
+                }
+            }
 
             if (installed) {
                 String version = getInstalledVersion(sdk.getId());

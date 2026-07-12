@@ -94,7 +94,9 @@ public class SettingsHandler extends BaseMessageHandler {
         // User language preference
         "set_user_language",
         "get_user_language",
-        "clear_user_language"
+        "clear_user_language",
+        "get_grok_auth_config",
+        "set_grok_auth_config"
     };
 
     public SettingsHandler(HandlerContext context) {
@@ -331,6 +333,13 @@ public class SettingsHandler extends BaseMessageHandler {
             case "clear_user_language":
                 handleClearUserLanguage();
                 return true;
+            case "get_grok_auth_config":
+                projectConfigHandler.handleGetGrokAuthConfig();
+                return true;
+            case "set_grok_auth_config":
+                projectConfigHandler.handleSetGrokAuthConfig(content);
+                return true;
+
             default:
                 return false;
         }

@@ -285,7 +285,8 @@
     "providersDesc": "Управление конфигурациями API-провайдеров Claude и Codex и переключение между ними",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "grok": "Grok"
     },
     "pluginModels": {
       "title": "Пользовательские модели",
@@ -337,7 +338,9 @@
       "uninstallSuccess": "{{name}} удалён",
       "uninstallFailed": "Ошибка удаления: {{error}}",
       "updating": "Обновление...",
-      "updateSuccess": "{{name}} успешно обновлён"
+      "updateSuccess": "{{name}} успешно обновлён",
+      "grokCliName": "Grok CLI",
+      "grokCliDescription": "Локальный Grok CLI для чата Grok (ACP). Установите @vibe-kit/grok-cli и выполните grok login."
     },
     "usage": "Статистика использования",
     "usageDesc": "Просмотр потребления токенов, статистики затрат и анализа тенденций",
@@ -751,6 +754,30 @@
         "confirmAdd": "Создать",
         "saveChanges": "Сохранить"
       }
+    },
+    "grokProvider": {
+      "title": "Grok (xAI)",
+      "desc": "Локальный Grok CLI через ACP (grok agent stdio). Предпочтительно OAuth: `grok login`. API key — опционально.",
+      "oauthHint": "Auth: выполните `grok login` в терминале (OAuth для SuperGrok/Heavy). API key — только если нужен xAI API.",
+      "cliHint": "Нужен CLI: `@vibe-kit/grok-cli` (или GROK_CLI_PATH). Определяется автоматически.",
+      "openDependencies": "Открыть зависимости",
+      "authMethodLabel": "Аутентификация",
+      "authMethodHint": "Явный выбор способа входа Grok (как выбор провайдера у Claude). OAuth — `grok login` / SuperGrok; API key — кредиты console.x.ai.",
+      "authOauth": "OAuth (grok login / SuperGrok)",
+      "authApiKey": "API key (XAI_API_KEY / console.x.ai)",
+      "authAuto": "Авто (сначала OAuth, затем API key)",
+      "apiKeyLabel": "xAI API key",
+      "apiKeyHint": "Используется только при Auth = API key или Auto. Пусто — взять из окружения процесса.",
+      "saveApiKey": "Сохранить ключ",
+      "gatewayLabel": "Базовые URL ai-proxy gateway",
+      "gatewayHint": "Корневой POST /v1/chat/completions на gateway всегда 403. Нужны namespace: API key → …/xai/v1, OAuth → …/grok/v1. Пусто — прямой xAI / cli-chat-proxy.",
+      "gatewayOriginLabel": "Origin gateway (опционально)",
+      "applyGatewayDefaults": "Подставить …/xai + …/grok",
+      "apiBaseUrlLabel": "API base URL (api_key)",
+      "oauthBaseUrlLabel": "OAuth base URL (cli-chat-proxy)",
+      "saveBaseUrls": "Сохранить base URL",
+      "bareV1Warn": "Внимание: голый …/v1 без /xai или /grok попадёт в lock gateway (403). Используйте …/xai/v1 или …/grok/v1.",
+      "tokenHint": "x-gateway-token: Grok CLI не умеет custom headers. Направьте base на local-agent (например http://127.0.0.1:18789/xai/v1), который inject’ит token к remote gateway."
     }
   },
   "history": {
@@ -1549,6 +1576,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "grok": {
+      "label": "Grok"
     }
   },
   "promptEnhancer": {

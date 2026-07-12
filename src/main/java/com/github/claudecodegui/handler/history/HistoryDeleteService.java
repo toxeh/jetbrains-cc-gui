@@ -6,6 +6,7 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.cache.SessionIndexCache;
 import com.github.claudecodegui.cache.SessionIndexManager;
+import com.github.claudecodegui.provider.grok.GrokHistoryReader;
 import com.github.claudecodegui.util.PathUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -177,6 +178,9 @@ class HistoryDeleteService {
         }
         if ("codex".equals(currentProvider)) {
             return new DeleteResult(deleteCodexSession(sessionId), 0);
+        }
+        if ("grok".equals(currentProvider)) {
+            return new DeleteResult(new GrokHistoryReader().deleteSession(sessionId), 0);
         }
 
         String rawPath = context.resolveEffectiveWorkingDirectory();

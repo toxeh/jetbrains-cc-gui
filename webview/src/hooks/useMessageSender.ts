@@ -323,8 +323,14 @@ export function useMessageSender({
       return;
     }
     if (!currentSdkInstalled) {
+      const providerLabel =
+        currentProvider === 'codex'
+          ? 'Codex'
+          : currentProvider === 'grok'
+            ? 'Grok'
+            : 'Claude Code';
       addToast(
-        t('chat.sdkNotInstalled', { provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code' }) + ' ' + t('chat.goInstallSdk'),
+        t('chat.sdkNotInstalled', { provider: providerLabel }) + ' ' + t('chat.goInstallSdk'),
         'warning'
       );
       setSettingsInitialTab('dependencies');

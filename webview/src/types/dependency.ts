@@ -4,6 +4,7 @@
  * SDK dependency installation path: ~/.codemoss/dependencies/
  * - claude-sdk: Claude SDK (@anthropic-ai/claude-agent-sdk and its dependencies)
  * - codex-sdk: Codex SDK (@openai/codex-sdk)
+ * - grok-cli: local Grok CLI binary (ACP), not an npm package under dependencies/
  *
  * Supported operations:
  * - Install/uninstall SDKs
@@ -14,7 +15,7 @@
 /**
  * SDK ID type
  */
-export type SdkId = 'claude-sdk' | 'codex-sdk';
+export type SdkId = 'claude-sdk' | 'codex-sdk' | 'grok-cli';
 
 /**
  * SDK installation status
@@ -173,5 +174,11 @@ export const SDK_DEFINITIONS: SdkDefinition[] = [
     name: 'Codex SDK',
     description: 'Codex AI 提供商所需。包含 @openai/codex-sdk。',
     relatedProviders: ['openai'],
+  },
+  {
+    id: 'grok-cli',
+    name: 'Grok CLI',
+    description: 'Grok (xAI) requires the local Grok CLI (ACP). Prefer OAuth via `grok login`.',
+    relatedProviders: ['grok'],
   },
 ];

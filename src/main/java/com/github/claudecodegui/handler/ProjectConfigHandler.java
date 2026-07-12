@@ -790,4 +790,69 @@ public class ProjectConfigHandler {
             }
         });
     }
+
+    // ---- Grok auth method --------------------------------------------------
+
+    public void handleGetGrokAuthConfig() {
+        respondWithJson("window.updateGrokAuthConfig",
+            () -> {
+                JsonObject payload = new JsonObject();
+                payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
+                String key = settingsService.getGrokApiKey();
+                payload.addProperty("hasApiKey", key != null && !key.isEmpty());
+                // For editing, frontend may request separately — send empty placeholder.
+                payload.addProperty("apiKey", key != null ? key : "");
+                payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
+                payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
+                payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
+                return payload;
+            },
+            jsonOf("authMethod", CodemossSettingsService.DEFAULT_GROK_AUTH_METHOD),
+            "Failed to get Grok auth config");
+    }
+
+    public void handleSetGrokAuthConfig(String content) {
+        try {
+            JsonObject json = gson.fromJson(content, JsonObject.class);
+            if (json == null) {
+                showError("Invalid Grok auth config");
+                return;
+            }
+            if (json.has("authMethod") && !json.get("authMethod").isJsonNull()) {
+                settingsService.setGrokAuthMethod(json.get("authMethod").getAsString());
+            }
+            if (json.has("apiKey") && !json.get("apiKey").isJsonNull()) {
+                settingsService.setGrokApiKey(json.get("apiKey").getAsString());
+            }
+            if (json.has("apiBaseUrl") && !json.get("apiBaseUrl").isJsonNull()) {
+                settingsService.setGrokApiBaseUrl(json.get("apiBaseUrl").getAsString());
+            }
+            if (json.has("oauthBaseUrl") && !json.get("oauthBaseUrl").isJsonNull()) {
+                settingsService.setGrokOauthBaseUrl(json.get("oauthBaseUrl").getAsString());
+            }
+            if (json.has("gatewayOrigin") && !json.get("gatewayOrigin").isJsonNull()) {
+                settingsService.setGrokGatewayOrigin(json.get("gatewayOrigin").getAsString());
+            }
+            JsonObject payload = new JsonObject();
+            payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
+            String key = settingsService.getGrokApiKey();
+            payload.addProperty("hasApiKey", key != null && !key.isEmpty());
+            payload.addProperty("apiKey", key != null ? key : "");
+            payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
+            payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
+            payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
+            LOG.info("[ProjectConfigHandler] Set Grok authMethod=" + payload.get("authMethod").getAsString()
+                    + " apiBaseUrl=" + payload.get("apiBaseUrl").getAsString()
+                    + " oauthBaseUrl=" + payload.get("oauthBaseUrl").getAsString());
+            ApplicationManager.getApplication().invokeLater(() -> {
+                context.callJavaScript("window.updateGrokAuthConfig",
+                    context.escapeJs(gson.toJson(payload)));
+                context.callJavaScript("window.showSuccessI18n", "toast.saveSuccess");
+            });
+        } catch (Exception e) {
+            LOG.error("[ProjectConfigHandler] Failed to set Grok auth config: " + e.getMessage(), e);
+            showError("Failed to save Grok auth config: " + e.getMessage());
+        }
+    }
+
 }
