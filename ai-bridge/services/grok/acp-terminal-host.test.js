@@ -1,0 +1,77 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { AcpTerminalHost, truncateOutputFromStart, isTerminalMethod } from './acp-terminal-host.js';
+
+test('isTerminalMethod recognizes ACP methods', () => {
+  assert.equal(isTerminalMethod('terminal/create'), true);
+  assert.equal(isTerminalMethod('terminal/wait_for_exit'), true);
+  assert.equal(isTerminalMethod('fs/read_text_file'), false);
+});
+
+test('truncateOutputFromStart keeps suffix within byte limit', () => {
+  const s = 'abcdefghijklmnopqrstuvwxyz';
+  const { text, truncated } = truncateOutputFromStart(s, 5);
+  assert.equal(truncated, true);
+  assert.ok(Buffer.byteLength(text, 'utf8') <= 5);
+  assert.ok(text.endsWith('z'));
+});
+
+test('create → output → wait_for_exit for simple command', async () => {
+  const host = new AcpTerminalHost({
+    defaultCwd: process.cwd(),
+    authorizeCreate: async () => true,
+  });
+  const { terminalId } = await host.create({
+    sessionId: 's1',
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write("hello-acp"); process.exit(0)'],
+    outputByteLimit: 10_000,
+  });
+  assert.ok(terminalId);
+
+  const waited = await host.waitForExit({ terminalId });
+  assert.equal(waited.exitCode, 0);
+
+  const out = await host.output({ terminalId });
+  assert.match(out.output, /hello-acp/);
+  assert.equal(out.truncated, false);
+  assert.equal(out.exitStatus.exitCode, 0);
+
+  await host.release({ terminalId });
+  assert.equal(host.size(), 0);
+});
+
+test('kill terminates long-running process', async () => {
+  const host = new AcpTerminalHost({ authorizeCreate: async () => true });
+  const { terminalId } = await host.create({
+    sessionId: 's1',
+    command: process.execPath,
+    args: ['-e', 'setInterval(()=>{}, 1000)'],
+  });
+  await host.kill({ terminalId });
+  const waited = await host.waitForExit({ terminalId });
+  // SIGTERM may yield null exitCode + signal, or non-zero code depending on platform
+  assert.ok(waited.exitCode !== 0 || waited.signal);
+  await host.release({ terminalId });
+});
+
+test('authorizeCreate denial rejects create', async () => {
+  const host = new AcpTerminalHost({ authorizeCreate: async () => false });
+  await assert.rejects(
+    () => host.create({ sessionId: 's', command: 'echo', args: ['x'] }),
+    /denied/i
+  );
+});
+
+test('shell string command with empty args', async () => {
+  const host = new AcpTerminalHost({ authorizeCreate: async () => true });
+  const { terminalId } = await host.create({
+    sessionId: 's',
+    command: 'echo shell-ok',
+    args: [],
+  });
+  await host.waitForExit({ terminalId });
+  const out = await host.output({ terminalId });
+  assert.match(out.output, /shell-ok/);
+  await host.release({ terminalId });
+});

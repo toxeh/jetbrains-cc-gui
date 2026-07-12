@@ -307,7 +307,8 @@
     "providersDesc": "Claude와 Codex API 제공자 설정을 관리하고 다른 API 서비스 제공자 간 전환",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "grok": "Grok"
     },
     "pluginModels": {
       "title": "사용자 지정 모델",
@@ -359,7 +360,9 @@
       "uninstallSuccess": "{{name}}이(가) 제거되었습니다",
       "uninstallFailed": "제거 실패: {{error}}",
       "updating": "업데이트 중...",
-      "updateSuccess": "{{name}} 업데이트 완료"
+      "updateSuccess": "{{name}} 업데이트 완료",
+      "grokCliName": "Grok CLI",
+      "grokCliDescription": "Local Grok CLI required for Grok chat (ACP). Install @vibe-kit/grok-cli and run grok login."
     },
     "usage": "사용 통계",
     "usageDesc": "토큰 소비량, 비용 통계 및 사용 추이 분석 보기",
@@ -855,6 +858,30 @@
         "selectHint": "내보낼 프롬프트를 선택하세요",
         "confirmExport": "내보내기 확인"
       }
+    },
+    "grokProvider": {
+      "title": "Grok (xAI)",
+      "desc": "Uses the local Grok CLI over ACP (grok agent stdio). Prefer OAuth via `grok login`. API key is optional.",
+      "oauthHint": "Auth: run `grok login` in a terminal (OAuth for SuperGrok/Heavy). Optional API key only if you use xAI API billing.",
+      "cliHint": "CLI required: install `@vibe-kit/grok-cli` (or set GROK_CLI_PATH). Detected automatically from common paths.",
+      "openDependencies": "Open Dependencies",
+      "authMethodLabel": "Authentication",
+      "authMethodHint": "Choose how the plugin authenticates Grok CLI (like Claude provider selection). OAuth uses `grok login` / SuperGrok; API key uses console.x.ai credits.",
+      "authOauth": "OAuth (grok login / SuperGrok)",
+      "authApiKey": "API key (XAI_API_KEY / console.x.ai)",
+      "authAuto": "Auto (prefer OAuth, then API key)",
+      "apiKeyLabel": "xAI API key",
+      "apiKeyHint": "Used only when Auth is API key or Auto. Leave empty to use the process environment.",
+      "saveApiKey": "Save key",
+      "gatewayLabel": "ai-proxy gateway base URLs",
+      "gatewayHint": "Root gateway POST /v1/chat/completions is always 403. Use namespaced bases: API key → …/xai/v1, OAuth → …/grok/v1. Leave empty for direct xAI / cli-chat-proxy.",
+      "gatewayOriginLabel": "Gateway origin (optional)",
+      "applyGatewayDefaults": "Apply …/xai + …/grok",
+      "apiBaseUrlLabel": "API base URL (api_key)",
+      "oauthBaseUrlLabel": "OAuth base URL (cli-chat-proxy)",
+      "saveBaseUrls": "Save base URLs",
+      "bareV1Warn": "Warning: bare …/v1 without /xai or /grok will hit the gateway lock (403). Use …/xai/v1 or …/grok/v1.",
+      "tokenHint": "x-gateway-token: Grok CLI cannot send custom headers. Point bases at local-agent (e.g. http://127.0.0.1:18789/xai/v1) which injects the token toward the remote gateway."
     }
   },
   "history": {
@@ -1640,6 +1667,9 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "grok": {
+      "label": "Grok"
     }
   },
   "promptEnhancer": {
