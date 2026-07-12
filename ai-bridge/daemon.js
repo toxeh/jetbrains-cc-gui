@@ -45,10 +45,7 @@ import {
   preconnectPersistent as grokPreconnectPersistent,
   resetRuntimePersistent as grokResetRuntimePersistent,
   abortCurrentTurn as grokAbortCurrentTurn,
-  shutdownPersistentRuntimes as grokShutdownPersistentRuntimes,
-  setPermissionModePersistent as grokSetPermissionModePersistent,
-  getContextUsagePersistent as grokGetContextUsagePersistent,
-  getUsagePersistent as grokGetUsagePersistent
+  shutdownPersistentRuntimes as grokShutdownPersistentRuntimes
 } from './services/grok/persistent-acp-service.js';
 import { injectStartupEnvVars, isWebviewControlledEnvVar, isDangerousEnvVar } from './config/api-config.js';
 import { cleanupStaleTempImages } from './services/claude/attachment-service.js';
@@ -482,10 +479,6 @@ async function processRequest(request) {
       await resetRuntimePersistent(stdinData);
     } else if (provider === 'claude' && command === 'getContextUsage') {
       await getContextUsagePersistent(stdinData);
-    } else if (provider === 'grok' && command === 'getContextUsage') {
-      await grokGetContextUsagePersistent(stdinData);
-    } else if (provider === 'grok' && command === 'getUsage') {
-      await grokGetUsagePersistent(stdinData);
     } else if (provider === 'grok' && command === 'send') {
       await grokSendPersistent(stdinData);
     } else if (provider === 'grok' && command === 'preconnect') {
@@ -538,7 +531,7 @@ async function processRequest(request) {
 // Main Entry Point
 // =============================================================================
 
-async function runDaemonMain() {
+(async () => {
   // --- Error Handlers ---
   process.on('uncaughtException', (error) => {
     _originalStderrWrite(
@@ -667,23 +660,6 @@ async function runDaemonMain() {
       return;
     }
 
-    if (request.method === 'grok.setPermissionMode') {
-      const switchId = request.id || '0';
-      if (!request.id) {
-        _originalStderrWrite(
-          '[daemon] grok.setPermissionMode arrived without request.id; done signal may be orphaned\n',
-          'utf8'
-        );
-      }
-      grokSetPermissionModePersistent(request.params || {})
-        .then(() => writeRawLine({ id: switchId, done: true, success: true }))
-        .catch((e) => {
-          _originalStderrWrite(`[daemon] grok.setPermissionMode error: ${e.message}\n`, 'utf8');
-          writeRawLine({ id: switchId, done: true, success: false, error: e.message || String(e) });
-        });
-      return;
-    }
-
     // Command requests are serialized to prevent activeRequestId conflicts
     commandQueue = commandQueue
       .then(() => processRequest(request))
@@ -770,17 +746,4 @@ async function runDaemonMain() {
 
   // --- Keep alive ---
   // The process stays alive as long as stdin is open (rl keeps the event loop active)
-}
-
-runDaemonMain().catch((error) => {
-  const message = error?.message || String(error);
-  const stack = error?.stack || '';
-  _originalStderrWrite(`[daemon] Fatal startup error: ${stack || message}\n`, 'utf8');
-  try {
-    sendDaemonEvent('startup_failed', { error: message, stack });
-  } catch {
-    // ignore — process is already broken
-  }
-  isDaemonMode = false;
-  setTimeout(() => _originalExit(1), 150);
-});
+})();

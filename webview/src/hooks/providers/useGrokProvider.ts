@@ -5,11 +5,10 @@ import type { PermissionMode } from '../../components/ChatInputBox/types';
 /**
  * Grok (xAI) provider-specific selectable state.
  *
- * For the Grok ACP integration:
- * - Model selection is exposed.
- * - Permission mode defaults to 'default' — ACP session/request_permission and
- *   terminal authorizeCreate must show the Claude-style permission dialog (not silent).
- * - bypassPermissions / acceptEdits are supported via the shared mode selector when enabled.
+ * For the initial integration (headless CLI via grok-channel.js):
+ * - Only model selection is exposed.
+ * - Permission mode is forced to 'default' (Grok channel currently doesn't use the Claude-style permission modes).
+ * - Reasoning / fast-mode can be added later when the Grok agent protocol surfaces them.
  *
  * The handler simply forwards set_model to the Java bridge (SessionSendService will see currentProvider === 'grok').
  */

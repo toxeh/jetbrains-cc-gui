@@ -4,10 +4,6 @@
  */
 
 import { sendMessage as grokSendMessage } from '../services/grok/message-service.js';
-import {
-  getGrokReasoningSupportedModels,
-  buildGrokContextUsagePayload,
-} from '../services/grok/grok-utils.js';
 
 export async function handleGrokCommand(command, args, stdinData) {
   switch (command) {
@@ -45,43 +41,11 @@ export async function handleGrokCommand(command, args, stdinData) {
       break;
     }
 
-    case 'getContextUsage': {
-      // One-shot path: synthesize from Java-supplied used/max when present.
-      const payload = buildGrokContextUsagePayload({
-        usedTokens: stdinData?.usedTokens ?? 0,
-        maxTokens: stdinData?.maxTokens ?? 200_000,
-        model: stdinData?.model || '',
-      });
-      console.log(JSON.stringify(payload));
-      break;
-    }
-    case 'getUsage': {
-      // One-shot path: structured unavailable (billing needs auth/daemon).
-      console.log(JSON.stringify({
-        success: true,
-        data: {
-          unavailable: true,
-          message:
-            'Grok billing snapshot requires the persistent daemon. Use /usage in chat or open a Grok session first.',
-          source: 'channel-fallback',
-        },
-      }));
-      break;
-    }
-    case 'getReasoningSupportedModels': {
-      // Dynamic lookup from ~/.grok/models_cache.json
-      const supported = getGrokReasoningSupportedModels();
-      console.log(JSON.stringify({
-        success: true,
-        supportedModels: supported
-      }));
-      break;
-    }
     default:
       throw new Error(`Unknown Grok command: ${command}`);
   }
 }
 
 export function getGrokCommandList() {
-  return ['send', 'getContextUsage', 'getUsage', 'getReasoningSupportedModels'];
+  return ['send'];
 }

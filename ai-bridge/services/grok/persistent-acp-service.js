@@ -20,43 +20,16 @@ import {
   GrokAcpClient,
   initializeAndAuthenticate,
   ensureSession,
-  applyPermissionModeToSession,
+  applyAutoApproveIfNeeded,
   buildPromptBlocks,
   isAutoApproveMode,
   resolveAcpPermissionDecision,
   isPermissionRequestMethod,
-  TURN_PROMPT_TIMEOUT_MS,
 } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
-import {
-  buildGrokEnv,
-  buildGrokContextUsagePayload,
-  extractUsedTokens,
-  extractUsageFromAcpEnvelope,
-} from './grok-utils.js';
+import { buildGrokEnv } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
-
-export { buildGrokContextUsagePayload, extractUsedTokens };
-
-/**
- * Remember last ACP usage total on the runtime for /context synthesis.
- */
-function rememberUsageOnRuntime(runtime, usage) {
-  if (!runtime || !usage) return;
-  const used = extractUsedTokens(usage);
-  if (used > 0) {
-    runtime.lastUsedTokens = used;
-  }
-}
-
-/**
- * Pull usage from ACP notifications (session/update usage_update OR
- * _x.ai/session_notification turn_completed — the path real Grok CLI uses).
- */
-function usageFromNotification(method, params) {
-  return extractUsageFromAcpEnvelope(method, params);
-}
 
 // =============================================================================
 // Runtime registry (lightweight, Grok-specific)
@@ -65,19 +38,12 @@ function usageFromNotification(method, params) {
 const runtimes = new Map(); // runtimeKey -> runtime
 let activeTurnRuntime = null;
 
-function normalizePermissionMode(mode) {
-  const m = String(mode || '').trim().toLowerCase();
-  // Empty → default so preconnect (permissionMode:"") shares the runtime with UI "default"
-  // and does not leave tools un-gated under a silent always-approve session.
-  return m || 'default';
-}
-
 function makeRuntimeKey(params) {
   const epoch = params.runtimeSessionEpoch || params.epoch || 'default';
   const sid = (params.sessionId || '').trim() || 'new';
   const cwd = (params.cwd || process.cwd()).trim();
   const model = (params.model || '').trim();
-  const perm = normalizePermissionMode(params.permissionMode);
+  const perm = (params.permissionMode || '').trim().toLowerCase();
   // authFingerprint: presence only (never secrets)
   const authMethod = String(params.authMethod || process.env.GROK_AUTH_METHOD || 'oauth').toLowerCase();
   const hasKey = !!(params.apiKey || process.env.XAI_API_KEY || process.env.GROK_API_KEY);
@@ -131,13 +97,7 @@ async function createRuntime(params, { log } = {}) {
   const key = makeRuntimeKey(params);
   const existing = getRuntime(key);
   if (existing && !existing.closed) {
-    // Drop half-dead clients left after ACP timeout so the next turn recovers.
-    const client = existing.client;
-    if (client && (client.closed || client.unhealthy || client.isUnhealthy?.())) {
-      await disposeRuntime(existing);
-    } else {
-      return existing;
-    }
+    return existing;
   }
 
   const workCwd = (params.cwd || '').trim() || process.cwd();
@@ -148,13 +108,7 @@ async function createRuntime(params, { log } = {}) {
   env.GROK_NO_AUTO_UPDATE = '1';
   env.CI = env.CI || '1';
 
-  // Live permission mode holder — onServerRequest / authorizeCreate must re-read
-  // this on every decision so setPermissionModePersistent and default mode work.
-  // (Previously autoApprove was closed over at create time → default stayed silent
-  // if the runtime was ever created under bypass, and live mode changes were ignored.)
-  const live = {
-    permissionMode: normalizePermissionMode(params.permissionMode),
-  };
+  const autoApprove = isAutoApproveMode(params.permissionMode);
 
   const terminalHost = new AcpTerminalHost({
     defaultCwd: workCwd,
@@ -164,10 +118,8 @@ async function createRuntime(params, { log } = {}) {
       if (log) log('[GROK-TERM]', event);
     },
     authorizeCreate: async (info) => {
-      const mode = live.permissionMode || 'default';
-      if (isAutoApproveMode(mode)) return true;
+      if (autoApprove) return true;
       try {
-        // default / plan / acceptEdits+exec: always surface the permission dialog
         return await requestPermissionFromJava('run_terminal_command', {
           command: info.commandLine || info.command,
           cwd: info.cwd,
@@ -191,9 +143,8 @@ async function createRuntime(params, { log } = {}) {
     },
     onServerRequest: async (method, paramsReq, id, acp) => {
       if (isPermissionRequestMethod(method)) {
-        const mode = live.permissionMode || 'default';
-        const decision = await resolveAcpPermissionDecision(paramsReq, mode, {
-          autoApprove: isAutoApproveMode(mode),
+        const decision = await resolveAcpPermissionDecision(paramsReq, params.permissionMode || '', {
+          autoApprove,
         });
         acp.respond(id, decision.response);
         return true;
@@ -223,9 +174,9 @@ async function createRuntime(params, { log } = {}) {
       model: params.model || '',
     });
 
-    // Sync CLI always-approve with mode (default → off so agent keeps requesting).
-    if (client.activeSessionId) {
-      await applyPermissionModeToSession(client, client.activeSessionId, live.permissionMode);
+    const auto = isAutoApproveMode(params.permissionMode);
+    if (auto && client.activeSessionId) {
+      await applyAutoApproveIfNeeded(client, client.activeSessionId, params.permissionMode);
     }
 
     const runtime = {
@@ -235,11 +186,7 @@ async function createRuntime(params, { log } = {}) {
       epoch: params.runtimeSessionEpoch || params.epoch || 'default',
       cwd: workCwd,
       model: params.model || '',
-      permissionMode: live.permissionMode,
-      /** Shared with authorizeCreate / onServerRequest — mutate for live mode changes. */
-      _livePermission: live,
-      /** Last ACP [USAGE] total — used by getContextUsage when Java has no snapshot. */
-      lastUsedTokens: 0,
+      permissionMode: params.permissionMode || '',
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
       activeTurnCount: 0,
@@ -248,8 +195,7 @@ async function createRuntime(params, { log } = {}) {
     };
 
     rememberRuntime(key, runtime);
-    console.log('[GROK-DAEMON] runtime created key=' + key.slice(0, 80) + ' sessionId=' + runtime.sessionId
-      + ' permissionMode=' + live.permissionMode);
+    console.log('[GROK-DAEMON] runtime created key=' + key.slice(0, 80) + ' sessionId=' + runtime.sessionId);
     return runtime;
   } catch (e) {
     await client.close().catch(() => {});
@@ -323,50 +269,30 @@ async function executeTurn(runtime, params, normalizer) {
     // Wire notifications for this turn into the normalizer
     const originalOnNotif = runtime.client.onNotification;
     runtime.client.onNotification = (method, p) => {
-      const usage = usageFromNotification(method, p);
-      if (usage) rememberUsageOnRuntime(runtime, usage);
       emit('notification', { method, params: p });
       if (typeof originalOnNotif === 'function') {
         try { originalOnNotif(method, p); } catch {}
       }
     };
 
-    try {
-      const result = await runtime.client.prompt(sid, promptBlocks, TURN_PROMPT_TIMEOUT_MS);
+    const result = await runtime.client.prompt(sid, promptBlocks, 300_000);
 
-      // Keep turn notification handler until after prompt_result is normalized —
-      // late turn_completed must not be dropped by restoring the previous handler early.
-      const resultUsage = extractUsageFromAcpEnvelope(result) || result?.usage;
-      if (resultUsage) {
-        rememberUsageOnRuntime(runtime, resultUsage);
-      }
+    // restore
+    runtime.client.onNotification = originalOnNotif;
 
-      emit('prompt_result', result);
-      normalizer.finishSuccess(sid || runtime.sessionId, normalizer.assistantText);
+    emit('prompt_result', result);
+    normalizer.finishSuccess(sid || runtime.sessionId, normalizer.assistantText);
 
-      runtime.sessionId = sid || runtime.client.activeSessionId;
-      return { sessionId: runtime.sessionId, success: true };
-    } finally {
-      runtime.client.onNotification = originalOnNotif;
-    }
+    runtime.sessionId = sid || runtime.client.activeSessionId;
+    return { sessionId: runtime.sessionId, success: true };
   } catch (err) {
     normalizer.finishError(err);
-    // Ensure timeout / stream corruption always recycles (even if markUnhealthy raced).
-    if (err?.code === 'ACP_TIMEOUT' || /ACP timeout waiting for/i.test(String(err?.message || ''))) {
-      try {
-        runtime.client?.markUnhealthy?.(err.message || 'ACP timeout', { killProcess: true });
-      } catch {
-        // ignore
-      }
-    }
     throw err;
   } finally {
     runtime.activeTurnCount = Math.max((runtime.activeTurnCount || 1) - 1, 0);
     clearActiveIf(runtime);
-    // If client died or became unhealthy (timeout), drop runtime so the next send
-    // creates a fresh ACP session instead of hanging on a stuck agent.
-    const client = runtime.client;
-    if (client && (client.closed || client.unhealthy || client.isUnhealthy?.())) {
+    // If client died during turn, drop runtime
+    if (runtime.client && runtime.client.closed) {
       await disposeRuntime(runtime);
     }
   }
@@ -471,215 +397,13 @@ export async function shutdownPersistentRuntimes() {
   console.log('[GROK-DAEMON] shutdown all Grok runtimes');
 }
 
-/**
- * Live permission-mode switch for an existing Grok runtime (daemon grok.setPermissionMode).
- * Updates the live holder used by authorizeCreate / session/request_permission so default
- * mode immediately starts showing the permission dialog again.
- */
-export async function setPermissionModePersistent(params = {}) {
-  const targetMode = normalizePermissionMode(params.permissionMode);
-  const sessionId = (params.sessionId || '').trim() || null;
-  const epoch = params.runtimeSessionEpoch || params.epoch || null;
-
-  // Collect every runtime that should flip mode now. Mid-turn Auto switches must
-  // hit the active turn even when Java's sessionId does not match the ACP id
-  // (permission-service key vs Grok thread id) — that mismatch was a residual
-  // path where dialogs kept appearing after the user selected Auto.
-  const targets = [];
-  const seen = new Set();
-  const addTarget = (rt) => {
-    if (!rt || rt.closed || seen.has(rt)) return;
-    seen.add(rt);
-    targets.push(rt);
-  };
-
-  // 1) Always prefer the in-flight turn (sessionId mismatch safe).
-  if (activeTurnRuntime && !activeTurnRuntime.closed) {
-    addTarget(activeTurnRuntime);
-  }
-
-  // 2) Exact ACP / host session match.
-  if (sessionId) {
-    for (const rt of getAllRuntimes()) {
-      if (!rt.closed && rt.sessionId === sessionId) {
-        addTarget(rt);
-      }
-    }
-  }
-
-  // 3) Same epoch (preconnect + send share epoch; covers id-less runtimes).
-  if (epoch) {
-    for (const rt of getAllRuntimes()) {
-      if (!rt.closed && rt.epoch === epoch) {
-        addTarget(rt);
-      }
-    }
-  }
-
-  // 4) Last resort: single open runtime in the process.
-  if (targets.length === 0) {
-    const open = getAllRuntimes().filter((rt) => !rt.closed);
-    if (open.length === 1) {
-      addTarget(open[0]);
-    }
-  }
-
-  if (targets.length === 0) {
-    console.log(
-      '[GROK-DAEMON] setPermissionModePersistent skipped: no live runtime'
-      + ` sessionId=${sessionId || '(none)'} epoch=${epoch || '(none)'} mode=${targetMode}`
-    );
-    return { success: true, applied: false, permissionMode: targetMode };
-  }
-
-  for (const runtime of targets) {
-    runtime.permissionMode = targetMode;
-    if (runtime._livePermission) {
-      runtime._livePermission.permissionMode = targetMode;
-    }
-
-    const sid =
-      runtime.sessionId
-      || runtime.client?.activeSessionId
-      || null;
-    if (runtime.client && sid) {
-      await applyPermissionModeToSession(runtime.client, sid, targetMode);
-    }
-
-    console.log(
-      '[GROK-DAEMON] setPermissionModePersistent applied mode=' + targetMode
-      + ' sessionId=' + (runtime.sessionId || '(none)')
-      + ' epoch=' + (runtime.epoch || '(none)')
-    );
-  }
-
-  return {
-    success: true,
-    applied: true,
-    permissionMode: targetMode,
-    runtimeCount: targets.length,
-  };
-}
-
-/**
- * Context usage for /context dialog. Prefer Java-supplied used/max when present;
- * otherwise use lastUsage stored on the active runtime.
- */
-export async function getContextUsagePersistent(params = {}) {
-  const active = activeTurnRuntime && !activeTurnRuntime.closed ? activeTurnRuntime : null;
-  let used = Number(params.usedTokens);
-  if (!Number.isFinite(used) || used < 0) {
-    used = Number(active?.lastUsedTokens) || 0;
-  }
-  let max = Number(params.maxTokens);
-  if (!Number.isFinite(max) || max <= 0) {
-    max = 200_000;
-  }
-  const model = params.model || active?.model || '';
-  const payload = buildGrokContextUsagePayload({ usedTokens: used, maxTokens: max, model });
-  console.log(JSON.stringify(payload));
-  return payload;
-}
-
-/**
- * Live Grok billing/credits. Best-effort headless `grok -p "/usage"`; otherwise a
- * structured unavailable payload so the Settings panel stops spinning (never hangs).
- */
-export async function getUsagePersistent(params = {}) {
-  const cwd = (params.cwd || process.cwd()).trim() || process.cwd();
-  try {
-    const { spawnGrok, buildGrokEnv } = await import('./grok-utils.js');
-    const env = buildGrokEnv(
-      process.env,
-      params.apiKey || '',
-      params.baseUrl || '',
-      params.authMethod || process.env.GROK_AUTH_METHOD || '',
-    );
-
-    const result = await Promise.race([
-      spawnGrok(
-        ['-p', '/usage', '--output-format', 'json', '--always-approve'],
-        env,
-        cwd,
-      ),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('grok /usage timed out')), 20_000);
-      }),
-    ]);
-
-    const trimmed = String(result?.stdout || '').trim();
-    if (trimmed) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        const payload = parsed.data || parsed.config
-          ? { success: true, data: parsed.data || parsed }
-          : { success: true, data: { raw: parsed }, output: trimmed };
-        console.log(JSON.stringify(payload));
-        return payload;
-      } catch {
-        const payload = { success: true, data: { raw: trimmed }, output: trimmed };
-        console.log(JSON.stringify(payload));
-        return payload;
-      }
-    }
-  } catch (e) {
-    console.error('[GROK-DAEMON] getUsagePersistent failed:', e?.message || e);
-  }
-
-  const payload = {
-    success: true,
-    data: {
-      unavailable: true,
-      message:
-        'Grok billing snapshot is not available here. Use the /usage slash command in chat, or check account limits on grok.com / console.x.ai.',
-      source: 'plugin-fallback',
-    },
-  };
-  console.log(JSON.stringify(payload));
-  return payload;
-}
-
 // For daemon introspection / tests
 export const __testing = {
   getRuntimes: () => getAllRuntimes(),
   getActiveTurnRuntime: () => activeTurnRuntime,
-  getActiveTurnRuntimeInternal: () => activeTurnRuntime,
   makeRuntimeKey,
-  normalizePermissionMode,
   resetRegistry: () => {
     runtimes.clear();
     activeTurnRuntime = null;
   },
-  /**
-   * Lightweight fake runtime for unit tests (no real Grok CLI).
-   * Mirrors fields used by setPermissionModePersistent / permission handlers.
-   */
-  createTestRuntime: (key, opts = {}) => {
-    const mode = normalizePermissionMode(opts.permissionMode);
-    const live = { permissionMode: mode };
-    const rt = {
-      key,
-      client: opts.client || {
-        activeSessionId: opts.sessionId || null,
-        request: opts.clientRequest || (async () => ({})),
-      },
-      sessionId: opts.sessionId ?? null,
-      epoch: opts.epoch || opts.runtimeSessionEpoch || 'default',
-      cwd: opts.cwd || '/tmp',
-      model: opts.model || '',
-      permissionMode: mode,
-      _livePermission: live,
-      createdAt: opts.createdAt || Date.now(),
-      lastUsedAt: opts.lastUsedAt || Date.now(),
-      activeTurnCount: opts.activeTurnCount || 0,
-      closed: false,
-    };
-    rememberRuntime(key, rt);
-    return rt;
-  },
-  forceSetActiveTurn: (runtime) => {
-    activeTurnRuntime = runtime || null;
-  },
-  /** No-op placeholder for older tests that expected idle cleanup timers. */
-  triggerCleanup: () => {},
 };

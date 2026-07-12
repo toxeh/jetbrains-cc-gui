@@ -4,25 +4,18 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import com.github.claudecodegui.bridge.NodeDetector;
-import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.provider.common.BaseSDKBridge;
 import com.github.claudecodegui.provider.common.DaemonBridge;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession;
 import com.github.claudecodegui.settings.CodemossSettingsService;
-import com.github.claudecodegui.util.PlatformUtils;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * Grok SDK bridge (Claude-template architecture).
@@ -40,10 +33,6 @@ public class GrokSDKBridge extends BaseSDKBridge {
 
     private final GrokDaemonCoordinator daemonCoordinator;
     private final GrokDaemonRequestExecutor daemonRequestExecutor;
-
-    /** Last observed token total from ACP [USAGE] for /context synthesis. */
-    private final AtomicInteger lastUsedTokens = new AtomicInteger(0);
-    private volatile String lastUsageModel = "";
 
     public GrokSDKBridge() {
         super(GrokSDKBridge.class);
@@ -103,23 +92,19 @@ public class GrokSDKBridge extends BaseSDKBridge {
         if (effectiveBase == null || effectiveBase.isEmpty()) {
             return;
         }
-        // Official CLI: GROK_MODELS_BASE_URL drives inference + /models (api_key path).
-        // Without it the CLI ignores XAI_API_BASE_URL and never hits local-agent.
-        String modelsList = effectiveBase.replaceAll("/+$", "") + "/models";
-        env.put("GROK_MODELS_BASE_URL", effectiveBase);
-        env.put("GROK_MODELS_LIST_URL", modelsList);
-        env.put("GROK_BASE_URL", effectiveBase);
-
         if (CodemossSettingsService.GROK_AUTH_METHOD_API_KEY.equals(authMethod)) {
             env.put("XAI_API_BASE_URL", effectiveBase);
-            // Chat/agent also uses cli-chat-proxy base under hosts-block setups.
-            env.put("GROK_CLI_CHAT_PROXY_BASE_URL", effectiveBase);
+            env.put("GROK_BASE_URL", effectiveBase);
+            // Do not point OAuth chat proxy at /xai/v1
+            env.remove("GROK_CLI_CHAT_PROXY_BASE_URL");
         } else if (CodemossSettingsService.GROK_AUTH_METHOD_OAUTH.equals(authMethod)) {
             env.put("GROK_CLI_CHAT_PROXY_BASE_URL", effectiveBase);
+            env.put("GROK_BASE_URL", effectiveBase);
             // Avoid forcing API base onto xai path when using SuperGrok OAuth
             env.remove("XAI_API_BASE_URL");
         } else {
             // auto: set both so whichever auth path the CLI picks works
+            env.put("GROK_BASE_URL", effectiveBase);
             env.put("XAI_API_BASE_URL", effectiveBase);
             env.put("GROK_CLI_CHAT_PROXY_BASE_URL", effectiveBase);
         }
@@ -268,22 +253,7 @@ public class GrokSDKBridge extends BaseSDKBridge {
             return;
         }
         if (line.startsWith("[USAGE]")) {
-            String usageJson = line.substring("[USAGE]".length()).trim();
-            try {
-                JsonObject usage = gson.fromJson(usageJson, JsonObject.class);
-                // Canonical snake_case for Java consumers; camelCase ACP is fallback input.
-                JsonObject canonical = GrokContextUsageBuilder.normalizeUsageToSnakeCase(usage);
-                if (canonical != null) {
-                    usageJson = gson.toJson(canonical);
-                    usage = canonical;
-                }
-                int used = GrokContextUsageBuilder.extractUsedTokens(usage);
-                if (used > 0) {
-                    lastUsedTokens.set(used);
-                }
-            } catch (Exception ignored) {
-            }
-            callback.onMessage("usage", usageJson);
+            callback.onMessage("usage", line.substring("[USAGE]".length()).trim());
             return;
         }
         if (line.startsWith("[SEND_ERROR]")) {
@@ -413,362 +383,6 @@ public class GrokSDKBridge extends BaseSDKBridge {
 
     public void resetPersistentRuntime(String runtimeSessionEpoch) {
         daemonCoordinator.resetPersistentRuntime(runtimeSessionEpoch);
-    }
-
-    /**
-     * Push permission mode to the live Grok daemon runtime so Auto/bypass takes
-     * effect mid-turn (session/request_permission + always-approve), not only on
-     * the next user message.
-     *
-     * <p>Mirrors {@code ClaudeSDKBridge#setPermissionModeLive}: best-effort against
-     * an already-running daemon only (no spawn). A fresh daemon has no runtime, so
-     * {@code setPermissionModePersistent} would be a no-op.
-     *
-     * @return JSON with success/applied/reason (or error) for diagnostics
-     */
-    public CompletableFuture<JsonObject> setPermissionModeLive(String sessionId, String epoch, String mode) {
-        // Non-spawning accessor: only push to an already-running daemon.
-        DaemonBridge db = this.daemonCoordinator.getCurrentDaemonBridge();
-        if (db == null || !db.isAlive()) {
-            JsonObject skipped = new JsonObject();
-            skipped.addProperty("success", true);
-            skipped.addProperty("applied", false);
-            skipped.addProperty("reason", "no-daemon");
-            LOG.info("[Grok] setPermissionModeLive skipped (no live daemon): mode=" + mode);
-            return CompletableFuture.completedFuture(skipped);
-        }
-
-        JsonObject params = new JsonObject();
-        if (sessionId != null && !sessionId.isEmpty()) {
-            params.addProperty("sessionId", sessionId);
-        }
-        if (epoch != null && !epoch.isEmpty()) {
-            params.addProperty("runtimeSessionEpoch", epoch);
-        }
-        if (mode != null && !mode.isEmpty()) {
-            params.addProperty("permissionMode", mode);
-        }
-
-        CompletableFuture<JsonObject> resultFuture = new CompletableFuture<>();
-
-        // setPermissionMode only emits {id, done, success} — complete from onComplete/onError.
-        DaemonBridge.DaemonOutputCallback callback = new DaemonBridge.DaemonOutputCallback() {
-            @Override
-            public void onLine(String line) { }
-
-            @Override
-            public void onStderr(String text) { }
-
-            @Override
-            public void onError(String error) {
-                if (!resultFuture.isDone()) {
-                    JsonObject err = new JsonObject();
-                    err.addProperty("success", false);
-                    err.addProperty("error", error != null ? error : "unknown");
-                    resultFuture.complete(err);
-                }
-            }
-
-            @Override
-            public void onComplete(boolean success) {
-                if (!resultFuture.isDone()) {
-                    JsonObject ok = new JsonObject();
-                    ok.addProperty("success", success);
-                    // Daemon applied flag is best-effort; success=true means command finished.
-                    ok.addProperty("applied", success);
-                    resultFuture.complete(ok);
-                }
-            }
-        };
-
-        try {
-            LOG.info("[Grok] setPermissionModeLive → grok.setPermissionMode mode=" + mode
-                    + " sessionId=" + (sessionId != null ? sessionId : "(none)")
-                    + " epoch=" + (epoch != null ? epoch : "(none)"));
-            CompletableFuture<Boolean> commandFuture = db.sendCommand("grok.setPermissionMode", params, callback);
-            commandFuture.exceptionally(ex -> {
-                if (!resultFuture.isDone()) {
-                    JsonObject err = new JsonObject();
-                    err.addProperty("success", false);
-                    err.addProperty("error", ex.getMessage() != null ? ex.getMessage() : "sendCommand failed");
-                    resultFuture.complete(err);
-                }
-                return false;
-            });
-        } catch (Exception e) {
-            LOG.error("[Grok] setPermissionModeLive failed: " + e.getMessage(), e);
-            JsonObject err = new JsonObject();
-            err.addProperty("success", false);
-            err.addProperty("error", e.getMessage() != null ? e.getMessage() : "exception");
-            return CompletableFuture.completedFuture(err);
-        }
-
-        return resultFuture.orTimeout(10, TimeUnit.SECONDS).exceptionally(ex -> {
-            JsonObject err = new JsonObject();
-            err.addProperty("success", false);
-            err.addProperty("error", "setPermissionMode timed out after 10 seconds");
-            return err;
-        });
-    }
-
-    /**
-     * Context usage for the /context dialog.
-     * Prefer daemon runtime snapshot when available; otherwise synthesize from the
-     * last ACP [USAGE] line + static model context limits.
-     */
-    public CompletableFuture<JsonObject> getContextUsage(String sessionId, String cwd, String model) {
-        String effectiveModel = (model != null && !model.isEmpty()) ? model : lastUsageModel;
-        int maxTokens = ModelProviderHandler.getModelContextLimit(effectiveModel);
-        int usedTokens = lastUsedTokens.get();
-
-        DaemonBridge db = daemonCoordinator.getCurrentDaemonBridge();
-        if (db != null && db.isAlive()) {
-            return fetchContextUsageFromDaemon(db, sessionId, cwd, effectiveModel)
-                    .exceptionally(ex -> {
-                        LOG.warn("[Grok] daemon getContextUsage failed, using local synthesis: " + ex.getMessage());
-                        return GrokContextUsageBuilder.build(usedTokens, maxTokens, effectiveModel);
-                    });
-        }
-
-        return CompletableFuture.completedFuture(
-                GrokContextUsageBuilder.build(usedTokens, maxTokens, effectiveModel)
-        );
-    }
-
-    private CompletableFuture<JsonObject> fetchContextUsageFromDaemon(
-            DaemonBridge db, String sessionId, String cwd, String model) {
-        JsonObject params = new JsonObject();
-        if (sessionId != null && !sessionId.isEmpty()) {
-            params.addProperty("sessionId", sessionId);
-        }
-        if (cwd != null && !cwd.isEmpty()) {
-            params.addProperty("cwd", cwd);
-        }
-        if (model != null && !model.isEmpty()) {
-            params.addProperty("model", model);
-        }
-        params.addProperty("usedTokens", lastUsedTokens.get());
-        params.addProperty("maxTokens", ModelProviderHandler.getModelContextLimit(model));
-
-        AtomicReference<JsonObject> resultRef = new AtomicReference<>();
-        CompletableFuture<JsonObject> resultFuture = new CompletableFuture<>();
-
-        DaemonBridge.DaemonOutputCallback callback = new DaemonBridge.DaemonOutputCallback() {
-            @Override
-            public void onLine(String line) {
-                try {
-                    JsonObject parsed = gson.fromJson(line, JsonObject.class);
-                    if (parsed != null) {
-                        resultRef.set(parsed);
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-
-            @Override
-            public void onStderr(String text) { }
-
-            @Override
-            public void onError(String error) {
-                if (!resultFuture.isDone()) {
-                    resultFuture.completeExceptionally(
-                            new RuntimeException(error != null ? error : "getContextUsage error"));
-                }
-            }
-
-            @Override
-            public void onComplete(boolean success) {
-                if (resultFuture.isDone()) {
-                    return;
-                }
-                JsonObject result = resultRef.get();
-                if (success && result != null && (!result.has("success") || result.get("success").getAsBoolean())) {
-                    resultFuture.complete(result);
-                } else if (result != null && result.has("success") && !result.get("success").getAsBoolean()) {
-                    // Fall through to local synthesis via exceptionally path
-                    resultFuture.completeExceptionally(new RuntimeException(
-                            result.has("error") ? result.get("error").getAsString() : "daemon context usage failed"));
-                } else {
-                    resultFuture.completeExceptionally(new RuntimeException("No context usage response"));
-                }
-            }
-        };
-
-        try {
-            db.sendCommand("grok.getContextUsage", params, callback).exceptionally(ex -> {
-                if (!resultFuture.isDone()) {
-                    resultFuture.completeExceptionally(ex);
-                }
-                return false;
-            });
-        } catch (Exception e) {
-            resultFuture.completeExceptionally(e);
-        }
-
-        return resultFuture.orTimeout(15, TimeUnit.SECONDS);
-    }
-
-    /**
-     * Live Grok billing/credits snapshot for the Usage Statistics panel.
-     * Tries the daemon (which may shell out to the Grok CLI); on failure returns
-     * a structured {@code data.unavailable} payload so the UI can stop loading.
-     */
-    public CompletableFuture<JsonObject> getUsage(String cwd) {
-        // Non-spawning: Settings panel must not start a cold daemon just to refresh billing.
-        DaemonBridge db = daemonCoordinator.getCurrentDaemonBridge();
-        if (db == null || !db.isAlive()) {
-            return CompletableFuture.completedFuture(buildUsageUnavailable(
-                    "Grok daemon is not running. Open a Grok chat turn first, or check Node/daemon setup."));
-        }
-
-        JsonObject params = new JsonObject();
-        if (cwd != null && !cwd.isEmpty()) {
-            params.addProperty("cwd", cwd);
-        }
-        String authMethod = resolveAuthMethod();
-        params.addProperty("authMethod", authMethod != null ? authMethod : "");
-        String effectiveKey = "";
-        if (!CodemossSettingsService.GROK_AUTH_METHOD_OAUTH.equals(authMethod)) {
-            String k = resolveApiKeyForAuth(authMethod);
-            effectiveKey = k != null ? k : "";
-        }
-        params.addProperty("apiKey", effectiveKey);
-        String effectiveBase = resolveEffectiveBaseUrl(authMethod);
-        params.addProperty("baseUrl", effectiveBase != null ? effectiveBase : "");
-
-        AtomicReference<JsonObject> resultRef = new AtomicReference<>();
-        CompletableFuture<JsonObject> resultFuture = new CompletableFuture<>();
-
-        DaemonBridge.DaemonOutputCallback callback = new DaemonBridge.DaemonOutputCallback() {
-            @Override
-            public void onLine(String line) {
-                try {
-                    JsonObject parsed = gson.fromJson(line, JsonObject.class);
-                    if (parsed != null) {
-                        resultRef.set(parsed);
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-
-            @Override
-            public void onStderr(String text) { }
-
-            @Override
-            public void onError(String error) {
-                if (!resultFuture.isDone()) {
-                    resultFuture.complete(buildUsageUnavailable(
-                            error != null ? error : "getUsage failed"));
-                }
-            }
-
-            @Override
-            public void onComplete(boolean success) {
-                if (resultFuture.isDone()) {
-                    return;
-                }
-                JsonObject result = resultRef.get();
-                if (result != null) {
-                    resultFuture.complete(result);
-                } else {
-                    resultFuture.complete(buildUsageUnavailable(
-                            success ? "No usage payload from Grok daemon" : "getUsage command failed"));
-                }
-            }
-        };
-
-        try {
-            db.sendCommand("grok.getUsage", params, callback).exceptionally(ex -> {
-                if (!resultFuture.isDone()) {
-                    resultFuture.complete(buildUsageUnavailable(
-                            ex.getMessage() != null ? ex.getMessage() : "sendCommand failed"));
-                }
-                return false;
-            });
-        } catch (Exception e) {
-            return CompletableFuture.completedFuture(buildUsageUnavailable(e.getMessage()));
-        }
-
-        return resultFuture.orTimeout(45, TimeUnit.SECONDS).exceptionally(ex ->
-                buildUsageUnavailable("getUsage timed out: " + (ex.getMessage() != null ? ex.getMessage() : "timeout"))
-        );
-    }
-
-    /** Payload shape that {@code useUsageStatistics} accepts without hanging the spinner. */
-    static JsonObject buildUsageUnavailable(String message) {
-        JsonObject root = new JsonObject();
-        root.addProperty("success", true);
-        JsonObject data = new JsonObject();
-        data.addProperty("unavailable", true);
-        data.addProperty("message", message != null ? message : "Grok billing is unavailable");
-        data.addProperty("source", "plugin-fallback");
-        root.add("data", data);
-        return root;
-    }
-
-    /** Package-visible for tests: last captured ACP usage total. */
-    int getLastUsedTokensForTest() {
-        return lastUsedTokens.get();
-    }
-
-    void setLastUsedTokensForTest(int tokens) {
-        lastUsedTokens.set(tokens);
-    }
-
-    /**
-     * Dynamically loads Grok models that support reasoning effort (Low/Medium/High/XHigh)
-     * by reading ~/.grok/models_cache.json .
-     * Returns { success: true, supportedModels: ["grok-build", ...] }
-     */
-    public JsonObject getReasoningSupportedModels() {
-        JsonObject result = new JsonObject();
-        JsonArray supported = new JsonArray();
-        try {
-            Path cachePath = Paths.get(PlatformUtils.getHomeDirectory(), ".grok", "models_cache.json");
-            if (!Files.exists(cachePath)) {
-                result.addProperty("success", true);
-                result.add("supportedModels", supported);
-                return result;
-            }
-            String content = Files.readString(cachePath);
-            JsonObject data = gson.fromJson(content, JsonObject.class);
-            JsonObject models = null;
-            if (data != null) {
-                if (data.has("models") && data.get("models").isJsonObject()) {
-                    models = data.getAsJsonObject("models");
-                } else {
-                    // sometimes the top level may be the models map in older caches
-                    models = data;
-                }
-            }
-            if (models != null) {
-                for (Map.Entry<String, com.google.gson.JsonElement> entry : models.entrySet()) {
-                    String id = entry.getKey();
-                    com.google.gson.JsonElement val = entry.getValue();
-                    com.google.gson.JsonObject info = null;
-                    if (val != null && val.isJsonObject()) {
-                        com.google.gson.JsonObject obj = val.getAsJsonObject();
-                        if (obj.has("info") && obj.get("info").isJsonObject()) {
-                            info = obj.getAsJsonObject("info");
-                        } else {
-                            info = obj;
-                        }
-                    }
-                    if (info != null && info.has("supports_reasoning_effort")
-                            && info.get("supports_reasoning_effort").getAsBoolean()) {
-                        supported.add(id);
-                    }
-                }
-            }
-            result.addProperty("success", true);
-            result.add("supportedModels", supported);
-        } catch (Exception e) {
-            LOG.warn("[GrokSDKBridge] Failed to load reasoning supports from cache: " + e.getMessage());
-            result.addProperty("success", false);
-            result.addProperty("error", e.getMessage());
-            result.add("supportedModels", supported);
-        }
-        return result;
     }
 
     /**

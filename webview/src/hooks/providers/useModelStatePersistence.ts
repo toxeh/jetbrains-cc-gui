@@ -3,7 +3,6 @@ import { sendBridgeEvent } from '../../utils/bridge';
 import {
   CLAUDE_MODELS,
   CODEX_MODELS,
-  DEFAULT_CLAUDE_MODEL_ID,
   GROK_MODELS,
   isValidPermissionMode,
   normalizeClaudeModelId,
@@ -114,7 +113,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       const hasBackendModel = initialTabModel.length > 0;
 
       let restoredProvider = 'claude';
-      let restoredClaudeModel = DEFAULT_CLAUDE_MODEL_ID;
+      let restoredClaudeModel = CLAUDE_MODELS[0].id;
       let restoredCodexModel = CODEX_MODELS[0].id;
       let restoredGrokModel = GROK_MODELS[0].id;
       let restoredClaudePermissionMode: PermissionMode = 'default';

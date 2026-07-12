@@ -18,29 +18,6 @@ import { AcpTerminalHost, isTerminalMethod } from './acp-terminal-host.js';
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
- * User-turn session/prompt budget. Long agentic runs (tools + terminal) routinely
- * exceed 5 minutes; 300s was killing healthy turns with ACP timeout.
- * Override: GROK_ACP_TURN_TIMEOUT_MS (clamped 5m … 4h).
- */
-const DEFAULT_TURN_PROMPT_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
-const MIN_TURN_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
-const MAX_TURN_PROMPT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
-
-export function resolveTurnPromptTimeoutMs(env = process.env) {
-  const raw = env?.GROK_ACP_TURN_TIMEOUT_MS;
-  if (raw == null || String(raw).trim() === '') {
-    return DEFAULT_TURN_PROMPT_TIMEOUT_MS;
-  }
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) {
-    return DEFAULT_TURN_PROMPT_TIMEOUT_MS;
-  }
-  return Math.min(MAX_TURN_PROMPT_TIMEOUT_MS, Math.max(MIN_TURN_PROMPT_TIMEOUT_MS, Math.floor(n)));
-}
-
-export const TURN_PROMPT_TIMEOUT_MS = resolveTurnPromptTimeoutMs();
-
-/**
  * Reusable helpers for both one-shot (runAcpTurn) and persistent runtime paths.
  * These allow init+auth+session to be done once, then prompt() reused.
  */
@@ -145,38 +122,17 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
 }
 
 /**
- * Sync Grok CLI always-approve flag with our permission mode.
- * Default/plan/acceptEdits must turn always-approve OFF so ACP keeps
- * emitting session/request_permission (otherwise tools run in silence).
- * Bypass/auto modes turn it ON.
- *
- * This is the single entry point for mode→CLI sync (replaces the old
- * applyAutoApproveIfNeeded helper that only ever turned always-approve on).
+ * Apply /always-approve style command for auto-approve modes (best effort).
  */
-/**
- * Control-plane prompts (/always-approve on|off) should not wait the full turn
- * timeout. They are best-effort and must never kill a healthy mid-turn agent:
- * recycleOnTimeout is false so a slow/busy session only skips the mode sync
- * (error swallowed) instead of popping ACP timeout UI or recycling the runtime.
- */
-const PERMISSION_MODE_SYNC_TIMEOUT_MS = 20_000;
-
-export async function applyPermissionModeToSession(client, sessionId, permissionMode) {
-  if (!client || !sessionId) return;
-  const cmd = isAutoApproveMode(permissionMode) ? '/always-approve on' : '/always-approve off';
+export async function applyAutoApproveIfNeeded(client, sessionId, permissionMode) {
+  if (!isAutoApproveMode(permissionMode)) return;
   try {
-    await client.request(
-      'session/prompt',
-      {
-        sessionId,
-        prompt: [{ type: 'text', text: cmd }],
-      },
-      PERMISSION_MODE_SYNC_TIMEOUT_MS,
-      { recycleOnTimeout: false },
-    );
+    await client.request('session/prompt', {
+      sessionId,
+      prompt: [{ type: 'text', text: '/always-approve on' }],
+    });
   } catch {
-    // Best-effort: older CLIs may not support the command, or the agent is busy
-    // on a user turn. Never surface to UI; live.permissionMode still drives dialogs.
+    // ignore
   }
 }
 
@@ -250,35 +206,17 @@ export class GrokAcpClient {
     });
   }
 
-  /**
-   * @param {string} method
-   * @param {object} [params]
-   * @param {number} [timeoutMs]
-   * @param {{ recycleOnTimeout?: boolean }} [options]
-   *   recycleOnTimeout (default true): on timeout, mark unhealthy + kill process
-   *   so the next user turn recovers. Set false for best-effort control prompts
-   *   (/always-approve) that must not abort an in-flight user turn.
-   */
-  async request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS, options = {}) {
+  async request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     if (!this.proc || this.closed) {
       throw new Error('ACP client is not running');
     }
-    const recycleOnTimeout = options.recycleOnTimeout !== false;
     const id = this.nextId++;
     const payload = { jsonrpc: '2.0', id, method, params };
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        const err = new Error(`ACP timeout waiting for ${method}`);
-        err.code = 'ACP_TIMEOUT';
-        err.method = method;
         this.pending.delete(id);
-        if (recycleOnTimeout) {
-          // Abandoning a user-turn RPC leaves the agent busy → recycle.
-          this.markUnhealthy(err.message, { killProcess: true });
-        }
-        // Soft timeout: leave client alive (control-plane /always-approve).
-        reject(err);
+        reject(new Error(`ACP timeout waiting for ${method}`));
       }, timeoutMs);
 
       this.pending.set(id, {
@@ -294,50 +232,6 @@ export class GrokAcpClient {
 
       this.proc.stdin.write(JSON.stringify(payload) + '\n');
     });
-  }
-
-  /**
-   * Mark this client unusable for further turns.
-   * After an ACP timeout (or similar stream corruption), the daemon must dispose
-   * the runtime and create a fresh agent — otherwise session/prompt never recovers.
-   */
-  markUnhealthy(reason = 'ACP client unhealthy', { killProcess = false } = {}) {
-    this.unhealthy = true;
-    this.unhealthyReason = reason;
-    this.closed = true;
-
-    const err = new Error(reason);
-    err.code = 'ACP_UNHEALTHY';
-    for (const [, p] of this.pending) {
-      try {
-        p.reject(err);
-      } catch {
-        // ignore double-reject
-      }
-    }
-    this.pending.clear();
-
-    if (killProcess && this.proc && !this.proc.killed) {
-      try {
-        this.proc.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
-      // Best-effort SIGKILL after a short grace (fire-and-forget; close() also kills).
-      const proc = this.proc;
-      setTimeout(() => {
-        try {
-          if (proc && !proc.killed) proc.kill('SIGKILL');
-        } catch {
-          // ignore
-        }
-      }, 300).unref?.();
-    }
-  }
-
-  /** True when a prior timeout/corruption requires runtime recycle. */
-  isUnhealthy() {
-    return !!(this.unhealthy || this.closed);
   }
 
   respond(id, result) {
@@ -393,9 +287,8 @@ export class GrokAcpClient {
   /**
    * Perform a prompt on an already-initialized/authenticated session.
    * Client must be started and session active.
-   * Default timeout is long (see TURN_PROMPT_TIMEOUT_MS / GROK_ACP_TURN_TIMEOUT_MS).
    */
-  async prompt(sessionId, promptBlocks, timeoutMs = TURN_PROMPT_TIMEOUT_MS) {
+  async prompt(sessionId, promptBlocks, timeoutMs = 300_000) {
     if (!this.proc || this.closed) {
       throw new Error('ACP client is not running');
     }
@@ -594,9 +487,7 @@ export async function runAcpTurn({
   env.CI = env.CI || '1';
 
   const workCwd = cwd && cwd.trim() ? cwd.trim() : process.cwd();
-  // Normalize empty → default so one-shot path asks the user (never silent auto).
-  const effectiveMode = String(permissionMode || '').trim() || 'default';
-  const autoApprove = isAutoApproveMode(effectiveMode);
+  const autoApprove = isAutoApproveMode(permissionMode);
 
   const terminalHost = new AcpTerminalHost({
     defaultCwd: workCwd,
@@ -607,7 +498,7 @@ export async function runAcpTurn({
     // Gate shell spawn when not in auto-approve modes (permission dialog).
     // Agent may also call session/request_permission first; double-gate is OK.
     authorizeCreate: async (info) => {
-      if (isAutoApproveMode(effectiveMode)) return true;
+      if (autoApprove) return true;
       try {
         return await requestPermissionFromJava('run_terminal_command', {
           command: info.commandLine || info.command,
@@ -634,8 +525,8 @@ export async function runAcpTurn({
 
       // Permission / tool approval style requests → Claude-like UI in default mode
       if (isPermissionRequestMethod(method)) {
-        const decision = await resolveAcpPermissionDecision(params, effectiveMode, {
-          autoApprove: isAutoApproveMode(effectiveMode),
+        const decision = await resolveAcpPermissionDecision(params, permissionMode, {
+          autoApprove,
         });
         emit('permission_decision', {
           method,
@@ -670,9 +561,9 @@ export async function runAcpTurn({
     emit('session_id', activeSessionId);
     emit('session_new', sessionInfo.sessionMeta || {});
 
-    // Always sync always-approve with mode (default must turn it OFF so the agent
-    // keeps requesting session/request_permission instead of silent auto-run).
-    await applyPermissionModeToSession(client, activeSessionId, effectiveMode);
+    if (autoApprove) {
+      await applyAutoApproveIfNeeded(client, activeSessionId, permissionMode);
+    }
 
     const promptBlocks = buildPromptBlocks({
       message,
@@ -687,7 +578,7 @@ export async function runAcpTurn({
         sessionId: activeSessionId,
         prompt: promptBlocks,
       },
-      TURN_PROMPT_TIMEOUT_MS
+      300_000
     );
     emit('prompt_result', promptResult);
 
@@ -843,11 +734,7 @@ function isExecutionLike(toolName, kind, input) {
  * Resolve ACP permission request using Claude permission dialog when needed.
  * @returns {{ allowed: boolean, optionId: string|null, response: object, toolName: string, source: string }}
  */
-export async function resolveAcpPermissionDecision(
-  params,
-  permissionMode,
-  { autoApprove = false, requestPermission = null } = {},
-) {
+export async function resolveAcpPermissionDecision(params, permissionMode, { autoApprove = false } = {}) {
   const info = extractPermissionToolInfo(params || {});
   const { toolName, input, kind, options } = info;
 
@@ -883,14 +770,11 @@ export async function resolveAcpPermissionDecision(
   }
 
   // default / plan / acceptEdits+exec → ask user via Claude permission IPC + dialog
-  // (Injected `requestPermission` supports unit tests without FS IPC.)
-  const askUser =
-    typeof requestPermission === 'function' ? requestPermission : requestPermissionFromJava;
   let allowed = false;
   try {
-    allowed = await askUser(toolName, input);
+    allowed = await requestPermissionFromJava(toolName, input);
   } catch (e) {
-    // Fail closed on IPC errors — still means we attempted the UI path, not auto-approve.
+    // Fail closed on IPC errors
     allowed = false;
   }
 

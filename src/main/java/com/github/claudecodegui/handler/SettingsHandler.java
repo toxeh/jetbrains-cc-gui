@@ -29,7 +29,6 @@ public class SettingsHandler extends BaseMessageHandler {
     private final ClaudeCliPathHandler claudeCliPathHandler;
     private final ProjectConfigHandler projectConfigHandler;
     private final CodexSubscriptionQuotaHandler codexSubscriptionQuotaHandler;
-    private final TokenTrackerHandler tokenTrackerHandler;
 
     private static final String[] SUPPORTED_TYPES = {
         "get_mode",
@@ -42,11 +41,7 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_node_path",
         "get_claude_cli_path",
         "set_claude_cli_path",
-        // TokenTracker local usage dashboard (vendored tokentracker-cli server)
-        "tt_detect_cli",
-        "tt_install_cli",
-        "tt_ensure_server",
-        "tt_proxy",
+        "get_usage_statistics",
         "get_codex_subscription_quota",
         "get_working_directory",
         "set_working_directory",
@@ -101,10 +96,7 @@ public class SettingsHandler extends BaseMessageHandler {
         "get_user_language",
         "clear_user_language",
         "get_grok_auth_config",
-        "set_grok_auth_config",
-        "get_grok_usage",
-        "get_grok_plan_usage",
-        "get_claude_plan_usage"
+        "set_grok_auth_config"
     };
 
     public SettingsHandler(HandlerContext context) {
@@ -118,7 +110,6 @@ public class SettingsHandler extends BaseMessageHandler {
         this.claudeCliPathHandler = new ClaudeCliPathHandler(context);
         this.projectConfigHandler = new ProjectConfigHandler(context);
         this.codexSubscriptionQuotaHandler = new CodexSubscriptionQuotaHandler(context);
-        this.tokenTrackerHandler = new TokenTrackerHandler(context);
         // Register theme change listener to automatically notify frontend when IDE theme changes
         registerThemeChangeListener();
     }
@@ -176,18 +167,9 @@ public class SettingsHandler extends BaseMessageHandler {
             case "set_claude_cli_path":
                 claudeCliPathHandler.handleSetClaudeCliPath(content);
                 return true;
-            // TokenTracker local usage dashboard
-            case "tt_detect_cli":
-                tokenTrackerHandler.handleDetectCli(content);
-                return true;
-            case "tt_install_cli":
-                tokenTrackerHandler.handleInstallCli(content);
-                return true;
-            case "tt_ensure_server":
-                tokenTrackerHandler.handleEnsureServer(content);
-                return true;
-            case "tt_proxy":
-                tokenTrackerHandler.handleProxy(content);
+            // Project configuration
+            case "get_usage_statistics":
+                projectConfigHandler.handleGetUsageStatistics(content);
                 return true;
             case "get_codex_subscription_quota":
                 codexSubscriptionQuotaHandler.handleGetCodexSubscriptionQuota();
@@ -356,15 +338,6 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_grok_auth_config":
                 projectConfigHandler.handleSetGrokAuthConfig(content);
-                return true;
-            case "get_grok_usage":
-                projectConfigHandler.handleGetGrokUsage(content);
-                return true;
-            case "get_grok_plan_usage":
-                projectConfigHandler.handleGetGrokPlanUsage();
-                return true;
-            case "get_claude_plan_usage":
-                projectConfigHandler.handleGetClaudePlanUsage();
                 return true;
 
             default:

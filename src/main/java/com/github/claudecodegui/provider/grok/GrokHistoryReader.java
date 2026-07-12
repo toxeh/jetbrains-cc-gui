@@ -20,8 +20,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /** Reads Grok CLI session history from {@code ~/.grok/sessions}. */
@@ -48,8 +46,6 @@ public class GrokHistoryReader {
         public long firstTimestamp;
         public String cwd;
         public long fileSize;
-        /** From summary {@code current_model_id} when present. */
-        public String model;
     }
 
     public String getSessionsForProjectAsJson(String projectPath) {
@@ -122,30 +118,6 @@ public class GrokHistoryReader {
         }
     }
 
-    /**
-     * All sessions under {@code ~/.grok/sessions} (any project cwd).
-     */
-    public List<SessionInfo> listAllSessions() throws IOException {
-        if (!Files.isDirectory(sessionsRoot)) {
-            return List.of();
-        }
-        List<SessionInfo> sessions = new ArrayList<>();
-        try (Stream<Path> cwdGroups = Files.list(sessionsRoot)) {
-            for (Path cwdGroup : cwdGroups.filter(Files::isDirectory).toList()) {
-                try (Stream<Path> sessionDirs = Files.list(cwdGroup)) {
-                    for (Path sessionDir : sessionDirs.filter(Files::isDirectory).toList()) {
-                        SessionInfo info = readSessionInfo(sessionDir);
-                        if (info != null) {
-                            sessions.add(info);
-                        }
-                    }
-                }
-            }
-        }
-        sessions.sort(Comparator.comparingLong((SessionInfo s) -> s.lastTimestamp).reversed());
-        return sessions;
-    }
-
     List<SessionInfo> listSessionsForProject(String projectPath) throws IOException {
         String normalizedProject = normalizePath(projectPath);
         if (!Files.isDirectory(sessionsRoot)) {
@@ -203,17 +175,10 @@ public class GrokHistoryReader {
             if (info.title == null || info.title.isBlank()) {
                 info.title = info.sessionId;
             }
-            info.title = formatSessionTitlePreview(stripUserQueryWrapper(info.title), 40);
-            if (info.title.isBlank()) {
-                info.title = info.sessionId;
-            }
             if (summary.has("num_chat_messages")) {
                 info.messageCount = summary.get("num_chat_messages").getAsInt();
             } else if (summary.has("num_messages")) {
                 info.messageCount = summary.get("num_messages").getAsInt();
-            }
-            if (summary.has("current_model_id") && !summary.get("current_model_id").isJsonNull()) {
-                info.model = summary.get("current_model_id").getAsString();
             }
             info.firstTimestamp = parseIsoMillis(summary, "created_at");
             info.lastTimestamp = parseIsoMillis(summary, "updated_at");
@@ -277,14 +242,22 @@ public class GrokHistoryReader {
             return null;
         }
         if ("user".equals(type)) {
-            String text = stripUserQueryWrapper(extractUserText(row));
+            String text = extractUserText(row);
             if (text == null || text.isBlank() || shouldSkipUserText(text)) {
                 return null;
             }
             return textEnvelope("user", text);
         }
         if ("assistant".equals(type)) {
-            return assistantEnvelope(row);
+            String text = row.has("content") && row.get("content").isJsonPrimitive()
+                    ? row.get("content").getAsString() : "";
+            if (text.isBlank() && row.has("tool_calls") && row.get("tool_calls").isJsonArray()) {
+                text = summarizeToolCalls(row.getAsJsonArray("tool_calls"));
+            }
+            if (text.isBlank()) {
+                return null;
+            }
+            return textEnvelope("assistant", text);
         }
         if ("tool_result".equals(type)) {
             JsonObject envelope = new JsonObject();
@@ -323,126 +296,17 @@ public class GrokHistoryReader {
         return envelope;
     }
 
-    static JsonObject assistantEnvelope(JsonObject row) {
-        if (row == null) {
-            return null;
-        }
-        JsonArray contentBlocks = new JsonArray();
-        String text = extractAssistantPlainText(row);
-        if (!text.isBlank() && !isSyntheticToolSummary(text)) {
-            JsonObject textBlock = new JsonObject();
-            textBlock.addProperty("type", "text");
-            textBlock.addProperty("text", text);
-            contentBlocks.add(textBlock);
-        }
-        if (row.has("tool_calls") && row.get("tool_calls").isJsonArray()) {
-            appendToolUseBlocks(contentBlocks, row.getAsJsonArray("tool_calls"));
-        }
-        if (contentBlocks.isEmpty()) {
-            // Legacy rows stored only "Tool: foo, bar" with no structured tool_calls — hide from UI.
-            if (!text.isBlank() && isSyntheticToolSummary(text)) {
-                return null;
-            }
-            return null;
-        }
-        JsonObject envelope = new JsonObject();
-        envelope.addProperty("type", "assistant");
-        JsonObject message = new JsonObject();
-        message.addProperty("role", "assistant");
-        message.add("content", contentBlocks);
-        envelope.add("message", message);
-        return envelope;
-    }
-
-    private static String extractAssistantPlainText(JsonObject row) {
-        if (!row.has("content")) {
-            return "";
-        }
-        JsonElement contentEl = row.get("content");
-        if (contentEl.isJsonPrimitive()) {
-            return contentEl.getAsString();
-        }
-        if (contentEl.isJsonArray()) {
-            StringBuilder sb = new StringBuilder();
-            for (JsonElement el : contentEl.getAsJsonArray()) {
-                if (el.isJsonObject()) {
-                    JsonObject block = el.getAsJsonObject();
-                    if (block.has("type") && "text".equals(block.get("type").getAsString()) && block.has("text")) {
-                        if (!sb.isEmpty()) {
-                            sb.append("\n");
-                        }
-                        sb.append(block.get("text").getAsString());
-                    }
-                }
-            }
-            return sb.toString();
-        }
-        return "";
-    }
-
-    static boolean isSyntheticToolSummary(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        for (String line : text.split("\\R")) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            if (!trimmed.startsWith("Tool:")) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static void appendToolUseBlocks(JsonArray contentBlocks, JsonArray toolCalls) {
+    private static String summarizeToolCalls(JsonArray toolCalls) {
+        StringBuilder sb = new StringBuilder();
         for (JsonElement el : toolCalls) {
-            if (!el.isJsonObject()) {
-                continue;
-            }
-            JsonObject call = el.getAsJsonObject();
-            if (!call.has("name")) {
-                continue;
-            }
-            JsonObject toolUse = new JsonObject();
-            toolUse.addProperty("type", "tool_use");
-            String id = call.has("id") && !call.get("id").isJsonNull()
-                    ? call.get("id").getAsString()
-                    : (call.has("tool_call_id") && !call.get("tool_call_id").isJsonNull()
-                    ? call.get("tool_call_id").getAsString()
-                    : "tool-" + contentBlocks.size());
-            toolUse.addProperty("id", id);
-            toolUse.addProperty("name", call.get("name").getAsString());
-            toolUse.add("input", parseToolCallArguments(call));
-            contentBlocks.add(toolUse);
-        }
-    }
-
-    private static JsonObject parseToolCallArguments(JsonObject call) {
-        JsonObject input = new JsonObject();
-        if (!call.has("arguments")) {
-            return input;
-        }
-        JsonElement argsEl = call.get("arguments");
-        if (argsEl.isJsonObject()) {
-            return argsEl.getAsJsonObject();
-        }
-        if (argsEl.isJsonPrimitive()) {
-            String raw = argsEl.getAsString();
-            if (raw == null || raw.isBlank()) {
-                return input;
-            }
-            try {
-                JsonElement parsed = JsonParser.parseString(raw);
-                if (parsed.isJsonObject()) {
-                    return parsed.getAsJsonObject();
+            if (el.isJsonObject() && el.getAsJsonObject().has("name")) {
+                if (!sb.isEmpty()) {
+                    sb.append(", ");
                 }
-            } catch (Exception ignored) {
-                input.addProperty("value", raw);
+                sb.append(el.getAsJsonObject().get("name").getAsString());
             }
         }
-        return input;
+        return sb.isEmpty() ? "" : "Tool: " + sb;
     }
 
     private static String extractUserText(JsonObject row) {
@@ -489,41 +353,5 @@ public class GrokHistoryReader {
             return "";
         }
         return el.isJsonPrimitive() ? el.getAsString() : el.toString();
-    }
-
-    private static final Pattern USER_QUERY_PATTERN =
-            Pattern.compile("<user_query>([\\s\\S]*?)</user_query>", Pattern.CASE_INSENSITIVE);
-
-    static String stripUserQueryWrapper(String text) {
-        if (text == null) {
-            return "";
-        }
-        String trimmed = text.trim();
-        Matcher matcher = USER_QUERY_PATTERN.matcher(trimmed);
-        if (matcher.find()) {
-            return matcher.group(1).trim();
-        }
-        if (trimmed.toLowerCase().startsWith("<user_query>")) {
-            String inner = trimmed.substring("<user_query>".length()).trim();
-            if (inner.toLowerCase().endsWith("</user_query>")) {
-                inner = inner.substring(0, inner.length() - "</user_query>".length()).trim();
-            }
-            return inner;
-        }
-        return text;
-    }
-
-    static String formatSessionTitlePreview(String text, int maxLen) {
-        if (text == null) {
-            return "";
-        }
-        String cleaned = stripUserQueryWrapper(text).replaceAll("\\s+", " ").trim();
-        if (cleaned.isEmpty()) {
-            return "";
-        }
-        if (cleaned.length() <= maxLen) {
-            return cleaned;
-        }
-        return cleaned.substring(0, maxLen) + "...";
     }
 }

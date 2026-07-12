@@ -409,6 +409,24 @@ export const GROK_MODELS: ModelInfo[] = [
 ];
 
 /**
+ * Grok (xAI) model list
+ * Using IDs that the grok-channel.js + @xai-official/grok will understand.
+ * Default: Grok 4.5 (strong coding). Secondary: Grok Build (agentic).
+ */
+export const GROK_MODELS: ModelInfo[] = [
+  {
+    id: 'grok-4.5',
+    label: 'Grok 4.5',
+    description: 'Default Grok model. Excellent for coding and reasoning.',
+  },
+  {
+    id: 'grok-build',
+    label: 'Grok Build',
+    description: 'Grok Build — agentic coding model (full tool use).',
+  },
+];
+
+/**
  * Available models (backward compatibility)
  */
 export const AVAILABLE_MODELS = CLAUDE_MODELS;

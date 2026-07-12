@@ -73,22 +73,18 @@ test('buildGrokEnv api_key keeps provided key', () => {
   assert.equal(env.GROK_AUTH_METHOD, 'api_key');
 });
 
-test('buildGrokEnv oauth sets chat-proxy + models base (not XAI_API_BASE_URL)', () => {
+test('buildGrokEnv oauth sets only chat-proxy base (not XAI_API_BASE_URL)', () => {
   const env = buildGrokEnv({ PATH: '/bin' }, '', 'https://gw.example.com/grok/v1', 'oauth');
   assert.equal(env.GROK_CLI_CHAT_PROXY_BASE_URL, 'https://gw.example.com/grok/v1');
   assert.equal(env.GROK_BASE_URL, 'https://gw.example.com/grok/v1');
-  assert.equal(env.GROK_MODELS_BASE_URL, 'https://gw.example.com/grok/v1');
-  assert.equal(env.GROK_MODELS_LIST_URL, 'https://gw.example.com/grok/v1/models');
   assert.equal(env.XAI_API_BASE_URL, undefined);
 });
 
-test('buildGrokEnv api_key sets XAI + chat-proxy + models base', () => {
+test('buildGrokEnv api_key sets XAI base (not GROK_CLI_CHAT_PROXY)', () => {
   const env = buildGrokEnv({ PATH: '/bin' }, 'k', 'https://gw.example.com/xai/v1', 'api_key');
   assert.equal(env.XAI_API_BASE_URL, 'https://gw.example.com/xai/v1');
   assert.equal(env.GROK_BASE_URL, 'https://gw.example.com/xai/v1');
-  assert.equal(env.GROK_CLI_CHAT_PROXY_BASE_URL, 'https://gw.example.com/xai/v1');
-  assert.equal(env.GROK_MODELS_BASE_URL, 'https://gw.example.com/xai/v1');
-  assert.equal(env.GROK_MODELS_LIST_URL, 'https://gw.example.com/xai/v1/models');
+  assert.equal(env.GROK_CLI_CHAT_PROXY_BASE_URL, undefined);
 });
 
 test('buildGrokEnv empty base does not override', () => {
@@ -100,17 +96,14 @@ test('buildGrokEnv empty base does not override', () => {
   );
   assert.equal(env.XAI_API_BASE_URL, 'keep-me');
   assert.equal(env.GROK_CLI_CHAT_PROXY_BASE_URL, undefined);
-  assert.equal(env.GROK_MODELS_BASE_URL, undefined);
 });
 
-test('applyGrokBaseUrlEnv auto sets chat-proxy + models + XAI', () => {
+test('applyGrokBaseUrlEnv auto sets all three', () => {
   const env = {};
   applyGrokBaseUrlEnv(env, 'auto', 'http://127.0.0.1:18789/grok/v1');
   assert.equal(env.GROK_BASE_URL, 'http://127.0.0.1:18789/grok/v1');
   assert.equal(env.XAI_API_BASE_URL, 'http://127.0.0.1:18789/grok/v1');
   assert.equal(env.GROK_CLI_CHAT_PROXY_BASE_URL, 'http://127.0.0.1:18789/grok/v1');
-  assert.equal(env.GROK_MODELS_BASE_URL, 'http://127.0.0.1:18789/grok/v1');
-  assert.equal(env.GROK_MODELS_LIST_URL, 'http://127.0.0.1:18789/grok/v1/models');
 });
 
 test('isBareGatewayV1Base detects lock path', () => {
