@@ -5,6 +5,7 @@ import {
   truncateOutputFromStart,
   isTerminalMethod,
   unwrapShellWrapperCommand,
+  loginShellSpawnArgs,
 } from './acp-terminal-host.js';
 
 test('isTerminalMethod recognizes ACP methods', () => {
@@ -78,8 +79,17 @@ test('unwrapShellWrapperCommand strips full wrapper in command field', () => {
   assert.equal(inner, 'echo hi');
 });
 
+test('loginShellSpawnArgs matches daemon.js flag shapes', () => {
+  assert.deepEqual(loginShellSpawnArgs('/bin/bash', 'echo hi'), ['-lc', 'echo hi']);
+  assert.deepEqual(loginShellSpawnArgs('/bin/zsh', 'echo hi'), ['-l', '-c', 'echo hi']);
+  assert.deepEqual(loginShellSpawnArgs('/usr/bin/fish', 'echo hi'), ['-c', 'echo hi']);
+});
+
 test('create with Grok-style /bin/bash -lc args', async () => {
-  const host = new AcpTerminalHost({ authorizeCreate: async () => true });
+  const host = new AcpTerminalHost({
+    authorizeCreate: async () => true,
+    env: { ...process.env, SHELL: '/bin/bash' },
+  });
   const { terminalId } = await host.create({
     sessionId: 's',
     command: '/bin/bash',
