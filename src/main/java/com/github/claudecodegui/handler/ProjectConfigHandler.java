@@ -5,6 +5,9 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.action.SendShortcutSync;
+import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
+import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.util.FontConfigService;
 import com.github.claudecodegui.util.ThemeConfigService;
 import com.google.gson.Gson;
@@ -773,6 +776,10 @@ public class ProjectConfigHandler {
                     LOG.info("[ProjectConfigHandler] Codex statistics - sessions: " + stats.totalSessions +
                              ", cost: " + stats.estimatedCost + ", total tokens: " + stats.totalUsage.totalTokens);
                     json = gson.toJson(stats);
+                } else if ("grok".equals(provider)) {
+                    // For Grok use live billing via /usage
+                    handleGetGrokUsage(null);
+                    return; // will push via the callback in handleGetGrokUsage
                 } else {
                     ClaudeHistoryReader reader = new ClaudeHistoryReader();
                     json = gson.toJson(reader.getProjectStatistics(projectPath, cutoffTime));
@@ -849,6 +856,27 @@ public class ProjectConfigHandler {
             LOG.error("[ProjectConfigHandler] Failed to set Grok auth config: " + e.getMessage(), e);
             showError("Failed to save Grok auth config: " + e.getMessage());
         }
+    }
+
+    /** Get Grok billing/usage snapshot (credits, weekly limit etc.) by calling grok /usage via bridge. */
+    public void handleGetGrokUsage(String content) {
+        GrokSDKBridge grokBridge = context.getGrokSDKBridge();
+        if (grokBridge == null) {
+            showError("Grok bridge not initialized");
+            return;
+        }
+        String cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
+        grokBridge.getUsage(cwd).thenAccept(result -> {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    String json = gson.toJson(result);
+                    context.callJavaScript("window.updateUsageStatistics", context.escapeJs(json));
+                } catch (Exception e) {
+                    LOG.error("[ProjectConfigHandler] Failed to send grok usage: " + e.getMessage(), e);
+                    showError("Failed to get Grok usage: " + e.getMessage());
+                }
+            });
+        });
     }
 
 }

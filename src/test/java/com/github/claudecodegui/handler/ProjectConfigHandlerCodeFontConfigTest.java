@@ -62,6 +62,7 @@ public class ProjectConfigHandlerCodeFontConfigTest {
                 null,
                 null,
                 null,
+                null,
                 settingsService,
                 new HandlerContext.JsCallback() {
                     @Override

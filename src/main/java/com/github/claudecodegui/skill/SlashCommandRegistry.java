@@ -65,6 +65,11 @@ public final class SlashCommandRegistry {
             new SlashCommand("/update-config", "Configure settings.json (hooks, permissions, env vars)", "bundled")
     );
 
+    // Grok built-in (local CLI commands)
+    public static final List<SlashCommand> GROK_BUILTIN = List.of(
+            new SlashCommand("/usage", "Show current Grok billing, credits and limits", "builtin")
+    );
+
     // Codex built-in commands (GUI-relevant only; CLI-only ones like /status, /model, /quit are excluded)
     public static final List<SlashCommand> CODEX_BUILTIN = List.of(
             new SlashCommand("/compact", "Summarize conversation to free tokens", "builtin"),
@@ -166,8 +171,9 @@ public final class SlashCommandRegistry {
      */
     public static List<SlashCommand> getCommands(String provider, String cwd, String currentFilePath) {
         boolean isCodex = "codex".equalsIgnoreCase(provider);
+        boolean isGrok = "grok".equalsIgnoreCase(provider);
 
-        List<SlashCommand> builtins = isCodex ? CODEX_BUILTIN : CLAUDE_BUILTIN;
+        List<SlashCommand> builtins = isCodex ? CODEX_BUILTIN : (isGrok ? GROK_BUILTIN : CLAUDE_BUILTIN);
         String userHome = resolveUserHome();
         Path currentFile = SlashCommandPathPolicy.toNormalizedPath(currentFilePath);
 

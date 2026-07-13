@@ -24,8 +24,9 @@ export const TokenIndicator = ({
   // Calculate offset (fill clockwise from top)
   const strokeOffset = circumference * (1 - safePercentage / 100);
 
-  // Indicator label: integer percentage (no decimal)
-  const labelPercentage = `${Math.round(safePercentage)}%`;
+  // Indicator label: integer percentage (no decimal). Show <1% for small positive usage.
+  const rounded = Math.round(percentage);
+  const labelPercentage = percentage > 0 && rounded === 0 ? '<1%' : `${rounded}%`;
   // Tooltip: one decimal place for precision
   const tooltipPercentage = `${(Math.round(safePercentage * 10) / 10).toFixed(1)}%`;
 
