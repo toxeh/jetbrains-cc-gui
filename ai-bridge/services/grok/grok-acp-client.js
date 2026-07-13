@@ -157,6 +157,7 @@ export class GrokAcpClient {
     this.pending = new Map();
     this.closed = false;
     this.stderrBuf = '';
+    this.lastActivity = Date.now();
   }
 
   getLastStderr() {
@@ -179,6 +180,7 @@ export class GrokAcpClient {
     this.rl.on('line', (line) => this.#handleLine(line));
 
     this.proc.stderr.on('data', (chunk) => {
+      this.lastActivity = Date.now();
       const s = chunk.toString();
       this.stderrBuf = (this.stderrBuf + s).slice(-8000);
       try {
@@ -214,18 +216,23 @@ export class GrokAcpClient {
     const payload = { jsonrpc: '2.0', id, method, params };
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`ACP timeout waiting for ${method}`));
-      }, timeoutMs);
+      let timer = null;
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          this.pending.delete(id);
+          const lastErr = this.getLastStderr();
+          const detail = lastErr ? `\nLast stderr: ${lastErr.slice(-600)}` : '';
+          reject(new Error(`ACP timeout waiting for ${method}${detail}`));
+        }, timeoutMs);
+      }
 
       this.pending.set(id, {
         resolve: (result) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           resolve(result);
         },
         reject: (error) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           reject(error);
         },
       });
@@ -288,7 +295,9 @@ export class GrokAcpClient {
    * Perform a prompt on an already-initialized/authenticated session.
    * Client must be started and session active.
    */
-  async prompt(sessionId, promptBlocks, timeoutMs = 300_000) {
+  async prompt(sessionId, promptBlocks, timeoutMs = 0) {
+    // timeoutMs=0 means no hard timeout for prompt (per option 2).
+    // The agent can take as long as needed; user can interrupt.
     if (!this.proc || this.closed) {
       throw new Error('ACP client is not running');
     }
@@ -318,6 +327,7 @@ export class GrokAcpClient {
   }
 
   #handleLine(line) {
+    this.lastActivity = Date.now();
     const trimmed = (line || '').trim();
     if (!trimmed) return;
 
@@ -578,7 +588,7 @@ export async function runAcpTurn({
         sessionId: activeSessionId,
         prompt: promptBlocks,
       },
-      300_000
+      0  // no hard timeout for prompt (see option 2)
     );
     emit('prompt_result', promptResult);
 

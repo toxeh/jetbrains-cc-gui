@@ -319,6 +319,7 @@ public class PermissionHandlerTest {
                 null,
                 null,
                 null,
+                null,
                 settingsService,
                 new HandlerContext.JsCallback() {
                     @Override public void callJavaScript(String functionName, String... args) {}

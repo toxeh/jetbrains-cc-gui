@@ -76,7 +76,7 @@ public class GrokSDKBridgeTest {
 
     @Test
     void testGrokModelsHaveExpectedContextLimits() {
-        assertEquals(200000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok"));
+        assertEquals(500000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok"));
         assertEquals(128000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok-2"));
         assertEquals(500000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok-4.5"));
         assertEquals(500000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok-build"));

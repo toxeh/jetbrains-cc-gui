@@ -238,6 +238,7 @@ public class ChatWindowDelegate {
         Project project = host.getProject();
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
         CodemossSettingsService settingsService = host.getSettingsService();
 
         HandlerContext.JsCallback jsCallback = new HandlerContext.JsCallback() {
@@ -251,7 +252,7 @@ public class ChatWindowDelegate {
             }
         };
 
-        HandlerContext handlerContext = new HandlerContext(project, claudeSDKBridge, codexSDKBridge, settingsService, jsCallback);
+        HandlerContext handlerContext = new HandlerContext(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, settingsService, jsCallback);
         handlerContext.setSession(host.getSession());
         host.setHandlerContext(handlerContext);
 
