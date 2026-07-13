@@ -264,8 +264,11 @@ public class SessionLifecycleManager {
                                     ? projectPath : NodeDetector.convertToWslPath(determineWorkingDirectory());
             newSession.setSessionInfo(sessionId, workingDir);
 
-            if ("claude".equals(newSession.getProvider())) {
+            String currentProvider = newSession.getProvider();
+            if ("claude".equals(currentProvider)) {
                 host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
+            } else if ("grok".equals(currentProvider)) {
+                host.getGrokSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
             }
 
             newSession.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
@@ -444,8 +447,12 @@ public class SessionLifecycleManager {
 
         newSession.setSessionInfo(null, workingDirectory);
         LOG.info(successLogPrefix + workingDirectory + ", epoch=" + newSession.getRuntimeSessionEpoch());
-        host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
-        host.getGrokSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        String provider = newSession.getProvider();
+        if ("claude".equals(provider)) {
+            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        } else if ("grok".equals(provider)) {
+            host.getGrokSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        }
         fetchSlashCommandsOnStartup();
 
         ApplicationManager.getApplication().invokeLater(() -> {

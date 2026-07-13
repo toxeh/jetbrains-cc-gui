@@ -41,11 +41,28 @@ export async function handleGrokCommand(command, args, stdinData) {
       break;
     }
 
+    case 'getContextUsage': {
+      // Requires persistent daemon mode (like Claude), for rich /context dialog.
+      console.log(JSON.stringify({
+        success: false,
+        error: 'getContextUsage requires daemon/persistent runtime for Grok. Use persistent mode.'
+      }));
+      break;
+    }
+    case 'getUsage': {
+      // For /usage billing info, prefer persistent but allow direct in fallback.
+      // Will be handled by daemon in main path.
+      console.log(JSON.stringify({
+        success: false,
+        error: 'getUsage requires daemon for consistent auth. Use persistent Grok mode.'
+      }));
+      break;
+    }
     default:
       throw new Error(`Unknown Grok command: ${command}`);
   }
 }
 
 export function getGrokCommandList() {
-  return ['send'];
+  return ['send', 'getContextUsage', 'getUsage'];
 }
