@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AcpTerminalHost, truncateOutputFromStart, isTerminalMethod } from './acp-terminal-host.js';
+import {
+  AcpTerminalHost,
+  truncateOutputFromStart,
+  isTerminalMethod,
+  unwrapShellWrapperCommand,
+} from './acp-terminal-host.js';
 
 test('isTerminalMethod recognizes ACP methods', () => {
   assert.equal(isTerminalMethod('terminal/create'), true);
@@ -61,6 +66,29 @@ test('authorizeCreate denial rejects create', async () => {
     () => host.create({ sessionId: 's', command: 'echo', args: ['x'] }),
     /denied/i
   );
+});
+
+test('unwrapShellWrapperCommand strips /bin/bash -lc split form', () => {
+  const inner = unwrapShellWrapperCommand('/bin/bash', ['-lc', 'echo hi']);
+  assert.equal(inner, 'echo hi');
+});
+
+test('unwrapShellWrapperCommand strips full wrapper in command field', () => {
+  const inner = unwrapShellWrapperCommand("/bin/bash -lc 'echo hi'", []);
+  assert.equal(inner, 'echo hi');
+});
+
+test('create with Grok-style /bin/bash -lc args', async () => {
+  const host = new AcpTerminalHost({ authorizeCreate: async () => true });
+  const { terminalId } = await host.create({
+    sessionId: 's',
+    command: '/bin/bash',
+    args: ['-lc', 'echo grok-unwrap-ok'],
+  });
+  await host.waitForExit({ terminalId });
+  const out = await host.output({ terminalId });
+  assert.match(out.output, /grok-unwrap-ok/);
+  await host.release({ terminalId });
 });
 
 test('shell string command with empty args', async () => {
