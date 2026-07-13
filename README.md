@@ -17,7 +17,7 @@
 > To mitigate Claude trademark risks, this project has been renamed to CC GUI (originally Claude Code GUI). The logo has also been updated to reduce Chinese-specific elements. Regarding security, a        
   /security-review audit will be conducted before each minor version release, and a comprehensive claude-code-security audit will be performed every 10 minor versions. 
 
-A powerful IntelliJ IDEA plugin that provides a visual interface for **Claude Code** and **OpenAI Codex** dual AI tools, making AI-assisted programming more efficient and intuitive.
+A powerful IntelliJ IDEA plugin that provides a visual interface for **Claude Code**, **OpenAI Codex**, and **Grok (xAI)** AI tools, making AI-assisted programming more efficient and intuitive.
 
 <img width="850" alt="Image" src="/docs/img/banner.png" />
 
@@ -34,6 +34,7 @@ A powerful IntelliJ IDEA plugin that provides a visual interface for **Claude Co
 ### Dual AI Engine Support
 - **Claude Code** - Anthropic's official AI programming assistant, supporting Opus 4.5 and other models
 - **OpenAI Codex** - OpenAI's powerful code generation engine
+- **Grok (xAI)** - xAI Grok via local CLI over ACP for persistent multi-turn sessions, context window, and billing integration (grok-4.5 and build models)
 
 ### Intelligent Conversation
 - Context-aware AI coding assistant
