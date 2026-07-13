@@ -133,6 +133,17 @@ function escapeForShell(arg) {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+/**
+ * Login-shell argv for -c, aligned with daemon.js env probe:
+ * bash → -lc; fish → -c; zsh/other → -l -c.
+ */
+export function loginShellSpawnArgs(loginShell, commandLine) {
+  const shellBase = path.basename(String(loginShell || ''));
+  if (shellBase === 'fish') return ['-c', commandLine];
+  if (shellBase === 'bash') return ['-lc', commandLine];
+  return ['-l', '-c', commandLine];
+}
+
 export class AcpTerminalHost {
   /**
    * @param {object} opts
@@ -232,11 +243,9 @@ export class AcpTerminalHost {
     };
     if (rawEnv.NODE_PATH) cleanEnv.NODE_PATH = rawEnv.NODE_PATH;
 
-    // Always run through the user's login shell with -l (to source profiles for normal env)
-    // using the cleanEnv (no IDEA_* vars) + explicit login shell.
-    // This prevents the macOS permission prompt, and ensures commands see user env.
-    // We use array form spawn(shell, ['-l', '-c', cmdline]) to ensure the cmdline is passed
-    // as the script string to -c, never as a filename.
+    // Always run through the user's login shell (profiles / normal env).
+    // Array form only — never pass a full "/bin/bash -lc '…'" string as argv[0]/path.
+    // Flag shape matches daemon.js: bash uses -lc, fish -c, others -l -c.
     const loginShell = rawEnv.SHELL || process.env.SHELL || '/bin/zsh';
     const commandLine = unwrapShellWrapperCommand(command, args);
     if (!commandLine.trim()) {
@@ -245,7 +254,8 @@ export class AcpTerminalHost {
       });
     }
 
-    const child = spawn(loginShell, ['-l', '-c', commandLine], {
+    const spawnArgs = loginShellSpawnArgs(loginShell, commandLine);
+    const child = spawn(loginShell, spawnArgs, {
       cwd,
       env: cleanEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
