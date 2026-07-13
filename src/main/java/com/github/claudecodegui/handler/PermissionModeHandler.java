@@ -106,15 +106,6 @@ public class PermissionModeHandler {
                 provider = com.github.claudecodegui.handler.core.HandlerContext.DEFAULT_PROVIDER;
             }
 
-            // Only the Claude persistent runtime supports hot-swapping the mode
-            // on a live query today; Codex rebuilds thread options per turn.
-            // TODO: implement live permission-mode switch for the Codex provider
-            // (verify whether the Codex SDK supports reconfiguring approvalPolicy
-            // / sandbox on an active thread without recreating it).
-            if (!"claude".equals(provider)) {
-                return;
-            }
-
             com.github.claudecodegui.session.ClaudeSession session = this.context.getSession();
             if (session == null) {
                 return;
@@ -122,11 +113,20 @@ public class PermissionModeHandler {
             String sessionId = session.getSessionId();
             String epoch = session.getRuntimeSessionEpoch();
 
-            this.context.getClaudeSDKBridge().setPermissionModeLive(sessionId, epoch, mode)
-                    .exceptionally(ex -> {
-                        LOG.warn("[PermissionModeHandler] Live mode push failed: " + ex.getMessage());
-                        return null;
-                    });
+            if ("claude".equals(provider)) {
+                this.context.getClaudeSDKBridge().setPermissionModeLive(sessionId, epoch, mode)
+                        .exceptionally(ex -> {
+                            LOG.warn("[PermissionModeHandler] Live mode push failed: " + ex.getMessage());
+                            return null;
+                        });
+            } else if ("grok".equals(provider)) {
+                this.context.getGrokSDKBridge().setPermissionModeLive(sessionId, epoch, mode)
+                        .exceptionally(ex -> {
+                            LOG.warn("[PermissionModeHandler] Live grok mode push failed: " + ex.getMessage());
+                            return null;
+                        });
+            }
+            // Codex: rebuilds per turn, no live push needed.
         } catch (Exception e) {
             LOG.warn("[PermissionModeHandler] Live mode push skipped: " + e.getMessage());
         }

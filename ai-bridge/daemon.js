@@ -45,7 +45,10 @@ import {
   preconnectPersistent as grokPreconnectPersistent,
   resetRuntimePersistent as grokResetRuntimePersistent,
   abortCurrentTurn as grokAbortCurrentTurn,
-  shutdownPersistentRuntimes as grokShutdownPersistentRuntimes
+  shutdownPersistentRuntimes as grokShutdownPersistentRuntimes,
+  setPermissionModePersistent as grokSetPermissionModePersistent,
+  getContextUsagePersistent as grokGetContextUsagePersistent,
+  getUsagePersistent as grokGetUsagePersistent
 } from './services/grok/persistent-acp-service.js';
 import { injectStartupEnvVars, isWebviewControlledEnvVar, isDangerousEnvVar } from './config/api-config.js';
 import { cleanupStaleTempImages } from './services/claude/attachment-service.js';
@@ -479,6 +482,10 @@ async function processRequest(request) {
       await resetRuntimePersistent(stdinData);
     } else if (provider === 'claude' && command === 'getContextUsage') {
       await getContextUsagePersistent(stdinData);
+    } else if (provider === 'grok' && command === 'getContextUsage') {
+      await grokGetContextUsagePersistent(stdinData);
+    } else if (provider === 'grok' && command === 'getUsage') {
+      await grokGetUsagePersistent(stdinData);
     } else if (provider === 'grok' && command === 'send') {
       await grokSendPersistent(stdinData);
     } else if (provider === 'grok' && command === 'preconnect') {
@@ -655,6 +662,23 @@ async function processRequest(request) {
         .then(() => writeRawLine({ id: switchId, done: true, success: true }))
         .catch((e) => {
           _originalStderrWrite(`[daemon] setPermissionMode error: ${e.message}\n`, 'utf8');
+          writeRawLine({ id: switchId, done: true, success: false, error: e.message || String(e) });
+        });
+      return;
+    }
+
+    if (request.method === 'grok.setPermissionMode') {
+      const switchId = request.id || '0';
+      if (!request.id) {
+        _originalStderrWrite(
+          '[daemon] grok.setPermissionMode arrived without request.id; done signal may be orphaned\n',
+          'utf8'
+        );
+      }
+      grokSetPermissionModePersistent(request.params || {})
+        .then(() => writeRawLine({ id: switchId, done: true, success: true }))
+        .catch((e) => {
+          _originalStderrWrite(`[daemon] grok.setPermissionMode error: ${e.message}\n`, 'utf8');
           writeRawLine({ id: switchId, done: true, success: false, error: e.message || String(e) });
         });
       return;

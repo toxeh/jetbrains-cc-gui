@@ -42,6 +42,10 @@ export class GrokEventNormalizer {
         this.#handlePromptResult(payload);
         break;
 
+      case 'usage':
+        this.#emitUsage(payload);
+        break;
+
       case 'server_request':
         // already handled by ACP client; optionally surface status
         if (payload?.method) {
@@ -133,8 +137,7 @@ export class GrokEventNormalizer {
       }
       case 'usage_update':
       case 'usage': {
-        const usage = update.usage || update;
-        this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
+        this.#emitUsage(update);
         break;
       }
       case 'user_message_chunk':
@@ -224,11 +227,48 @@ export class GrokEventNormalizer {
   #handlePromptResult(result) {
     // session/prompt returns completion metadata; usage may be here
     if (result?.usage) {
-      this.#emit(`[USAGE] ${JSON.stringify(result.usage)}`);
+      this.#emitUsage(result.usage);
     }
     if (result?.stopReason || result?.stop_reason) {
       // optional
     }
+  }
+
+  #emitUsage(raw) {
+    if (!raw) return;
+    const usage = this.#normalizeUsage(raw.usage || raw);
+    this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
+  }
+
+  #normalizeUsage(u) {
+    if (!u || typeof u !== 'object') return u || {};
+    const out = { ...u };
+    // Map common xAI / Grok / OpenAI / other variants to the keys Java GrokMessageHandler expects
+    // for context window (input/prompt size, not including output).
+    const num = (v) => (typeof v === 'number' ? v : (typeof v === 'string' ? parseInt(v, 10) : null));
+    // prompt / input
+    if (out.prompt_tokens == null) {
+      out.prompt_tokens = num(out.promptTokenCount) ?? num(out.prompt_tokens) ?? num(out.input_tokens) ?? num(out.inputTokens) ?? num(out.input);
+    }
+    if (out.input_tokens == null && out.prompt_tokens != null) {
+      out.input_tokens = out.prompt_tokens;
+    }
+    // completion / output (not used for context bar but normalize for completeness)
+    if (out.completion_tokens == null) {
+      out.completion_tokens = num(out.completion_tokens) ?? num(out.completionTokenCount) ?? num(out.output_tokens) ?? num(out.outputTokens) ?? num(out.output);
+    }
+    if (out.output_tokens == null && out.completion_tokens != null) {
+      out.output_tokens = out.completion_tokens;
+    }
+    // total
+    if (out.total_tokens == null) {
+      out.total_tokens = num(out.total_tokens) ?? num(out.totalTokenCount) ?? num(out.totalTokens);
+    }
+    // If we have prompt+completion but no total, synthesize (for lastUsage consumers)
+    if (out.total_tokens == null && out.prompt_tokens != null && out.completion_tokens != null) {
+      out.total_tokens = out.prompt_tokens + out.completion_tokens;
+    }
+    return out;
   }
 
   #buildContentBlocks(text) {

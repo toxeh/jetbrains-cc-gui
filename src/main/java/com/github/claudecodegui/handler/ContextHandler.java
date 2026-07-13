@@ -8,6 +8,8 @@ import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 
+import java.util.concurrent.CompletableFuture;
+
 /**
  * Context usage handler.
  * Handles the get_context_usage event from the frontend to display context window usage breakdown.
@@ -94,10 +96,23 @@ public class ContextHandler extends BaseMessageHandler {
         final String finalModel = model;
         final String finalRequestId = requestId;
 
+        // Determine provider to route getContextUsage correctly (Claude has rich data,
+        // Grok synthesizes basic total/max from ACP usage + model limits).
+        String provider = "claude";
         try {
-            this.context.getClaudeSDKBridge()
-                    .getContextUsage(finalSessionId, finalCwd, finalModel)
-                    .thenAccept(result -> {
+            if (this.context.getSession() != null) {
+                String p = this.context.getSession().getProvider();
+                if (p != null && !p.isEmpty()) {
+                    provider = p;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            CompletableFuture<JsonObject> bridgeCall = "grok".equalsIgnoreCase(provider)
+                    ? this.context.getGrokSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel)
+                    : this.context.getClaudeSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            bridgeCall.thenAccept(result -> {
                         ApplicationManager.getApplication().invokeLater(() -> {
                             try {
                                 // If the result indicates failure, route through the error callback

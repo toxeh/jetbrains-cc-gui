@@ -3,8 +3,10 @@ package com.github.claudecodegui.session;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession.Message;
+import com.github.claudecodegui.handler.SettingsHandler;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 
@@ -233,8 +235,35 @@ public class GrokMessageHandler implements MessageCallback {
                 if (currentAssistantMessage.raw == null) {
                     currentAssistantMessage.raw = new JsonObject();
                 }
-                currentAssistantMessage.raw.add("turnUsage", resultJson.get("usage").deepCopy());
+                JsonElement usageEl = resultJson.get("usage");
+                currentAssistantMessage.raw.add("turnUsage", usageEl.deepCopy());
                 callbackHandler.notifyMessageUpdate(state.getMessages());
+
+                // Also drive the context bar from result.usage if we got here (defensive for Grok)
+                try {
+                    JsonObject u = usageEl != null && usageEl.isJsonObject() ? usageEl.getAsJsonObject() : null;
+                    if (u != null && u.has("usage") && u.get("usage").isJsonObject()) {
+                        u = u.getAsJsonObject("usage");
+                    }
+                    if (u != null) {
+                        int used = 0;
+                        if (u.has("input_tokens")) {
+                            used = u.get("input_tokens").getAsInt();
+                        } else if (u.has("prompt_tokens")) {
+                            used = u.get("prompt_tokens").getAsInt();
+                        } else if (u.has("total_tokens")) {
+                            used = u.get("total_tokens").getAsInt();
+                        } else if (u.has("promptTokenCount")) {
+                            used = u.get("promptTokenCount").getAsInt();
+                        } else if (u.has("inputTokenCount")) {
+                            used = u.get("inputTokenCount").getAsInt();
+                        }
+                        int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+                        if (used > 0 || maxTokens > 0) {
+                            callbackHandler.notifyUsageUpdate(used, maxTokens);
+                        }
+                    }
+                } catch (Exception ignored) {}
             }
         } catch (Exception e) {
             LOG.debug("Grok result parse skipped: " + e.getMessage());
@@ -254,6 +283,13 @@ public class GrokMessageHandler implements MessageCallback {
         streamEndedThisTurn = false;
         resetStreamingAccumulator();
         callbackHandler.notifyStreamStart();
+
+        // Do not force notifyUsageUpdate(0, max) here.
+        // Forcing 0 made the context indicator drop to 0% at the start of every Grok turn.
+        // The max (and a reasonable used value) is populated by:
+        //  - model/provider change -> UsagePushService
+        //  - [USAGE] events in handleUsage (which always include real max)
+        // This keeps the previous context size visible during generation for the current turn.
     }
 
     private void handleStreamEnd() {
@@ -381,20 +417,37 @@ public class GrokMessageHandler implements MessageCallback {
             message.add("usage", usage);
             currentAssistantMessage.raw.add("message", message);
 
+            // For the context window bar, use the *input/prompt* size (the context fed to the model for this call).
+            // This is the current context window usage. Do not add output (generated after).
+            // NOTE for Grok: the exact semantics of "usage" from ACP are not fully documented like Claude's context_window.
+            // We take the last reported input/prompt size as best approximation of current context fed (history + new).
+            // Max is from model catalog (500k for grok-4.x). May not be 100% precise.
+            // Unwrap if the JSON was { "usage": { ... } }
+            JsonObject u = usage;
+            if (u.has("usage") && u.get("usage").isJsonObject()) {
+                u = u.getAsJsonObject("usage");
+            }
             int used = 0;
-            if (usage.has("input_tokens")) {
-                used += usage.get("input_tokens").getAsInt();
+            if (u.has("input_tokens")) {
+                used = u.get("input_tokens").getAsInt();
+            } else if (u.has("prompt_tokens")) {
+                used = u.get("prompt_tokens").getAsInt();
+            } else if (u.has("total_tokens")) {
+                used = u.get("total_tokens").getAsInt();
+            } else if (u.has("promptTokenCount")) {
+                used = u.get("promptTokenCount").getAsInt();
+            } else if (u.has("inputTokenCount")) {
+                used = u.get("inputTokenCount").getAsInt();
+            } else if (u.has("totalTokenCount")) {
+                used = u.get("totalTokenCount").getAsInt();
+            } else if (!u.has("prompt_tokens") && u.has("input") && u.get("input").isJsonPrimitive()) {
+                // rare fallback
+                try { used = u.get("input").getAsInt(); } catch (Exception ignored) {}
             }
-            if (usage.has("output_tokens")) {
-                used += usage.get("output_tokens").getAsInt();
-            }
-            if (usage.has("total_tokens")) {
-                used = usage.get("total_tokens").getAsInt();
-            }
-            // Best-effort; max tokens unknown for Grok models yet
-            if (used > 0) {
-                callbackHandler.notifyUsageUpdate(used, 0);
-            }
+            int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+            // Always include real maxTokens (from model limits) so the context bar
+            // shows "X / Y Context" (e.g. 12k / 500k) instead of just % with no limit.
+            callbackHandler.notifyUsageUpdate(used, maxTokens);
             callbackHandler.notifyMessageUpdate(state.getMessages());
         } catch (Exception e) {
             LOG.debug("Grok usage parse skipped: " + e.getMessage());

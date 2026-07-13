@@ -56,6 +56,18 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("o1", 200_000);
         MODEL_CONTEXT_LIMITS.put("o1-mini", 128_000);
         MODEL_CONTEXT_LIMITS.put("o1-preview", 128_000);
+
+        // Grok models (xAI) - common context windows
+        // Note: grok / grok-4.5 / grok-4 / grok-build use 500k per current catalog / model info
+        // Older models (grok-2 etc.) remain at 128k
+        MODEL_CONTEXT_LIMITS.put("grok-2", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-2-latest", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-beta", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-1.5", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
     }
 
     private final HandlerContext context;
@@ -146,6 +158,13 @@ public class ModelProviderHandler {
 
             refreshSlashCommandsForProvider(provider);
             usagePushService.refreshContextBar();
+
+            // Ensure the context usage indicator (upper-left token ring + "X / Yk Context")
+            // immediately knows the correct max for the newly active provider's model.
+            // This makes Grok (and others) show the limit even before the first message.
+            String modelForLimit = context.getCurrentModel();
+            int maxTokens = getModelContextLimit(modelForLimit);
+            usagePushService.pushUsageUpdateAfterModelChange(maxTokens);
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set provider: " + e.getMessage(), e);
         }
