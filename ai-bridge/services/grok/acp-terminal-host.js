@@ -76,6 +76,63 @@ function formatCommandLine(command, args) {
   return parts.join(' ');
 }
 
+function stripWrappingQuotes(s) {
+  const t = String(s || '').trim();
+  if (t.length >= 2) {
+    if ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"'))) {
+      return t.slice(1, -1);
+    }
+  }
+  return t;
+}
+
+function isShellExecutable(bin) {
+  return /^(?:\/bin\/)?(?:bash|zsh|sh)$/.test(String(bin || '').trim());
+}
+
+/**
+ * Grok run_terminal_command / ACP terminal/create often sends an outer
+ * `/bin/bash -lc '…'` layer. This host already runs `loginShell -l -c <script>`;
+ * strip the outer wrapper so the inner command is the -c script (never a bogus
+ * “script path” like `/bin/bash -lc '…'`, which yields exit 127).
+ */
+export function unwrapShellWrapperCommand(command, args = []) {
+  const cmd = String(command || '').trim();
+  const argList = Array.isArray(args) ? args.map(String) : [];
+
+  if (isShellExecutable(cmd) && argList.length >= 1) {
+    const flag = argList[0];
+    if (flag === '-lc' || flag === '-c') {
+      return argList.length >= 2 ? argList.slice(1).join(' ') : '';
+    }
+    const combined = argList[0].match(/^-(?:lc|c)\s+([\s\S]+)$/);
+    if (combined) return combined[1];
+  }
+
+  const wrapperMatch = cmd.match(/^\/bin\/(?:zsh|bash|sh)\s+(?:-lc|-c)\s+([\s\S]+)$/);
+  if (wrapperMatch) {
+    let inner = stripWrappingQuotes(wrapperMatch[1].trim());
+    inner = inner.replace(/'\\''/g, "'");
+    inner = inner.replace(/'"'"'/g, "'");
+    return inner;
+  }
+
+  const parts = [cmd, ...argList];
+  return parts.map(escapeForShell).join(' ');
+}
+
+/**
+ * Simple shell escaping for passing to sh -c or zsh -c.
+ * Uses single quotes to avoid most interpretation.
+ */
+function escapeForShell(arg) {
+  const s = String(arg);
+  // If no special chars, return as-is for readability
+  if (/^[a-zA-Z0-9_\/:.-]+$/.test(s)) return s;
+  // Escape single quotes by closing, adding \', reopening
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
 export class AcpTerminalHost {
   /**
    * @param {object} opts
@@ -157,29 +214,43 @@ export class AcpTerminalHost {
     }
 
     const terminalId = randomUUID();
-    const env = buildEnv(this.env, params.env);
+    const rawEnv = buildEnv(this.env, params.env);
 
-    // ACP provides argv-style command+args. If the agent packs a full shell
-    // line into `command` with empty args, run via shell so tools still work.
-    const cmd = String(command);
-    const useShell =
-      args.length === 0 &&
-      (/[\s|&;<>$`"']/.test(cmd) || cmd.includes('\n'));
-    const child = useShell
-      ? spawn(cmd, {
-          cwd,
-          env,
-          shell: true,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        })
-      : spawn(cmd, args, {
-          cwd,
-          env,
-          shell: false,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
+    // Clean env: explicitly build minimal user env without any IDEA_* pollution
+    // so that when Grok's wrapper does /bin/bash -lc 'cmd' (or direct), the bash/mvn
+    // see normal user env (not "launched from inside IDEA").
+    const cleanEnv = {
+      PATH: rawEnv.PATH || process.env.PATH,
+      HOME: rawEnv.HOME || process.env.HOME,
+      USER: rawEnv.USER || process.env.USER,
+      SHELL: rawEnv.SHELL || process.env.SHELL,
+      LANG: rawEnv.LANG || process.env.LANG || 'en_US.UTF-8',
+      LC_ALL: rawEnv.LC_ALL || process.env.LC_ALL || '',
+      TMPDIR: rawEnv.TMPDIR || process.env.TMPDIR || '',
+      TEMP: rawEnv.TEMP || process.env.TEMP || '',
+      TMP: rawEnv.TMP || process.env.TMP || '',
+    };
+    if (rawEnv.NODE_PATH) cleanEnv.NODE_PATH = rawEnv.NODE_PATH;
+
+    // Always run through the user's login shell with -l (to source profiles for normal env)
+    // using the cleanEnv (no IDEA_* vars) + explicit login shell.
+    // This prevents the macOS permission prompt, and ensures commands see user env.
+    // We use array form spawn(shell, ['-l', '-c', cmdline]) to ensure the cmdline is passed
+    // as the script string to -c, never as a filename.
+    const loginShell = rawEnv.SHELL || process.env.SHELL || '/bin/zsh';
+    const commandLine = unwrapShellWrapperCommand(command, args);
+    if (!commandLine.trim()) {
+      throw Object.assign(new Error('command is empty after unwrapping shell wrapper'), {
+        code: -32602,
+      });
+    }
+
+    const child = spawn(loginShell, ['-l', '-c', commandLine], {
+      cwd,
+      env: cleanEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
 
     const state = {
       terminalId,
