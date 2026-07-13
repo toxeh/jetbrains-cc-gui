@@ -7,6 +7,7 @@ import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.action.SendShortcutSync;
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.util.FontConfigService;
 import com.github.claudecodegui.util.ThemeConfigService;
 import com.google.gson.Gson;
@@ -777,6 +778,10 @@ public class ProjectConfigHandler {
                     LOG.info("[ProjectConfigHandler] Codex statistics - sessions: " + stats.totalSessions +
                              ", cost: " + stats.estimatedCost + ", total tokens: " + stats.totalUsage.totalTokens);
                     json = gson.toJson(stats);
+                } else if ("grok".equals(provider)) {
+                    // For Grok use live billing via /usage
+                    handleGetGrokUsage(null);
+                    return; // will push via the callback in handleGetGrokUsage
                 } else {
                     ClaudeHistoryReader reader = new ClaudeHistoryReader();
                     json = gson.toJson(reader.getProjectStatistics(projectPath, cutoffTime));
@@ -790,4 +795,90 @@ public class ProjectConfigHandler {
             }
         });
     }
+
+    // ---- Grok auth method --------------------------------------------------
+
+    public void handleGetGrokAuthConfig() {
+        respondWithJson("window.updateGrokAuthConfig",
+            () -> {
+                JsonObject payload = new JsonObject();
+                payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
+                String key = settingsService.getGrokApiKey();
+                payload.addProperty("hasApiKey", key != null && !key.isEmpty());
+                // For editing, frontend may request separately — send empty placeholder.
+                payload.addProperty("apiKey", key != null ? key : "");
+                payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
+                payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
+                payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
+                return payload;
+            },
+            jsonOf("authMethod", CodemossSettingsService.DEFAULT_GROK_AUTH_METHOD),
+            "Failed to get Grok auth config");
+    }
+
+    public void handleSetGrokAuthConfig(String content) {
+        try {
+            JsonObject json = gson.fromJson(content, JsonObject.class);
+            if (json == null) {
+                showError("Invalid Grok auth config");
+                return;
+            }
+            if (json.has("authMethod") && !json.get("authMethod").isJsonNull()) {
+                settingsService.setGrokAuthMethod(json.get("authMethod").getAsString());
+            }
+            if (json.has("apiKey") && !json.get("apiKey").isJsonNull()) {
+                settingsService.setGrokApiKey(json.get("apiKey").getAsString());
+            }
+            if (json.has("apiBaseUrl") && !json.get("apiBaseUrl").isJsonNull()) {
+                settingsService.setGrokApiBaseUrl(json.get("apiBaseUrl").getAsString());
+            }
+            if (json.has("oauthBaseUrl") && !json.get("oauthBaseUrl").isJsonNull()) {
+                settingsService.setGrokOauthBaseUrl(json.get("oauthBaseUrl").getAsString());
+            }
+            if (json.has("gatewayOrigin") && !json.get("gatewayOrigin").isJsonNull()) {
+                settingsService.setGrokGatewayOrigin(json.get("gatewayOrigin").getAsString());
+            }
+            JsonObject payload = new JsonObject();
+            payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
+            String key = settingsService.getGrokApiKey();
+            payload.addProperty("hasApiKey", key != null && !key.isEmpty());
+            payload.addProperty("apiKey", key != null ? key : "");
+            payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
+            payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
+            payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
+            LOG.info("[ProjectConfigHandler] Set Grok authMethod=" + payload.get("authMethod").getAsString()
+                    + " apiBaseUrl=" + payload.get("apiBaseUrl").getAsString()
+                    + " oauthBaseUrl=" + payload.get("oauthBaseUrl").getAsString());
+            ApplicationManager.getApplication().invokeLater(() -> {
+                context.callJavaScript("window.updateGrokAuthConfig",
+                    context.escapeJs(gson.toJson(payload)));
+                context.callJavaScript("window.showSuccessI18n", "toast.saveSuccess");
+            });
+        } catch (Exception e) {
+            LOG.error("[ProjectConfigHandler] Failed to set Grok auth config: " + e.getMessage(), e);
+            showError("Failed to save Grok auth config: " + e.getMessage());
+        }
+    }
+
+    /** Get Grok billing/usage snapshot (credits, weekly limit etc.) by calling grok /usage via bridge. */
+    public void handleGetGrokUsage(String content) {
+        GrokSDKBridge grokBridge = context.getGrokSDKBridge();
+        if (grokBridge == null) {
+            showError("Grok bridge not initialized");
+            return;
+        }
+        String cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
+        grokBridge.getUsage(cwd).thenAccept(result -> {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    String json = gson.toJson(result);
+                    context.callJavaScript("window.updateUsageStatistics", context.escapeJs(json));
+                } catch (Exception e) {
+                    LOG.error("[ProjectConfigHandler] Failed to send grok usage: " + e.getMessage(), e);
+                    showError("Failed to get Grok usage: " + e.getMessage());
+                }
+            });
+        });
+    }
+
 }

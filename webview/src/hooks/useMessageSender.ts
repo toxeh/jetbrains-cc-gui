@@ -1,6 +1,6 @@
 import { useCallback, type RefObject } from 'react';
 import type { TFunction } from 'i18next';
-import { sendBridgeEvent } from '../utils/bridge';
+import { sendBridgeEvent, sendToJava } from '../utils/bridge';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
 import {
   EFFORT_SUPPORTED_CLAUDE_MODELS,
@@ -16,6 +16,7 @@ export const NEW_SESSION_COMMANDS = new Set(['/new', '/clear', '/reset']);
 export const RESUME_COMMANDS = new Set(['/resume', '/continue']);
 export const PLAN_COMMANDS = new Set(['/plan']);
 export const CONTEXT_COMMANDS = new Set(['/context']);
+export const USAGE_COMMANDS = new Set(['/usage']);
 
 // Hoisted regex to avoid creating new RegExp on every call
 const WHITESPACE_REGEX = /\s+/;
@@ -138,17 +139,17 @@ export function useMessageSender({
 
   /**
    * Check for context usage command (/context)
-   * Only available for Claude provider. Opens a dialog to display context window usage.
+   * Opens a dialog to display context window usage (supported for Claude and Grok).
    */
   const checkContextCommand = useCallback((text: string): boolean => {
     if (!text.startsWith('/')) return false;
     const command = text.split(WHITESPACE_REGEX)[0].toLowerCase();
     if (CONTEXT_COMMANDS.has(command)) {
-      if (currentProvider !== 'claude') {
+      if (currentProvider !== 'claude' && currentProvider !== 'grok') {
         addToast(t('chat.commandProviderOnly', {
           command,
-          provider: 'Claude',
-          defaultValue: `${command} is only available for Claude provider`,
+          provider: currentProvider === 'codex' ? 'Codex' : 'Claude',
+          defaultValue: `${command} is only available for Claude/Grok providers`,
         }), 'warning');
         return true;
       }
@@ -159,10 +160,12 @@ export function useMessageSender({
       openContextUsageDialog(requestId, true);
 
       // Send bridge event to fetch context usage with current model
-      // Apply [1m] suffix if long context is enabled so the SDK creates
-      // a runtime with the correct context window limit.
+      // Apply [1m] suffix only for Claude if long context enabled.
+      const modelForContext = currentProvider === 'claude'
+        ? apply1MContextSuffix(selectedModel, longContextEnabled ?? false)
+        : selectedModel;
       const sent = sendBridgeEvent('get_context_usage', JSON.stringify({
-        model: apply1MContextSuffix(selectedModel, longContextEnabled ?? false),
+        model: modelForContext,
         requestId,
       }));
 
@@ -172,6 +175,13 @@ export function useMessageSender({
           defaultValue: 'Bridge is not available right now',
         }), 'error');
       }
+      return true;
+    }
+
+    if (USAGE_COMMANDS.has(command) && currentProvider === 'grok') {
+      // For Grok /usage fetch live billing and push to usage stats (or could render as message)
+      sendToJava('get_grok_usage', { cwd: null });
+      addToast(t('chat.grokUsageRequested', { defaultValue: 'Fetching Grok usage...' }), 'info');
       return true;
     }
     return false;
@@ -323,8 +333,14 @@ export function useMessageSender({
       return;
     }
     if (!currentSdkInstalled) {
+      const providerLabel =
+        currentProvider === 'codex'
+          ? 'Codex'
+          : currentProvider === 'grok'
+            ? 'Grok'
+            : 'Claude Code';
       addToast(
-        t('chat.sdkNotInstalled', { provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code' }) + ' ' + t('chat.goInstallSdk'),
+        t('chat.sdkNotInstalled', { provider: providerLabel }) + ' ' + t('chat.goInstallSdk'),
         'warning'
       );
       setSettingsInitialTab('dependencies');

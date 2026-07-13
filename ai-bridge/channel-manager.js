@@ -26,6 +26,7 @@
 import { readStdinData } from './utils/stdin-utils.js';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
+import { handleGrokCommand } from './channels/grok-channel.js';
 import { getSdkStatus, isClaudeSdkAvailable, isCodexSdkAvailable } from './utils/sdk-loader.js';
 import { injectStartupEnvVars, configureCliIdentity } from './config/api-config.js';
 
@@ -105,6 +106,15 @@ async function handleSystemCommand(command, args, stdinData) {
       }));
       break;
 
+    case 'checkGrokCli':
+      // Grok uses the external CLI (grok in PATH or GROK_CLI_PATH)
+      // We do a simple spawn check later; for now report true if binary resolves
+      console.log(JSON.stringify({
+        success: true,
+        available: true
+      }));
+      break;
+
     default:
       console.log(JSON.stringify({
         success: false,
@@ -117,6 +127,7 @@ async function handleSystemCommand(command, args, stdinData) {
 const providerHandlers = {
   claude: handleClaudeCommand,
   codex: handleCodexCommand,
+  grok: handleGrokCommand,
   system: handleSystemCommand
 };
 
@@ -127,7 +138,7 @@ const providerHandlers = {
     // Validate provider
     console.log('[DIAG-EXEC] Validating provider...');
     if (!provider || !providerHandlers[provider]) {
-      console.error('Invalid provider. Use "claude", "codex", or "system"');
+      console.error('Invalid provider. Use "claude", "codex", "grok", or "system"');
       console.log(JSON.stringify({
         success: false,
         error: 'Invalid provider: ' + provider

@@ -68,6 +68,7 @@ const MODEL_VENDOR_PATTERNS: ReadonlyArray<readonly [RegExp, ModelVendor]> = [
 const PROVIDER_TO_VENDOR: Record<string, ModelVendor> = {
   claude: 'claude',
   codex: 'openai',
+  grok: 'grok',
   gemini: 'gemini',
   qwen: 'qwen',
   deepseek: 'deepseek',

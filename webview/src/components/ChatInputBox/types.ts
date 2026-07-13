@@ -392,6 +392,24 @@ export const CODEX_MODELS: ModelInfo[] = [
 ];
 
 /**
+ * Grok (xAI) model list
+ * Using IDs that the grok-channel.js + @xai-official/grok will understand.
+ * Default: Grok 4.5 (strong coding). Secondary: Grok Build (agentic).
+ */
+export const GROK_MODELS: ModelInfo[] = [
+  {
+    id: 'grok-4.5',
+    label: 'Grok 4.5',
+    description: 'Default Grok model. Excellent for coding and reasoning.',
+  },
+  {
+    id: 'grok-build',
+    label: 'Grok Build',
+    description: 'Grok Build — agentic coding model (full tool use).',
+  },
+];
+
+/**
  * Available models (backward compatibility)
  */
 export const AVAILABLE_MODELS = CLAUDE_MODELS;
@@ -412,6 +430,7 @@ export interface ProviderInfo {
 export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
+  { id: 'grok', label: 'Grok', icon: 'codicon-terminal', enabled: true },
   { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: false },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: false },
 ];

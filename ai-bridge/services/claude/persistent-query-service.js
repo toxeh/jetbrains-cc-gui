@@ -37,6 +37,8 @@ import {
   setCachedQueryFn,
   touchRuntime,
   createTurnSink,
+  emitSessionUpdated,
+  waitForReaderQuiescent,
 } from './runtime-lifecycle.js';
 import {
   SESSION_CLEANUP_INTERVAL_MS,
@@ -268,12 +270,45 @@ async function executeTurn(runtime, requestContext, turnMeta) {
   try {
     beginRuntimeTurn(runtime);
 
+    // A previous turn can still be in flight on the CLI when this one starts:
+    // a CLI-initiated background turn (e.g. a background-task completion
+    // notification, #1305) or a late-finishing turn whose events are still in
+    // the pipe. The turnSink routes by existence, not by message identity, so
+    // opening it now would attribute that turn's output — and, worse, its
+    // closing `result` — to this turn. Consuming a foreign result ends this
+    // turn early, the real answer then completes unobserved between turns,
+    // and every later answer shifts back by one ("answer to the previous
+    // phrase").
+    //
+    // Wait until the reader has drained the pipe and parked on query.next().
+    // This covers not just a turn that is mid-flight now (waitForCliQuiet), but
+    // also a tail that lands in the gap after the previous result — a bare
+    // in-flight check is level-triggered on a flag the closing result already
+    // cleared, so a late background `assistant` (no result yet) would slip past
+    // it and contaminate this turn. We do this BEFORE enqueueing our user
+    // message: nothing in the pipe yet can be a response to it, so anything
+    // buffered is prior-turn tail and belongs on the inter-turn (background
+    // render) path. The CLI would queue our message behind that turn anyway, so
+    // this adds no real latency. Interruptible: abort disposes the runtime,
+    // which resolves the wait; we re-check `closed` after waking.
+    await waitForReaderQuiescent(runtime);
+    if (runtime.closed) {
+      const err = new Error('Runtime closed while waiting for an in-flight CLI turn to finish');
+      err.runtimeTerminated = true;
+      throw err;
+    }
+
     // Create and register turnSink after beginRuntimeTurn to avoid race
     // (ensures executeTurn is ready to consume before perpetual reader can push)
     runtime.turnSink = createTurnSink();
 
     console.log('[MESSAGE_START]');
     runtime.inputStream.enqueue(requestContext.userMessage);
+
+    // Guards the foreign-result check below: flips true once ANY message of
+    // this turn has been observed. A successful turn always produces output
+    // (at minimum one assistant message) before its result.
+    let sawTurnMessage = false;
 
     while (true) {
       let next;
@@ -295,6 +330,9 @@ async function executeTurn(runtime, requestContext, turnMeta) {
 
       touchRuntime(runtime);
       const msg = next.value;
+      if (msg?.type !== 'result') {
+        sawTurnMessage = true;
+      }
 
       if (turnState.streamingEnabled && !turnState.streamStarted) {
         process.stdout.write('[STREAM_START]\n');
@@ -329,7 +367,30 @@ async function executeTurn(runtime, requestContext, turnMeta) {
 
       if (msg?.type === 'result') {
         if (msg.is_error) {
+          // NOTE: error results are accepted even as the first message of the
+          // turn — an immediately-failing request (auth, rate limit, invalid
+          // model) legitimately produces a bare error result with no prior
+          // output. Only SUCCESS results are subject to the foreign check.
           throw new Error(msg.result || msg.message || 'API request failed');
+        }
+        if (!sawTurnMessage) {
+          // A successful turn always produces messages (at minimum one
+          // assistant snapshot) before its result, so a success result
+          // arriving as the FIRST message of this turn must be the closing
+          // result of a previous/background turn. The quiescence wait above
+          // drains anything already in the pipe before the sink opens, so this
+          // now only fires for the residual network window — a foreign run
+          // whose result lands after the sink opened. Consuming it as ours
+          // would end this turn before it produced anything, leave the real
+          // answer to complete unobserved between turns, and shift every later
+          // answer back by one. Skip it — this turn's real messages follow.
+          // session_updated still lets the UI render the background turn this
+          // result actually closed.
+          console.log('[LIFECYCLE] Skipping foreign result that closed a background turn');
+          if (runtime.sessionId) {
+            emitSessionUpdated(runtime.sessionId);
+          }
+          continue;
         }
         break;
       }

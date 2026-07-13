@@ -11,6 +11,7 @@ const UsageStatisticsSection = ({ currentProvider }: { currentProvider?: string 
     statistics, loading, activeTab, projectScope, dateRange,
     sessionPage, sessionSortBy, tooltip, sessionsPerPage,
     filteredSessions, paginatedSessions, totalPages, filteredDailyUsage,
+    grokBilling,
     setActiveTab, setDateRange, setSessionPage, setSessionSortBy, setTooltip,
     handleRefresh, handleScopeChange,
     formatNumber, formatCost, formatDate, formatChineseDate,
@@ -50,6 +51,26 @@ const UsageStatisticsSection = ({ currentProvider }: { currentProvider?: string 
         <span className="codicon codicon-warning" />
         {t('usage.estimateNotice')}
       </div>
+
+      {/* Grok specific billing from /usage */}
+      {currentProvider === 'grok' && grokBilling && (
+        <div className="grok-billing-panel">
+          <h3>Grok Billing</h3>
+          {grokBilling.creditUsagePercent !== undefined && (
+            <div>Weekly limit: {grokBilling.creditUsagePercent}%</div>
+          )}
+          {grokBilling.nextReset && <div>Next reset: {grokBilling.nextReset}</div>}
+          {grokBilling.credits !== undefined && <div>Credits: ${grokBilling.credits}</div>}
+          {grokBilling.prepaidBalance?.val !== undefined && <div>Prepaid balance: ${grokBilling.prepaidBalance.val}</div>}
+          {grokBilling.autoTopup !== undefined && <div>Auto topup: {grokBilling.autoTopup ? 'enabled' : 'disabled'}</div>}
+          {grokBilling.productUsage && grokBilling.productUsage.length > 0 && (
+            <div>Products: {grokBilling.productUsage.map((p: any) => `${p.product} ${p.usagePercent}%`).join(', ')}</div>
+          )}
+          {grokBilling.raw && (
+            <pre style={{ fontSize: '12px', whiteSpace: 'pre-wrap', marginTop: '8px' }}>{grokBilling.raw}</pre>
+          )}
+        </div>
+      )}
 
       {/* Controls bar */}
       <div className="usage-controls">
@@ -98,70 +119,117 @@ const UsageStatisticsSection = ({ currentProvider }: { currentProvider?: string 
         </button>
       </div>
 
-      {/* Tab navigation */}
-      <div className="usage-tabs">
-        <button className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-          <span className="codicon codicon-dashboard" />
-          {t('usage.overview')}
-        </button>
-        <button className={`tab-btn ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>
-          <span className="codicon codicon-symbol-class" />
-          {t('usage.models')}
-        </button>
-        <button className={`tab-btn ${activeTab === 'sessions' ? 'active' : ''}`} onClick={() => setActiveTab('sessions')}>
-          <span className="codicon codicon-list-unordered" />
-          {t('usage.sessions')}
-        </button>
-        <button className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} onClick={() => setActiveTab('timeline')}>
-          <span className="codicon codicon-graph-line" />
-          {t('usage.timeline')}
-        </button>
-      </div>
+      {/* Tab navigation - hide for Grok billing which has its own panel */}
+      {!(currentProvider === 'grok' && grokBilling) && (
+        <div className="usage-tabs">
+          <button className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+            <span className="codicon codicon-dashboard" />
+            {t('usage.overview')}
+          </button>
+          <button className={`tab-btn ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>
+            <span className="codicon codicon-symbol-class" />
+            {t('usage.models')}
+          </button>
+          <button className={`tab-btn ${activeTab === 'sessions' ? 'active' : ''}`} onClick={() => setActiveTab('sessions')}>
+            <span className="codicon codicon-list-unordered" />
+            {t('usage.sessions')}
+          </button>
+          <button className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} onClick={() => setActiveTab('timeline')}>
+            <span className="codicon codicon-graph-line" />
+            {t('usage.timeline')}
+          </button>
+        </div>
+      )}
 
-      {/* Tab content */}
+      {/* Tab content or Grok billing */}
       <div className="usage-content">
-        {activeTab === 'overview' && (
-          <UsageOverviewTab
-            statistics={statistics}
-            formatCost={formatCost}
-            formatNumber={formatNumber}
-            renderTrend={renderTrend}
-            getTokenPercentage={getTokenPercentage}
-          />
-        )}
+        {currentProvider === 'grok' && grokBilling ? (
+          <div className="grok-billing-content">
+            <div className="billing-cards">
+              {grokBilling.creditUsagePercent !== undefined && (
+                <div className="billing-card">
+                  <div className="label">Weekly limit</div>
+                  <div className="value">{grokBilling.creditUsagePercent}%</div>
+                </div>
+              )}
+              {grokBilling.credits !== undefined && (
+                <div className="billing-card">
+                  <div className="label">Credits</div>
+                  <div className="value">${grokBilling.credits}</div>
+                </div>
+              )}
+              {grokBilling.prepaidBalance?.val !== undefined && (
+                <div className="billing-card">
+                  <div className="label">Prepaid</div>
+                  <div className="value">${grokBilling.prepaidBalance.val}</div>
+                </div>
+              )}
+              {grokBilling.nextReset && (
+                <div className="billing-card">
+                  <div className="label">Next reset</div>
+                  <div className="value">{grokBilling.nextReset}</div>
+                </div>
+              )}
+              {grokBilling.autoTopup !== undefined && (
+                <div className="billing-card">
+                  <div className="label">Auto topup</div>
+                  <div className="value">{grokBilling.autoTopup ? 'enabled' : 'disabled'}</div>
+                </div>
+              )}
+            </div>
+            {grokBilling.raw && (
+              <details className="raw-output">
+                <summary>Raw output</summary>
+                <pre>{grokBilling.raw}</pre>
+              </details>
+            )}
+          </div>
+        ) : (
+          <>
+            {activeTab === 'overview' && (
+              <UsageOverviewTab
+                statistics={statistics}
+                formatCost={formatCost}
+                formatNumber={formatNumber}
+                renderTrend={renderTrend}
+                getTokenPercentage={getTokenPercentage}
+              />
+            )}
 
-        {activeTab === 'models' && (
-          <UsageModelsTab
-            models={statistics.byModel}
-            formatCost={formatCost}
-            formatNumber={formatNumber}
-          />
-        )}
+            {activeTab === 'models' && (
+              <UsageModelsTab
+                models={statistics.byModel}
+                formatCost={formatCost}
+                formatNumber={formatNumber}
+              />
+            )}
 
-        {activeTab === 'sessions' && (
-          <UsageSessionsTab
-            filteredSessions={filteredSessions}
-            paginatedSessions={paginatedSessions}
-            sessionPage={sessionPage}
-            totalPages={totalPages}
-            sessionsPerPage={sessionsPerPage}
-            sessionSortBy={sessionSortBy}
-            setSessionPage={setSessionPage}
-            setSessionSortBy={setSessionSortBy}
-            formatDate={formatDate}
-            formatCost={formatCost}
-            formatNumber={formatNumber}
-          />
-        )}
+            {activeTab === 'sessions' && (
+              <UsageSessionsTab
+                filteredSessions={filteredSessions}
+                paginatedSessions={paginatedSessions}
+                sessionPage={sessionPage}
+                totalPages={totalPages}
+                sessionsPerPage={sessionsPerPage}
+                sessionSortBy={sessionSortBy}
+                setSessionPage={setSessionPage}
+                setSessionSortBy={setSessionSortBy}
+                formatDate={formatDate}
+                formatCost={formatCost}
+                formatNumber={formatNumber}
+              />
+            )}
 
-        {activeTab === 'timeline' && (
-          <UsageTimelineTab
-            filteredDailyUsage={filteredDailyUsage}
-            tooltip={tooltip}
-            setTooltip={setTooltip}
-            formatCost={formatCost}
-            formatChineseDate={formatChineseDate}
-          />
+            {activeTab === 'timeline' && (
+              <UsageTimelineTab
+                filteredDailyUsage={filteredDailyUsage}
+                tooltip={tooltip}
+                setTooltip={setTooltip}
+                formatCost={formatCost}
+                formatChineseDate={formatChineseDate}
+              />
+            )}
+          </>
         )}
       </div>
 

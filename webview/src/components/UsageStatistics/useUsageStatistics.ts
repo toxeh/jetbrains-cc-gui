@@ -46,8 +46,42 @@ export function useUsageStatistics(currentProvider?: string) {
   useEffect(() => {
     window.updateUsageStatistics = (jsonStr: string) => {
       try {
-        const data: ProjectStatistics = JSON.parse(jsonStr);
-        setStatistics(data);
+        const data: any = JSON.parse(jsonStr);
+        if (data && (data.data || data.output)) {
+          let grokData = data.data || { raw: data.output };
+          // Normalize the API response (with .config) to a convenient flat + full shape
+          if (grokData && grokData.config) {
+            const c = grokData.config;
+            grokData = {
+              ...grokData,
+              creditUsagePercent: c.creditUsagePercent,
+              currentPeriod: c.currentPeriod,
+              prepaidBalance: c.prepaidBalance,
+              productUsage: c.productUsage,
+              onDemandCap: c.onDemandCap,
+              onDemandUsed: c.onDemandUsed,
+              isUnifiedBillingUser: c.isUnifiedBillingUser,
+              topUpMethod: c.topUpMethod,
+              weeklyLimitPercent: c.creditUsagePercent,
+              credits: c.prepaidBalance?.val,
+              nextReset: c.currentPeriod?.end,
+              autoTopup: grokData.autoTopup,
+            };
+          }
+          console.log('[Grok /usage]', grokData);
+          setStatistics({
+            sessions: [],
+            totalSessions: 0,
+            totalUsage: { totalTokens: 0 },
+            estimatedCost: 0,
+            dailyUsage: [],
+            grokBilling: grokData,
+            provider: 'grok'
+          } as any);
+          setLoading(false);
+          return;
+        }
+        setStatistics(data as ProjectStatistics);
         setLoading(false);
       } catch (error) {
         console.error('Failed to parse usage statistics:', error);
@@ -180,12 +214,15 @@ export function useUsageStatistics(currentProvider?: string) {
 
   const filteredDailyUsage = getFilteredDailyUsage();
 
+  const grokBilling = statistics && (statistics as any).grokBilling ? (statistics as any).grokBilling : null;
+
   return {
     // State
     statistics, loading, activeTab, projectScope, dateRange,
     sessionPage, sessionSortBy, tooltip, sessionsPerPage,
     // Derived
     filteredSessions, paginatedSessions, totalPages, filteredDailyUsage,
+    grokBilling,
     // Actions
     setActiveTab, setDateRange, setSessionPage, setSessionSortBy, setTooltip,
     handleRefresh, handleScopeChange,

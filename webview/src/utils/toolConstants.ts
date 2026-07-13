@@ -10,7 +10,7 @@ export const READ_TOOL_NAMES = new Set(['read', 'read_file', 'read_multiple_file
 export const EDIT_TOOL_NAMES = new Set(['edit', 'edit_file', 'replace_string', 'write_to_file']);
 
 // Bash/command execution tools
-export const BASH_TOOL_NAMES = new Set(['bash', 'run_terminal_cmd', 'exec_command', 'execute_command', 'shell_command']);
+export const BASH_TOOL_NAMES = new Set(['bash', 'run_terminal_cmd', 'run_terminal_command', 'exec_command', 'execute_command', 'shell_command']);
 
 // Search/grep/glob tools
 export const SEARCH_TOOL_NAMES = new Set(['grep', 'glob', 'search', 'find', 'search_files']);

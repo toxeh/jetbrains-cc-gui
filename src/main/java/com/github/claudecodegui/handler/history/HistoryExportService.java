@@ -5,6 +5,7 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.grok.GrokHistoryReader;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -60,6 +61,10 @@ class HistoryExportService {
                     LOG.info("[HistoryHandler] 使用 CodexHistoryReader 读取 Codex 会话消息");
                     CodexHistoryReader codexReader = new CodexHistoryReader();
                     messagesJson = codexReader.getSessionMessagesAsJson(sessionId);
+                } else if ("grok".equals(currentProvider)) {
+                    LOG.info("[HistoryHandler] 使用 GrokHistoryReader 读取 Grok 会话消息");
+                    GrokHistoryReader grokReader = new GrokHistoryReader();
+                    messagesJson = grokReader.getSessionMessagesAsJson(sessionId);
                 } else {
                     LOG.info("[HistoryHandler] 使用 ClaudeHistoryReader 读取 Claude 会话消息");
                     ClaudeHistoryReader historyReader = new ClaudeHistoryReader();

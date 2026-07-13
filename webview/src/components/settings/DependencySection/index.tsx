@@ -76,6 +76,12 @@ const SDK_DEFINITIONS = [
     description: 'settings.dependency.codexSdkDescription',
     relatedProviders: ['openai'],
   },
+  {
+    id: 'grok-cli' as SdkId,
+    nameKey: 'settings.dependency.grokCliName',
+    description: 'settings.dependency.grokCliDescription',
+    relatedProviders: ['grok'],
+  },
 ];
 
 const VersionSelect = ({
@@ -167,10 +173,7 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
   const [nodeAvailable, setNodeAvailable] = useState<boolean | null>(null);
   const [sdkVersions, setSdkVersions] = useState<Record<SdkId, DependencyVersionInfo>>({} as Record<SdkId, DependencyVersionInfo>);
   const [selectedVersions, setSelectedVersions] = useState<Record<SdkId, string>>({} as Record<SdkId, string>);
-  const [loadingVersions, setLoadingVersions] = useState<Record<SdkId, boolean>>({
-    'claude-sdk': false,
-    'codex-sdk': false,
-  });
+  const [loadingVersions, setLoadingVersions] = useState<Record<SdkId, boolean>>({ 'claude-sdk': false, 'codex-sdk': false, 'grok-cli': false });
   const logContainerRef = useRef<HTMLDivElement>(null);
   const isNodePathReadyRef = useRef(false);
   const sdkStatusRef = useRef<Record<SdkId, SdkStatus>>({} as Record<SdkId, SdkStatus>);
@@ -432,10 +435,7 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
     if (!isActive) {
       return;
     }
-    setLoadingVersions({
-      'claude-sdk': true,
-      'codex-sdk': true,
-    });
+    setLoadingVersions({ 'claude-sdk': true, 'codex-sdk': true, 'grok-cli': true });
     sendToJava('get_dependency_status:');
     sendToJava('check_dependency_updates:');
     sendToJava('get_dependency_versions:');

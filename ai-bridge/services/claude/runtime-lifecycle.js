@@ -141,6 +141,9 @@ export async function disposeRuntime(runtime, callbacks) {
     + ' signature=' + (runtime.runtimeSignature || '(none)'));
   runtime.closed = true;
   runtime.activeTurnCount = 0;
+  // Wake any executeTurn parked in waitForCliQuiet — it re-checks
+  // runtime.closed and fails the turn instead of hanging on a dead runtime.
+  resolveCliQuietWaiters(runtime);
 
   try {
     runtime.inputStream.done();
@@ -179,7 +182,16 @@ async function createRuntime(requestContext, callbacks) {
     stderrLines: [],
     query: null,
     inputStream: new AsyncStream(),
-    titleGenerationAttempted: false
+    titleGenerationAttempted: false,
+    // CLI turn accounting (see startPerpetualReader): true while the CLI has
+    // an unfinished message run — substantive output seen, closing `result`
+    // not yet. executeTurn defers opening its sink while this is set.
+    cliTurnInFlight: false,
+    cliQuietWaiters: [],
+    // Monotonic count of messages the perpetual reader has pulled from the SDK
+    // iterator. waitForReaderQuiescent watches this to tell when the reader has
+    // drained everything already in the pipe and parked on query.next().
+    readerReadCount: 0
   };
 
   const options = {
@@ -248,44 +260,136 @@ async function createRuntime(requestContext, callbacks) {
  *
  * Exported for testing; returns the reader loop promise.
  */
-export function startPerpetualReader(runtime, callbacks) {
-  /**
-   * Emit an inter-turn event using daemon.js's writeRawLine mechanism.
-   *
-   * IMPORTANT: Must bypass activeRequestId interception to avoid misrouting.
-   *
-   * Why writeRawLine is required:
-   * - daemon.js intercepts process.stdout.write and wraps output with activeRequestId
-   * - If we used console.log() here, the event would be tagged with whatever request
-   *   is currently active (possibly from a different session)
-   * - This would cause the session_updated event to be delivered to the wrong session
-   * - writeRawLine (_originalStdoutWrite) bypasses the interception layer and outputs
-   *   directly to stdout, ensuring the event is process-level and not request-scoped
-   *
-   * The event format {type: 'daemon', event: 'session_updated', sessionId} is recognized
-   * by Java's DaemonBridge.handleDaemonEvent() which routes it to registered listeners.
-   */
-  const emitInterTurnEvent = (sessionId) => {
-    try {
-      // Access the global writeRawLine from daemon.js
-      // daemon.js stores the original stdout.write as _originalStdoutWrite
-      // We must use _originalStdoutWrite to bypass activeRequestId wrapping
-      const originalWrite = process.stdout._originalStdoutWrite;
-      if (!originalWrite) {
-        console.error('[PERPETUAL_READER] _originalStdoutWrite not available (daemon.js not initialized?), cannot emit session_updated event');
-        return;
-      }
-      const eventPayload = {
-        type: 'daemon',
-        event: 'session_updated',
-        sessionId: sessionId
-      };
-      originalWrite.call(process.stdout, JSON.stringify(eventPayload) + '\n', 'utf8');
-    } catch (err) {
-      console.error('[PERPETUAL_READER] Failed to emit session_updated event:', err);
+/**
+ * Emit a session_updated event using daemon.js's writeRawLine mechanism.
+ *
+ * IMPORTANT: Must bypass activeRequestId interception to avoid misrouting.
+ *
+ * Why writeRawLine is required:
+ * - daemon.js intercepts process.stdout.write and wraps output with activeRequestId
+ * - If we used console.log() here, the event would be tagged with whatever request
+ *   is currently active (possibly from a different session)
+ * - This would cause the session_updated event to be delivered to the wrong session
+ * - writeRawLine (_originalStdoutWrite) bypasses the interception layer and outputs
+ *   directly to stdout, ensuring the event is process-level and not request-scoped
+ *
+ * The event format {type: 'daemon', event: 'session_updated', sessionId} is recognized
+ * by Java's DaemonBridge.handleDaemonEvent() which routes it to registered listeners.
+ *
+ * Used by the perpetual reader for inter-turn results, and by executeTurn when
+ * it skips a foreign result that closes a background turn.
+ */
+export function emitSessionUpdated(sessionId) {
+  try {
+    // Access the global writeRawLine from daemon.js
+    // daemon.js stores the original stdout.write as _originalStdoutWrite
+    // We must use _originalStdoutWrite to bypass activeRequestId wrapping
+    const originalWrite = process.stdout._originalStdoutWrite;
+    if (!originalWrite) {
+      console.error('[PERPETUAL_READER] _originalStdoutWrite not available (daemon.js not initialized?), cannot emit session_updated event');
+      return;
     }
-  };
+    const eventPayload = {
+      type: 'daemon',
+      event: 'session_updated',
+      sessionId: sessionId
+    };
+    originalWrite.call(process.stdout, JSON.stringify(eventPayload) + '\n', 'utf8');
+  } catch (err) {
+    console.error('[PERPETUAL_READER] Failed to emit session_updated event:', err);
+  }
+}
 
+/**
+ * Resolve every waiter parked in waitForCliQuiet on this runtime.
+ * Called by the reader when a `result` closes the in-flight CLI turn, on
+ * reader exit, and by disposeRuntime.
+ */
+function resolveCliQuietWaiters(runtime) {
+  if (!runtime?.cliQuietWaiters?.length) return;
+  // Copy first: each resolve() removes itself from the array.
+  for (const waiter of [...runtime.cliQuietWaiters]) {
+    waiter.resolve();
+  }
+}
+
+/**
+ * Wait until the CLI has no message run in flight on this runtime — i.e. the
+ * last substantive message the perpetual reader saw has been closed by a
+ * `result` — or until the runtime closes.
+ *
+ * The cap is a protocol-anomaly backstop, not a tuning knob: every CLI message
+ * run (user-initiated or CLI-initiated) ends with exactly one `result`, so the
+ * wait normally ends when that result is read. If the cap ever fires, turn
+ * accounting is off — we log loudly and fall back to today's behavior rather
+ * than blocking the user's send forever. Abort remains responsive throughout:
+ * disposing the runtime resolves the wait immediately.
+ */
+export function waitForCliQuiet(runtime, capMs = 120_000) {
+  if (!runtime || runtime.closed || !runtime.cliTurnInFlight) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const waiter = {
+      timer: null,
+      resolve() {
+        if (waiter.timer) clearTimeout(waiter.timer);
+        const index = runtime.cliQuietWaiters.indexOf(waiter);
+        if (index >= 0) runtime.cliQuietWaiters.splice(index, 1);
+        resolve();
+      }
+    };
+    waiter.timer = setTimeout(() => {
+      console.warn('[LIFECYCLE] waitForCliQuiet cap (' + capMs + 'ms) hit — proceeding without the closing result; turn accounting may be off');
+      waiter.resolve();
+    }, capMs);
+    if (typeof waiter.timer?.unref === 'function') waiter.timer.unref();
+    runtime.cliQuietWaiters.push(waiter);
+  });
+}
+
+/**
+ * Wait until the perpetual reader has drained everything already in the SDK
+ * pipe and is parked on query.next() — i.e. no CLI turn is in flight AND the
+ * reader made no progress across a macrotask.
+ *
+ * Called by executeTurn BEFORE it opens its turnSink and enqueues the user
+ * message. At that point the user message has not been sent, so nothing the
+ * pipe holds can be a response to it: anything still buffered is prior-turn
+ * tail (a late summary, a background turn's assistant/result, #1305). Letting
+ * the reader consume it via the inter-turn path first keeps it out of this
+ * turn's sink — which routes by existence and would otherwise misattribute it,
+ * ending the turn on a foreign result and shifting every later answer back by
+ * one ("answer to the previous phrase").
+ *
+ * waitForCliQuiet only parks on a result and cannot see a not-yet-closed tail
+ * that arrives in the gap after the previous result; the progress-tick check
+ * closes that gap. Bounded by capMs so a chatty background task cannot starve
+ * turn start; abort resolves it immediately via the closed check.
+ */
+export async function waitForReaderQuiescent(runtime, capMs = 120_000) {
+  if (!runtime || runtime.closed) return;
+  const deadline = Date.now() + capMs;
+  let lastCount = -1;
+  while (!runtime.closed) {
+    // Park cheaply on the in-flight turn's closing result instead of spinning.
+    if (runtime.cliTurnInFlight) {
+      await waitForCliQuiet(runtime, Math.max(0, deadline - Date.now()));
+      if (runtime.closed) return;
+    }
+    const count = runtime.readerReadCount || 0;
+    // No progress across a macrotask and no turn in flight → pipe drained.
+    if (count === lastCount && !runtime.cliTurnInFlight) return;
+    lastCount = count;
+    if (Date.now() >= deadline) {
+      console.warn('[LIFECYCLE] waitForReaderQuiescent cap (' + capMs + 'ms) hit — opening sink with the pipe possibly non-empty');
+      return;
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+export function startPerpetualReader(runtime, callbacks) {
   // Start the perpetual reader loop; return the promise so callers (and tests)
   // can await its completion.
   return (async () => {
@@ -317,6 +421,11 @@ export function startPerpetualReader(runtime, callbacks) {
 
         const msg = next.value;
 
+        // Progress tick for waitForReaderQuiescent: a change means the reader
+        // pulled a message this round; a steady value means it is parked on
+        // query.next() with an empty pipe.
+        runtime.readerReadCount = (runtime.readerReadCount || 0) + 1;
+
         // Keep the runtime's idle timer fresh while it actively produces output.
         // cleanupStaleSessionRuntimes reaps runtimes idle past SESSION_RUNTIME_MAX_IDLE_MS
         // and only spares those with activeTurnCount > 0 — which is 0 between turns.
@@ -325,6 +434,24 @@ export function startPerpetualReader(runtime, callbacks) {
         // messages are also touched by executeTurn; touching here is idempotent and
         // additionally covers the inter-turn path executeTurn cannot see.
         touchRuntime(runtime);
+
+        // CLI turn accounting. Every CLI message run — user-initiated or
+        // CLI-initiated (e.g. a background-task completion notification,
+        // #1305) — ends with exactly one `result`, and the pipe preserves
+        // order. So "substantive output seen, result not yet" means a turn is
+        // still in flight, and executeTurn must not open a new sink yet:
+        // the sink routes by existence, not by message identity, so a foreign
+        // in-flight turn's output — and, worse, its closing result — would be
+        // attributed to the new turn ("answer to the previous phrase" bug).
+        // `system` and other control-ish messages deliberately do not arm the
+        // flag: they can arrive outside any turn (e.g. init on a prewarmed
+        // runtime) and never carry a closing result of their own.
+        if (msg?.type === 'result') {
+          runtime.cliTurnInFlight = false;
+          resolveCliQuietWaiters(runtime);
+        } else if (msg?.type === 'assistant' || msg?.type === 'user' || msg?.type === 'stream_event') {
+          runtime.cliTurnInFlight = true;
+        }
 
         // Dual-mode routing: check if we're in an active turn or inter-turn period
         if (runtime.turnSink) {
@@ -338,7 +465,7 @@ export function startPerpetualReader(runtime, callbacks) {
             // Validate sessionId: only emit events for registered runtimes
             if (runtime.sessionId) {
               console.log('[PERPETUAL_READER] Inter-turn result detected, emitting session_updated for sessionId=' + runtime.sessionId);
-              emitInterTurnEvent(runtime.sessionId);
+              emitSessionUpdated(runtime.sessionId);
             } else {
               // Anonymous runtime - silently consume
               console.log('[PERPETUAL_READER] Inter-turn result for anonymous runtime, consuming silently');
@@ -355,6 +482,9 @@ export function startPerpetualReader(runtime, callbacks) {
       }
     } finally {
       console.log('[PERPETUAL_READER] Exiting for sessionId=' + (runtime.sessionId || '(new)'));
+      // No more results will ever arrive — never leave a turn parked in
+      // waitForCliQuiet on a dead stream.
+      resolveCliQuietWaiters(runtime);
       // The reader only exits on a terminal condition (query error, stream end,
       // or runtime closed) — never after a normal turn, where it blocks on the
       // next query.next() instead. If the runtime is still live here, the SDK
