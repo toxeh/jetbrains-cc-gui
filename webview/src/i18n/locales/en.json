@@ -668,7 +668,7 @@
         "remarkPlaceholder": "Optional",
         "apiKey": "API Key",
         "apiKeyPlaceholder": "sk-ant-...",
-        "apiKeyHint": "Please enter your API Key",
+        "apiKeyHint": "Optional. For an ai-proxy gateway (/claude) any non-empty value works — the worker injects the real token server-side.",
         "apiUrl": "API Endpoint",
         "apiUrlPlaceholder": "https://api.anthropic.com",
         "apiUrlHint": "Enter a Claude-compatible service endpoint. Official direct mode should use https://api.anthropic.com.",

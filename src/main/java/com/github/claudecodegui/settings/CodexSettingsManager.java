@@ -148,7 +148,7 @@ public class CodexSettingsManager {
         // Check if provider has configToml (raw string format)
         if (provider.has("configToml") && provider.get("configToml").isJsonPrimitive()) {
             String configTomlContent = provider.get("configToml").getAsString();
-            writeConfigTomlRaw(configTomlContent);
+            mergePreservingSandboxWorkspaceWrite(configTomlContent);
         }
 
         // Check if provider has authJson (raw string format)
@@ -955,5 +955,62 @@ public class CodexSettingsManager {
             }
         }
         return result;
+    }
+
+    /**
+     * Write newContent to config.toml, but preserve the [sandbox_workspace_write] section
+     * from the existing file if newContent does not contain it.
+     * This prevents provider setting saves from erasing user-configured writable_roots.
+     */
+    private void mergePreservingSandboxWorkspaceWrite(String newContent) throws IOException {
+        if (newContent == null) {
+            newContent = "";
+        }
+        if (newContent.contains("[sandbox_workspace_write]")) {
+            writeConfigTomlRaw(newContent);
+            return;
+        }
+        String existingSection = extractTomlSection(readExistingConfigToml(), "sandbox_workspace_write");
+        if (existingSection == null || existingSection.isBlank()) {
+            writeConfigTomlRaw(newContent);
+            return;
+        }
+        String merged = newContent.stripTrailing() + "\n\n" + existingSection.stripLeading();
+        writeConfigTomlRaw(merged);
+        LOG.info("[CodexSettingsManager] Preserved [sandbox_workspace_write] section during config.toml update");
+    }
+
+    private String readExistingConfigToml() {
+        Path configPath = getConfigTomlPath();
+        if (!Files.exists(configPath)) {
+            return null;
+        }
+        try {
+            return Files.readString(configPath, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            LOG.debug("[CodexSettingsManager] Could not read existing config.toml: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract a named TOML section (including its header) from content,
+     * up to the next section header or end of file.
+     * Returns null if the section is not found.
+     */
+    private static String extractTomlSection(String content, String sectionName) {
+        if (content == null) {
+            return null;
+        }
+        String header = "[" + sectionName + "]";
+        int start = content.indexOf(header);
+        if (start == -1) {
+            return null;
+        }
+        int nextSection = content.indexOf("\n[", start + 1);
+        if (nextSection == -1) {
+            return content.substring(start);
+        }
+        return content.substring(start, nextSection + 1);
     }
 }

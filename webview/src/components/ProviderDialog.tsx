@@ -540,7 +540,6 @@ export default function ProviderDialog({
           <div className="form-group">
             <label htmlFor="apiKey">
               {t('settings.provider.dialog.apiKey')}
-              <span className="required">{t('settings.provider.dialog.required')}</span>
             </label>
             <div className="input-with-visibility">
               <input
