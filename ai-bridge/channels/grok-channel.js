@@ -4,6 +4,7 @@
  */
 
 import { sendMessage as grokSendMessage } from '../services/grok/message-service.js';
+import { getGrokReasoningSupportedModels } from '../services/grok/grok-utils.js';
 
 export async function handleGrokCommand(command, args, stdinData) {
   switch (command) {
@@ -58,11 +59,20 @@ export async function handleGrokCommand(command, args, stdinData) {
       }));
       break;
     }
+    case 'getReasoningSupportedModels': {
+      // Dynamic lookup from ~/.grok/models_cache.json
+      const supported = getGrokReasoningSupportedModels();
+      console.log(JSON.stringify({
+        success: true,
+        supportedModels: supported
+      }));
+      break;
+    }
     default:
       throw new Error(`Unknown Grok command: ${command}`);
   }
 }
 
 export function getGrokCommandList() {
-  return ['send', 'getContextUsage', 'getUsage'];
+  return ['send', 'getContextUsage', 'getUsage', 'getReasoningSupportedModels'];
 }

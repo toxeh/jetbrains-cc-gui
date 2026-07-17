@@ -11,6 +11,8 @@ import {
   hasTaskNotificationTag,
   isTaskNotificationOnlyMessage,
   isSyntheticToolMessageContent,
+  extractUserQueryContent,
+  formatSessionTitlePreview,
   hasNonHumanOrigin,
   shouldShowMessage,
   isCompactCommandMessage,
@@ -129,6 +131,13 @@ describe('getContentBlocks', () => {
 
     expect(result.map((block) => block.type)).toEqual(['tool_use', 'text']);
     expect((result[1] as any).text).toBe('命令已经执行完成。');
+  });
+});
+
+describe('extractUserQueryContent', () => {
+  it('unwraps user_query tags for session titles', () => {
+    expect(extractUserQueryContent('<user_query>\nja fix imports\n</user_query>')).toBe('ja fix imports');
+    expect(formatSessionTitlePreview('<user_query>javadoc module</user_query>', 15)).toBe('javadoc module');
   });
 });
 
@@ -744,6 +753,21 @@ describe('shouldShowMessage', () => {
       content: 'meta content',
       timestamp: '1',
       raw: { isMeta: true },
+    };
+    expect(shouldShowMessage(msg, mockGetMessageText, mockNormalizeBlocks, mockT)).toBe(false);
+  });
+
+  it('filters assistant Grok history rows that are only synthetic Tool summaries', () => {
+    const msg: ClaudeMessage = {
+      type: 'assistant',
+      content: 'Tool: run_terminal_command, read_file',
+      raw: {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Tool: run_terminal_command, read_file' }],
+        },
+      } as any,
     };
     expect(shouldShowMessage(msg, mockGetMessageText, mockNormalizeBlocks, mockT)).toBe(false);
   });

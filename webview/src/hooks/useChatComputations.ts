@@ -8,6 +8,7 @@ import type {
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
 import type { RewindableMessage } from '../components/RewindSelectDialog';
 import { formatTime } from '../utils/helpers';
+import { formatSessionTitlePreview } from '../utils/messageUtils';
 import { extractTodosFromToolUse, extractAccumulatedTasks } from '../utils/todoToolNormalization';
 import {
   finalizeSubagentsForSettledTurn,
@@ -190,12 +191,15 @@ export function useChatComputations({
   }, [mergedMessages, currentProvider, canRewindFromMessageIndex, getMessageText]);
 
   const sessionTitle = useMemo(() => {
-    if (customSessionTitle) return customSessionTitle;
+    if (customSessionTitle) {
+      const fromCustom = formatSessionTitlePreview(customSessionTitle, 40);
+      return fromCustom || customSessionTitle;
+    }
     if (messages.length === 0) return t('common.newSession');
     const firstUserMessage = messages.find((message) => message.type === 'user');
     if (!firstUserMessage) return t('common.newSession');
     const text = getMessageText(firstUserMessage);
-    return text.length > 15 ? `${text.substring(0, 15)}...` : text;
+    return formatSessionTitlePreview(text, 15) || t('common.newSession');
   }, [customSessionTitle, messages, t, getMessageText]);
 
   return {

@@ -3,11 +3,13 @@ import { useTranslation } from 'react-i18next';
 import {
   REASONING_LEVELS,
   EFFORT_SUPPORTED_CLAUDE_MODELS,
+  EFFORT_SUPPORTED_GROK_MODELS,
   MAX_EFFORT_CLAUDE_MODELS,
   XHIGH_EFFORT_CLAUDE_MODELS,
   type ReasoningEffort,
 } from '../types';
 import { useDropdownPosition } from '../../../hooks/useDropdownPosition';
+import { sendBridgeEvent } from '../../../utils/bridge';
 
 const RELATIVE_INLINE_BLOCK_STYLE: React.CSSProperties = { position: 'relative', display: 'inline-block' };
 const CHEVRON_ICON_STYLE: React.CSSProperties = { fontSize: '10px', marginLeft: '2px' };
@@ -33,10 +35,13 @@ interface ReasoningSelectProps {
  * ReasoningSelect - Reasoning Effort Selector
  * Controls the depth of reasoning for AI models.
  * Visibility and available levels depend on the selected model:
- * - Codex: low/medium/high/xhigh
- * - Claude Opus 4.8: low/medium/high/xhigh/max
- * - Claude Sonnet 5, Opus 4.6, and Sonnet 4.6: low/medium/high/max
- * - Claude Haiku 4.5 and legacy models: hidden (no adaptive thinking support)
+ * - Codex: low/medium/high/xhigh (all Codex models)
+ * - Claude Opus 4.8 / Fable 5: low/medium/high/xhigh/max
+ * - Claude Sonnet 5, Opus 4.6, Sonnet 4.6: low/medium/high/max
+ * - Claude Haiku 4.5 and legacy: hidden
+ * - Grok (grok-4.5, grok-build etc): only when the model reports supports_reasoning_effort;
+ *   currently hidden for Grok-4.5 / Grok Build because the local CLI models do not support it.
+ *   When supported: low/medium/high/xhigh (max aliases to xhigh per Grok docs).
  */
 export const ReasoningSelect = ({ value, onChange, disabled, selectedModel, currentProvider }: ReasoningSelectProps) => {
   const { t } = useTranslation();
@@ -49,11 +54,46 @@ export const ReasoningSelect = ({ value, onChange, disabled, selectedModel, curr
     preferredAlignment: 'right',
   });
 
-  // Determine visibility: for Claude, hide if model doesn't support adaptive thinking
-  const isVisible = currentProvider !== 'claude' || !selectedModel || EFFORT_SUPPORTED_CLAUDE_MODELS.has(selectedModel);
+  // Dynamic Grok reasoning support from models_cache (populated via bridge event)
+  const [grokSupportedSet, setGrokSupportedSet] = useState<Set<string>>(() => new Set(EFFORT_SUPPORTED_GROK_MODELS));
 
-  // Build the list of available levels for the current model
+  // Listen for dynamic updates from backend (models_cache) and trigger initial fetch for Grok.
+  useEffect(() => {
+    if (currentProvider !== 'grok') {
+      return;
+    }
+    const onUpdate = (ev: Event) => {
+      const detail = (ev as CustomEvent<string[]>).detail || [];
+      setGrokSupportedSet(new Set(detail.length ? detail : EFFORT_SUPPORTED_GROK_MODELS));
+    };
+    window.addEventListener('grok-reasoning-supports-updated', onUpdate as EventListener);
+
+    // Request fresh dynamic list from models cache
+    sendBridgeEvent('get_grok_reasoning_supports');
+
+    return () => {
+      window.removeEventListener('grok-reasoning-supports-updated', onUpdate as EventListener);
+    };
+  }, [currentProvider]);
+
+  // Determine visibility using shared helper so Grok (and future providers) only show
+  // when the concrete model actually supports Low/Medium/High/XHigh.
+  // For Claude we preserve the previous "show if no model yet" lenient behavior.
+  // Grok uses the runtime dynamic set populated from models_cache.json .
+  const isVisible =
+    currentProvider === 'codex' ||
+    (currentProvider === 'claude' && (!selectedModel || EFFORT_SUPPORTED_CLAUDE_MODELS.has(selectedModel))) ||
+    (currentProvider === 'grok' && !!selectedModel && grokSupportedSet.has(selectedModel));
+
+  // Build the list of available levels for the current model.
+  // Non-Claude providers (Codex) get all except 'max'.
+  // Grok (when a supporting model is selected) gets low/medium/high/xhigh.
   const availableLevels = REASONING_LEVELS.filter(level => {
+    if (currentProvider === 'grok') {
+      // Only low/medium/high/xhigh; max is not offered for Grok (aliases to xhigh).
+      if (level.id === 'max') return false;
+      return true;
+    }
     if (currentProvider !== 'claude') {
       return level.id !== 'max';
     }
