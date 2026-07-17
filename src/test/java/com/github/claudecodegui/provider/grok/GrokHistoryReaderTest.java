@@ -1,6 +1,7 @@
 package com.github.claudecodegui.provider.grok;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.Test;
@@ -64,6 +65,56 @@ public class GrokHistoryReaderTest {
                 "{\"type\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<system-reminder>only</system-reminder>\"}]}")
                 .getAsJsonObject();
         assertTrue(GrokHistoryReader.toFrontendEnvelope(row) == null);
+    }
+
+    @Test
+    public void assistantEnvelopeBuildsToolUseBlocksFromToolCalls() {
+        JsonObject row = JsonParser.parseString("""
+                {
+                  "type":"assistant",
+                  "content":"",
+                  "tool_calls":[
+                    {"id":"call-1","name":"read_file","arguments":"{\\"path\\":\\"a.txt\\"}"},
+                    {"id":"call-2","name":"grep","arguments":{"pattern":"foo"}}
+                  ]
+                }
+                """).getAsJsonObject();
+
+        JsonObject envelope = GrokHistoryReader.assistantEnvelope(row);
+        assertTrue(envelope != null);
+        JsonArray blocks = envelope.getAsJsonObject("message").getAsJsonArray("content");
+        assertEquals(2, blocks.size());
+        assertEquals("tool_use", blocks.get(0).getAsJsonObject().get("type").getAsString());
+        assertEquals("read_file", blocks.get(0).getAsJsonObject().get("name").getAsString());
+        assertEquals("a.txt", blocks.get(0).getAsJsonObject().getAsJsonObject("input").get("path").getAsString());
+    }
+
+    @Test
+    public void assistantEnvelopeSkipsLegacySyntheticToolTextOnlyRows() {
+        JsonObject row = JsonParser.parseString(
+                "{\"type\":\"assistant\",\"content\":\"Tool: run_terminal_command, read_file\"}")
+                .getAsJsonObject();
+        assertTrue(GrokHistoryReader.assistantEnvelope(row) == null);
+    }
+
+    @Test
+    public void stripUserQueryWrapperExtractsInnerPrompt() {
+        assertEquals("hello world",
+                GrokHistoryReader.stripUserQueryWrapper("<user_query>\nhello world\n</user_query>"));
+        assertEquals("javadoc fix",
+                GrokHistoryReader.formatSessionTitlePreview("<user_query>javadoc fix for module</user_query>", 15));
+    }
+
+    @Test
+    public void assistantEnvelopeKeepsRealAssistantText() {
+        JsonObject row = JsonParser.parseString(
+                "{\"type\":\"assistant\",\"content\":\"ToxeH — коммичу 2.1\"}")
+                .getAsJsonObject();
+        JsonObject envelope = GrokHistoryReader.assistantEnvelope(row);
+        assertTrue(envelope != null);
+        assertEquals("ToxeH — коммичу 2.1",
+                envelope.getAsJsonObject("message").getAsJsonArray("content").get(0).getAsJsonObject()
+                        .get("text").getAsString());
     }
 
     @Test

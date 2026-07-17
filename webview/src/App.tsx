@@ -335,6 +335,7 @@ const App = () => {
     longContextEnabled,
     openContextUsageDialog,
     closeContextUsageDialog,
+    onReasoningChange: handleReasoningChange,
   });
 
   // ── Message queue ──

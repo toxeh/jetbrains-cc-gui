@@ -3,7 +3,7 @@ import type { TFunction } from 'i18next';
 import { sendBridgeEvent, sendToJava } from '../utils/bridge';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
 import {
-  EFFORT_SUPPORTED_CLAUDE_MODELS,
+  modelSupportsReasoningEffort,
   apply1MContextSuffix,
 } from '../components/ChatInputBox/types';
 import type { Attachment, ChatInputBoxHandle, PermissionMode, ReasoningEffort, SelectedAgent, CodexFastMode } from '../components/ChatInputBox/types';
@@ -17,6 +17,7 @@ export const RESUME_COMMANDS = new Set(['/resume', '/continue']);
 export const PLAN_COMMANDS = new Set(['/plan']);
 export const CONTEXT_COMMANDS = new Set(['/context']);
 export const USAGE_COMMANDS = new Set(['/usage']);
+export const EFFORT_COMMANDS = new Set(['/effort', '/reasoning', '/thinking']);
 
 // Hoisted regex to avoid creating new RegExp on every call
 const WHITESPACE_REGEX = /\s+/;
@@ -29,10 +30,7 @@ function createContextUsageRequestId(): string {
 }
 
 function shouldSendReasoningEffort(provider: string, model: string): boolean {
-  if (provider !== 'claude') {
-    return true;
-  }
-  return EFFORT_SUPPORTED_CLAUDE_MODELS.has(model);
+  return modelSupportsReasoningEffort(provider, model);
 }
 
 export interface UseMessageSenderOptions {
@@ -44,6 +42,7 @@ export interface UseMessageSenderOptions {
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
   selectedAgent: SelectedAgent | null;
+  onReasoningChange?: (effort: ReasoningEffort) => void;
   sdkStatusLoaded: boolean;
   currentSdkInstalled: boolean;
   sentAttachmentsRef: RefObject<Map<string, Array<{ fileName: string; mediaType: string }>>>;
@@ -77,6 +76,7 @@ export function useMessageSender({
   reasoningEffort,
   codexFastMode,
   selectedAgent,
+  onReasoningChange,
   sdkStatusLoaded,
   currentSdkInstalled,
   sentAttachmentsRef,
@@ -134,8 +134,27 @@ export function useMessageSender({
       return true;
     }
 
+    // /effort <level> (and aliases) - immediate UI update for supported models (Grok / Codex / Claude)
+    if (EFFORT_COMMANDS.has(command)) {
+      const parts = text.split(/\s+/);
+      let level = (parts[1] || '').toLowerCase().trim();
+      if (level === 'x-high' || level === 'x_high') level = 'xhigh';
+      if (level === 'max') level = 'xhigh'; // Grok doc alias
+      const candidate = level as ReasoningEffort;
+      if (['low', 'medium', 'high', 'xhigh', 'max'].includes(candidate) && shouldSendReasoningEffort(currentProvider, selectedModel)) {
+        if (onReasoningChange) {
+          onReasoningChange(candidate);
+        }
+        addToast(t('chat.effortSet', { level: candidate, defaultValue: `Reasoning effort set to ${candidate}` }) as string, 'info');
+        return true;
+      } else {
+        addToast(t('chat.effortNotSupported', { defaultValue: 'Reasoning effort not supported (or not available for current Grok model)' }) as string, 'warning');
+        return true;
+      }
+    }
+
     return false;
-  }, [setCurrentView, handleModeSelect, currentProvider, addToast, t]);
+  }, [setCurrentView, handleModeSelect, currentProvider, addToast, t, onReasoningChange, selectedModel]);
 
   /**
    * Check for context usage command (/context)

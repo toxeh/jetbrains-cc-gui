@@ -14,6 +14,7 @@ describe('useMessageSender - /context command', () => {
     reasoningEffort: 'high',
     codexFastMode: 'normal',
     selectedAgent: null,
+    onReasoningChange: vi.fn(),
     sdkStatusLoaded: true,
     currentSdkInstalled: true,
     sentAttachmentsRef: { current: new Map() },

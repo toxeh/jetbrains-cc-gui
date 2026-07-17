@@ -1,3 +1,17 @@
+##### **2026年7月13日（v0.4.8）**
+
+English:
+
+✨ Features
+- **Grok reasoning effort**: refined Low/Medium/High/XHigh selector for `grok-4.5` and `Grok Build`. Now uses **dynamic lookup** from `~/.grok/models_cache.json` (`supports_reasoning_effort`). Only models that actually support it show the selector. Added full `/effort <level>` (aliases `/reasoning`, `/thinking`) command mapping — works like native Grok TUI, immediately updates UI and payload (by @Grok).
+- Dynamic Grok model capabilities: `get_grok_reasoning_supports` bridge command + runtime `grokSupportedSet` in ReasoningSelect for live cache updates.
+- Grok context window now correctly 500k for 4.5 / Build models.
+
+🐛 Fixes
+- Reasoning effort is no longer offered for Grok models that report `supports_reasoning_effort: false` in CLI cache.
+
+---
+
 ##### **2026年7月9日（v0.4.7）**
 
 English:

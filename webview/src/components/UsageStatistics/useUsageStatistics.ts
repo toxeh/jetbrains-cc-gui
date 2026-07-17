@@ -11,6 +11,27 @@ export type TabType = 'overview' | 'models' | 'sessions' | 'timeline';
 export type ScopeType = 'current' | 'all';
 export type DateRangeType = '7d' | '30d' | 'all';
 
+/** Ensure partial backend payloads never leave required arrays/objects undefined. */
+function normalizeProjectStatistics(data: Partial<ProjectStatistics> | null | undefined): ProjectStatistics | null {
+  if (!data || typeof data !== 'object') return null;
+  return {
+    ...data,
+    sessions: data.sessions ?? [],
+    totalSessions: data.totalSessions ?? 0,
+    totalUsage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 0,
+      ...(data.totalUsage ?? {}),
+    },
+    estimatedCost: data.estimatedCost ?? 0,
+    dailyUsage: data.dailyUsage ?? [],
+    byModel: data.byModel ?? [],
+  } as ProjectStatistics;
+}
+
 export function useUsageStatistics(currentProvider?: string) {
   const { t } = useTranslation();
   const [statistics, setStatistics] = useState<ProjectStatistics | null>(null);
@@ -69,19 +90,19 @@ export function useUsageStatistics(currentProvider?: string) {
             };
           }
           console.log('[Grok /usage]', grokData);
-          setStatistics({
+          setStatistics(normalizeProjectStatistics({
             sessions: [],
             totalSessions: 0,
-            totalUsage: { totalTokens: 0 },
+            totalUsage: { totalTokens: 0 } as ProjectStatistics['totalUsage'],
             estimatedCost: 0,
             dailyUsage: [],
             grokBilling: grokData,
-            provider: 'grok'
-          } as any);
+            provider: 'grok',
+          } as Partial<ProjectStatistics>));
           setLoading(false);
           return;
         }
-        setStatistics(data as ProjectStatistics);
+        setStatistics(normalizeProjectStatistics(data));
         setLoading(false);
       } catch (error) {
         console.error('Failed to parse usage statistics:', error);
@@ -92,8 +113,8 @@ export function useUsageStatistics(currentProvider?: string) {
     if (isFirstMount.current && window.__pendingUsageStatistics) {
       debugLog('[UsageStatisticsSection] Found pending usage statistics, applying...');
       try {
-        const data: ProjectStatistics = JSON.parse(window.__pendingUsageStatistics);
-        setStatistics(data);
+        const data = JSON.parse(window.__pendingUsageStatistics);
+        setStatistics(normalizeProjectStatistics(data));
         setLoading(false);
       } catch (error) {
         console.error('Failed to parse pending usage statistics:', error);
@@ -167,28 +188,30 @@ export function useUsageStatistics(currentProvider?: string) {
   };
 
   const getTokenPercentage = (value: number): number => {
-    if (!statistics || statistics.totalUsage.totalTokens === 0) return 0;
-    return (value / statistics.totalUsage.totalTokens) * 100;
+    const totalTokens = statistics?.totalUsage?.totalTokens ?? 0;
+    if (!statistics || totalTokens === 0) return 0;
+    return (value / totalTokens) * 100;
   };
 
   // ---- Filtering ----
 
   const filterByDateRange = <T extends { timestamp?: number; date?: string }>(
-    items: T[],
+    items: T[] | undefined | null,
     range: DateRangeType
   ): T[] => {
-    if (range === 'all') return items;
+    const list = items ?? [];
+    if (range === 'all') return list;
     const now = Date.now();
     const cutoff = range === '7d'
       ? now - 7 * 24 * 60 * 60 * 1000
       : now - 30 * 24 * 60 * 60 * 1000;
-    return items.filter(item => {
+    return list.filter(item => {
       const time = item.timestamp || new Date(item.date!).getTime();
       return time >= cutoff;
     });
   };
 
-  const filteredSessions = filterByDateRange(statistics?.sessions || [], dateRange).slice().sort((a, b) => {
+  const filteredSessions = filterByDateRange(statistics?.sessions, dateRange).slice().sort((a, b) => {
     if (sessionSortBy === 'cost') return b.cost - a.cost;
     return b.timestamp - a.timestamp;
   });
@@ -202,14 +225,15 @@ export function useUsageStatistics(currentProvider?: string) {
 
   const getFilteredDailyUsage = (): DailyUsage[] => {
     if (!statistics) return [];
-    if (dateRange === 'all') return statistics.dailyUsage;
+    const dailyUsage = statistics.dailyUsage ?? [];
+    if (dateRange === 'all') return dailyUsage;
 
     const now = Date.now();
     const cutoffDate = dateRange === '7d'
       ? now - 7 * 24 * 60 * 60 * 1000
       : now - 30 * 24 * 60 * 60 * 1000;
 
-    return statistics.dailyUsage.filter(day => new Date(day.date).getTime() >= cutoffDate);
+    return dailyUsage.filter(day => new Date(day.date).getTime() >= cutoffDate);
   };
 
   const filteredDailyUsage = getFilteredDailyUsage();
