@@ -367,6 +367,12 @@ interface Window {
   updateGrokAuthConfig?: (json: string) => void;
 
   /**
+   * Receives dynamic list of Grok model IDs that support reasoning effort (from models_cache.json).
+   * { success: boolean, supportedModels: string[], error?: string }
+   */
+  updateGrokReasoningSupports?: (json: string) => void;
+
+  /**
    * Update current Claude config
    */
   updateCurrentClaudeConfig?: (json: string) => void;

@@ -6,7 +6,6 @@ import {
   EFFORT_SUPPORTED_GROK_MODELS,
   MAX_EFFORT_CLAUDE_MODELS,
   XHIGH_EFFORT_CLAUDE_MODELS,
-  codexModelSupportsMaxEffort,
   type ReasoningEffort,
 } from '../types';
 import { useDropdownPosition } from '../../../hooks/useDropdownPosition';
@@ -36,11 +35,12 @@ interface ReasoningSelectProps {
  * ReasoningSelect - Reasoning Effort Selector
  * Controls the depth of reasoning for AI models.
  * Visibility and available levels depend on the selected model:
- * - Codex GPT-5.6: low/medium/high/xhigh/max; other Codex models: up to xhigh
- * - Claude Opus 5 and Opus 4.8: low/medium/high/xhigh/max
- * - Claude Sonnet 5, Sonnet 4.7, Opus 4.6, and Sonnet 4.6: low/medium/high/max
- * - Claude Haiku 4.5 and legacy models: hidden (no adaptive thinking support)
+ * - Codex: low/medium/high/xhigh (all Codex models)
+ * - Claude Opus 4.8 / Fable 5: low/medium/high/xhigh/max
+ * - Claude Sonnet 5, Opus 4.6, Sonnet 4.6: low/medium/high/max
+ * - Claude Haiku 4.5 and legacy: hidden
  * - Grok (grok-4.5, grok-build etc): only when the model reports supports_reasoning_effort;
+ *   currently hidden for Grok-4.5 / Grok Build because the local CLI models do not support it.
  *   When supported: low/medium/high/xhigh (max aliases to xhigh per Grok docs).
  */
 export const ReasoningSelect = ({ value, onChange, disabled, selectedModel, currentProvider }: ReasoningSelectProps) => {
@@ -90,11 +90,9 @@ export const ReasoningSelect = ({ value, onChange, disabled, selectedModel, curr
   // Grok (when a supporting model is selected) gets low/medium/high/xhigh.
   const availableLevels = REASONING_LEVELS.filter(level => {
     if (currentProvider === 'grok') {
+      // Only low/medium/high/xhigh; max is not offered for Grok (aliases to xhigh).
       if (level.id === 'max') return false;
       return true;
-    }
-    if (currentProvider === 'codex') {
-      return level.id !== 'max' || (selectedModel !== undefined && codexModelSupportsMaxEffort(selectedModel));
     }
     if (currentProvider !== 'claude') {
       return level.id !== 'max';

@@ -58,6 +58,19 @@ export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod 
   env.GROK_NO_AUTO_UPDATE = '1';
   env.CI = env.CI || '1';
 
+  // Sanitize IDE context variables.
+  // These can leak into Grok CLI and its run_terminal_command children (e.g. mvn),
+  // causing build tools to detect "running under IntelliJ" and attempt Apple Events
+  // to the IDE → macOS shows ""IntelliJ IDEA" would like to access data from other apps".
+  // Claude path does not leak them the same way.
+  delete env.IDEA_PROJECT_PATH;
+  delete env.PROJECT_PATH;
+  for (const k of Object.keys(env)) {
+    if (k.startsWith('IDEA_') || k.startsWith('JETBRAINS_')) {
+      delete env[k];
+    }
+  }
+
   return env;
 }
 
@@ -202,79 +215,30 @@ export function spawnGrok(args, env, cwd, onData) {
 }
 
 /**
- * Read OIDC access JWT from ~/.grok/auth.json "key" field (used for Bearer auth to cli-chat-proxy).
- * This allows direct calls to /billing and /auto-topup-rule without spawning the CLI.
+ * Load models that support reasoning effort from the Grok CLI models cache.
+ * This provides *dynamic* lookup instead of a static hardcoded set.
+ * Returns array of model IDs (e.g. "grok-build") where supports_reasoning_effort === true.
+ * Safe: returns [] if cache missing or unreadable.
  */
-export function getGrokChatProxyToken() {
+export function getGrokReasoningSupportedModels() {
   try {
-    const authPath = join(homedir(), '.grok', 'auth.json');
-    if (!existsSync(authPath)) return null;
-    const content = readFileSync(authPath, 'utf8');
-    const auth = JSON.parse(content);
-    if (auth && typeof auth.key === 'string' && auth.key.length > 0) {
-      return auth.key;
+    const cachePath = join(homedir(), '.grok', 'models_cache.json');
+    if (!existsSync(cachePath)) {
+      return [];
     }
-    // Common alternative structures
-    if (auth && auth.tokens && typeof auth.tokens.access_token === 'string') return auth.tokens.access_token;
-    if (auth && typeof auth.access_token === 'string') return auth.access_token;
-    if (auth && typeof auth.token === 'string') return auth.token;
-    return null;
+    const raw = readFileSync(cachePath, 'utf8');
+    const data = JSON.parse(raw);
+    const models = data && (data.models || data);
+    if (!models || typeof models !== 'object') {
+      return [];
+    }
+    return Object.keys(models).filter((id) => {
+      const entry = models[id];
+      const info = entry && (entry.info || entry);
+      return !!(info && info.supports_reasoning_effort === true);
+    });
   } catch (e) {
-    console.error('[Grok] Failed to read chat proxy token from ~/.grok/auth.json:', e.message);
-    return null;
+    console.error('[Grok] Failed to read models_cache for reasoning supports:', e?.message || e);
+    return [];
   }
-}
-
-/** Get the base URL for cli-chat-proxy billing calls (OAuth path). */
-export function getGrokChatProxyBaseUrl() {
-  return (process.env.GROK_CLI_CHAT_PROXY_BASE_URL || 'https://cli-chat-proxy.grok.com/v1').replace(/\/+$/, '');
-}
-
-/**
- * Direct fetch to Grok billing endpoint (the one behind `grok /usage`).
- * Returns the raw config object from ?format=credits .
- */
-export async function fetchGrokBilling(options = {}) {
-  const base = options.baseUrl || getGrokChatProxyBaseUrl();
-  const token = options.token || getGrokChatProxyToken();
-  if (!token) {
-    throw new Error('No Grok OAuth token found. Run `grok login` or ensure ~/.grok/auth.json has a "key".');
-  }
-  const url = `${base}/billing?format=credits`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Grok billing request failed (${res.status}): ${text}`);
-  }
-  return res.json();
-}
-
-/**
- * Fetch auto top-up rule (sometimes shown alongside billing).
- */
-export async function fetchGrokAutoTopupRule(options = {}) {
-  const base = options.baseUrl || getGrokChatProxyBaseUrl();
-  const token = options.token || getGrokChatProxyToken();
-  if (!token) {
-    throw new Error('No Grok OAuth token for auto-topup-rule');
-  }
-  const url = `${base}/auto-topup-rule`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-    },
-  });
-  if (!res.ok) {
-    // Some accounts may not have it; don't hard fail
-    return null;
-  }
-  return res.json();
 }

@@ -1,22 +1,14 @@
 import { type RefObject, useCallback, useMemo, useRef } from 'react';
 import type { TFunction } from 'i18next';
 import type {
-  ClaudeContentBlock,
   ClaudeMessage,
   ClaudeRawMessage,
-  SubagentHistoryResponse,
-  TodoItem,
   ToolResultBlock,
 } from '../types';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
 import type { RewindableMessage } from '../components/RewindSelectDialog';
 import { formatTime } from '../utils/helpers';
-import {
-  containsAnyTag,
-  hasTaskNotificationTag,
-  INTERNAL_METADATA_TAGS,
-  formatSessionTitlePreview,
-} from '../utils/messageUtils';
+import { formatSessionTitlePreview } from '../utils/messageUtils';
 import { extractTodosFromToolUse, extractAccumulatedTasks } from '../utils/todoToolNormalization';
 import {
   finalizeSubagentsForSettledTurn,
@@ -33,7 +25,6 @@ interface UseChatComputationsParams {
   t: TFunction;
   messages: ClaudeMessage[];
   mergedMessages: ClaudeMessage[];
-  subagentHistories: Record<string, SubagentHistoryResponse>;
   customSessionTitle: string | null;
   streamingActive: boolean;
   currentProvider: string;
@@ -41,53 +32,6 @@ interface UseChatComputationsParams {
   currentSessionIdRef: RefObject<string | null>;
   getMessageText: ReturnType<typeof useMessageProcessing>['getMessageText'];
   getContentBlocks: ReturnType<typeof useMessageProcessing>['getContentBlocks'];
-}
-
-/**
- * Whether a message slice contains any assistant tool_use block. Used to decide
- * whether the latest-turn scope is carrying active tool work worth focusing on,
- * or is empty of tools (a reload snapshot / text-only turn) and should widen to
- * the full conversation so StatusPanel lists do not disappear.
- */
-function sliceHasToolUse(
-  messages: ClaudeMessage[],
-  getContentBlocks: (message: ClaudeMessage) => ClaudeContentBlock[],
-): boolean {
-  for (const message of messages) {
-    if (message.type !== 'assistant') continue;
-    const blocks = getContentBlocks(message);
-    for (const block of blocks) {
-      if (block.type === 'tool_use') return true;
-    }
-  }
-  return false;
-}
-
-export function deriveTodosForTurn(
-  turnMessages: ClaudeMessage[],
-  getContentBlocks: (message: ClaudeMessage) => ClaudeContentBlock[],
-  streamingActive: boolean,
-): TodoItem[] {
-  let latestTodos: ReturnType<typeof extractTodosFromToolUse> = null;
-  for (let i = turnMessages.length - 1; i >= 0; i--) {
-    const msg = turnMessages[i];
-    if (msg.type !== 'assistant') continue;
-    const blocks = getContentBlocks(msg);
-    for (let j = blocks.length - 1; j >= 0; j--) {
-      const todos = extractTodosFromToolUse(blocks[j]);
-      if (todos && todos.length > 0) {
-        latestTodos = todos;
-        break;
-      }
-    }
-    if (latestTodos) break;
-  }
-
-  if (latestTodos) {
-    return finalizeTodosForSettledTurn(latestTodos, streamingActive);
-  }
-
-  return extractAccumulatedTasks(turnMessages, getContentBlocks);
 }
 
 /**
@@ -101,7 +45,6 @@ export function useChatComputations({
   t,
   messages,
   mergedMessages,
-  subagentHistories,
   customSessionTitle,
   streamingActive,
   currentProvider,
@@ -169,31 +112,11 @@ export function useChatComputations({
 
   const latestTurnMessages = useMemo(() => sliceLatestConversationTurn(messages), [messages]);
 
-  // While streaming, focus on the current turn's task progress; once settled
-  // (history replay or idle), widen the scope to the whole conversation -
-  // otherwise a multi-turn history session whose last turn has no task tool
-  // would lose its task and subagent lists entirely.
-  //
-  // Exception: if the latest-turn slice carries no tool_use at all (e.g. a
-  // same-session reload snapshot whose latest turn predates the active work, or
-  // a text-only turn), widen to the full conversation. Without this, the
-  // StatusPanel subagent/todo lists can briefly disappear when a deferred
-  // reload's message refresh lands at the frontend a moment before the
-  // stream-end signal flips streamingActive back to false. Widening only adds
-  // content (earlier turns' settled items) - it never drops the current turn's.
-  const statusScopeMessages = useMemo(() => {
-    if (!streamingActive) return messages;
-    return latestTurnMessages.length > 0 && sliceHasToolUse(latestTurnMessages, getContentBlocks)
-      ? latestTurnMessages
-      : messages;
-  }, [streamingActive, latestTurnMessages, messages, getContentBlocks]);
-
   const latestTurnSubagents = useSubagents({
-    messages: statusScopeMessages,
+    messages: latestTurnMessages,
     getContentBlocks,
     findToolResult,
     getToolResultRaw,
-    subagentHistories,
   });
 
   const subagents = useMemo(
@@ -202,8 +125,29 @@ export function useChatComputations({
   );
 
   const globalTodos = useMemo(() => {
-    return deriveTodosForTurn(statusScopeMessages, getContentBlocks, streamingActive);
-  }, [statusScopeMessages, getContentBlocks, streamingActive]);
+    let latestTodos: ReturnType<typeof extractTodosFromToolUse> = null;
+    for (let i = latestTurnMessages.length - 1; i >= 0; i--) {
+      const msg = latestTurnMessages[i];
+      if (msg.type !== 'assistant') continue;
+      const blocks = getContentBlocks(msg);
+      for (let j = blocks.length - 1; j >= 0; j--) {
+        const todos = extractTodosFromToolUse(blocks[j]);
+        if (todos && todos.length > 0) {
+          latestTodos = todos;
+          break;
+        }
+      }
+      if (latestTodos) break;
+    }
+    if (latestTodos) {
+      return finalizeTodosForSettledTurn(latestTodos, streamingActive);
+    }
+    const accumulated = extractAccumulatedTasks(messages, getContentBlocks);
+    if (accumulated.length > 0) {
+      return accumulated;
+    }
+    return [];
+  }, [latestTurnMessages, messages, getContentBlocks, streamingActive]);
 
   const canRewindFromMessageIndex = useCallback(
     (userMessageIndex: number) => {
@@ -252,19 +196,9 @@ export function useChatComputations({
       return fromCustom || customSessionTitle;
     }
     if (messages.length === 0) return t('common.newSession');
-    let text = '';
-    for (const message of messages) {
-      if (message.type !== 'user') continue;
-      const raw = message.raw;
-      if (raw && typeof raw === 'object' && raw.isMeta === true) continue;
-      const candidate = getMessageText(message).trim();
-      if (!candidate) continue;
-      if (candidate.startsWith('<')) continue;
-      if (containsAnyTag(candidate, INTERNAL_METADATA_TAGS) || hasTaskNotificationTag(candidate)) continue;
-      text = candidate;
-      break;
-    }
-    if (!text) return t('common.newSession');
+    const firstUserMessage = messages.find((message) => message.type === 'user');
+    if (!firstUserMessage) return t('common.newSession');
+    const text = getMessageText(firstUserMessage);
     return formatSessionTitlePreview(text, 15) || t('common.newSession');
   }, [customSessionTitle, messages, t, getMessageText]);
 
