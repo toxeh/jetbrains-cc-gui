@@ -202,6 +202,40 @@ export function createTaskNotificationBlock(text: string): ClaudeContentBlock | 
  *   Input: "<command-message>aimax:auto</command-message>\n<command-name>/aimax:auto</command-name>\n<command-args>hello there</command-args>"
  *   Output: "aimax:auto hello there"
  */
+/**
+ * Strip Grok / ACP-style {@code <user_query>} wrappers so titles and chat text show the real prompt.
+ */
+export function extractUserQueryContent(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const wrapped = text.match(/<user_query>([\s\S]*?)<\/user_query>/i);
+  if (wrapped?.[1] != null) {
+    return wrapped[1].trim();
+  }
+  const trimmed = text.trim();
+  if (trimmed.toLowerCase().startsWith('<user_query>')) {
+    let inner = trimmed.slice('<user_query>'.length).trim();
+    if (inner.toLowerCase().endsWith('</user_query>')) {
+      inner = inner.slice(0, -'</user_query>'.length).trim();
+    }
+    return inner;
+  }
+  return text;
+}
+
+/** First-line session label (chat header, tab preview). */
+export function formatSessionTitlePreview(text: string, maxLen = 15): string {
+  const cleaned = extractUserQueryContent(text).replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return '';
+  }
+  if (cleaned.length <= maxLen) {
+    return cleaned;
+  }
+  return `${cleaned.substring(0, maxLen)}...`;
+}
+
 export function extractCommandMessageContent(text: string): string {
   if (!text) return text;
 
@@ -246,13 +280,30 @@ export function isSyntheticToolMessageContent(
 
   return content
     .split(/\r?\n/)
-    .every((line) => {
-      const trimmed = line.trim();
-      // Match any non-whitespace tool name to cover MCP tools whose canonical
-      // names (e.g. mcp__server__tool, plugin:foo/bar) include characters
-      // outside [\w.-]. Empty lines are also treated as synthetic.
-      return !trimmed || /^Tool:\s+\S+$/.test(trimmed);
-    });
+    .every((line) => isSyntheticToolSummaryLine(line));
+}
+
+/** Lines like `Tool: read_file` or `Tool: read_file, grep, search_replace` (Grok history summaries). */
+export function isSyntheticToolSummaryLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return true;
+  }
+  if (!trimmed.startsWith('Tool:')) {
+    return false;
+  }
+  const names = trimmed.slice('Tool:'.length).trim();
+  if (!names) {
+    return true;
+  }
+  return names.split(/\s*,\s*/).every((part) => part.length > 0);
+}
+
+export function isSyntheticToolSummaryContent(content: string | undefined): boolean {
+  if (!content || !content.trim()) {
+    return false;
+  }
+  return content.split(/\r?\n/).every((line) => isSyntheticToolSummaryLine(line));
 }
 
 /**
@@ -321,9 +372,10 @@ export function normalizeBlocks(
           return;
         }
 
+        const visibleText = isUserMessage ? extractUserQueryContent(rawText) : rawText;
         blocks.push({
           type: 'text',
-          text: localizeMessage(rawText),
+          text: localizeMessage(visibleText),
         });
       } else if (type === 'thinking') {
         const thinking =
@@ -411,7 +463,8 @@ export function normalizeBlocks(
       if (!content.trim() || (isUserMessage && containsAnyTag(content, FILTERED_NORMALIZE_TAGS))) {
         return null;
       }
-      return [{ type: 'text' as const, text: localizeMessage(content) }];
+      const displayText = isUserMessage ? extractUserQueryContent(content) : content;
+      return [{ type: 'text' as const, text: localizeMessage(displayText) }];
     }
     if (Array.isArray(content)) {
       const result = buildBlocksFromArray(content);

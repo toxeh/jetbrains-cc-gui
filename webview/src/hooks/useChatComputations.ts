@@ -15,6 +15,7 @@ import {
   containsAnyTag,
   hasTaskNotificationTag,
   INTERNAL_METADATA_TAGS,
+  formatSessionTitlePreview,
 } from '../utils/messageUtils';
 import { extractTodosFromToolUse, extractAccumulatedTasks } from '../utils/todoToolNormalization';
 import {
@@ -246,11 +247,11 @@ export function useChatComputations({
   }, [mergedMessages, currentProvider, canRewindFromMessageIndex, getMessageText]);
 
   const sessionTitle = useMemo(() => {
-    if (customSessionTitle) return customSessionTitle;
+    if (customSessionTitle) {
+      const fromCustom = formatSessionTitlePreview(customSessionTitle, 40);
+      return fromCustom || customSessionTitle;
+    }
     if (messages.length === 0) return t('common.newSession');
-    // Pick the first REAL prompt: skip meta/caveat messages and anything whose
-    // text is raw internal XML (e.g. <local-command-caveat>) so the tag is
-    // never leaked as the session title.
     let text = '';
     for (const message of messages) {
       if (message.type !== 'user') continue;
@@ -264,7 +265,7 @@ export function useChatComputations({
       break;
     }
     if (!text) return t('common.newSession');
-    return text.length > 15 ? `${text.substring(0, 15)}...` : text;
+    return formatSessionTitlePreview(text, 15) || t('common.newSession');
   }, [customSessionTitle, messages, t, getMessageText]);
 
   return {

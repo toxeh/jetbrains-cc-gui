@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react';
 import type { TFunction } from 'i18next';
 import type { HistorySessionSummary } from '../../types';
-import { extractCommandMessageContent } from '../../utils/messageUtils';
+import { extractCommandMessageContent, extractUserQueryContent } from '../../utils/messageUtils';
 import { ProviderModelIcon } from '../shared/ProviderModelIcon';
 
 // Module-level style constants (avoid breaking memoization)
@@ -220,7 +220,9 @@ export const HistoryListItem = memo(({
               checked={isSelected}
               onChange={handleCheckboxChange}
               onClick={stopPropagationHandler}
-              aria-label={t('history.selectSessionWithTitle', { title: extractCommandMessageContent(session.title) })}
+              aria-label={t('history.selectSessionWithTitle', {
+                title: extractCommandMessageContent(extractUserQueryContent(session.title)),
+              })}
             />
           </label>
         )}
@@ -262,7 +264,10 @@ export const HistoryListItem = memo(({
               </button>
             </div>
           ) : (
-            highlightText(extractCommandMessageContent(session.title), searchQuery)
+            highlightText(
+              extractCommandMessageContent(extractUserQueryContent(session.title)),
+              searchQuery,
+            )
           )}
         </div>
         <div className="history-item-time">{formatTimeAgo(session.lastTimestamp, t)}</div>

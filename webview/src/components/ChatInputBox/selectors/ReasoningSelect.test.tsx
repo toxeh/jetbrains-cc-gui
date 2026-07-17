@@ -161,4 +161,28 @@ describe('ReasoningSelect', () => {
 
     expect(screen.queryByRole('button')).toBeNull();
   });
+
+  it('hides for Grok models (grok-4.5 / Grok Build) since they do not support reasoning effort', () => {
+    // grok-4.5
+    const { rerender } = render(
+      <ReasoningSelect
+        value="high"
+        onChange={vi.fn()}
+        currentProvider="grok"
+        selectedModel="grok-4.5"
+      />,
+    );
+    expect(screen.queryByRole('button')).toBeNull();
+
+    // grok-build
+    rerender(
+      <ReasoningSelect
+        value="medium"
+        onChange={vi.fn()}
+        currentProvider="grok"
+        selectedModel="grok-build"
+      />,
+    );
+    expect(screen.queryByRole('button')).toBeNull();
+  });
 });

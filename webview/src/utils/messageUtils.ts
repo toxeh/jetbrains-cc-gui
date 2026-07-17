@@ -5,11 +5,13 @@ import {
   containsAnyTag,
   createTaskNotificationBlock,
   extractCommandMessageContent,
+  extractUserQueryContent,
   formatCommandForDisplay,
   formatTaskNotificationForDisplay,
   hasCommandMessageTag,
   hasTaskNotificationTag,
   isSyntheticToolMessageContent,
+  isSyntheticToolSummaryContent,
   HIDDEN_OUTPUT_TAGS,
   INTERNAL_METADATA_TAGS,
   MESSAGE_TYPES,
@@ -40,7 +42,11 @@ export {
   formatTaskNotificationForDisplay,
   createTaskNotificationBlock,
   extractCommandMessageContent,
+  extractUserQueryContent,
+  formatSessionTitlePreview,
   isSyntheticToolMessageContent,
+  isSyntheticToolSummaryContent,
+  isSyntheticToolSummaryLine,
   normalizeBlocks,
 } from './contentBlockNormalize';
 export type { LocalizeMessageFn } from './contentBlockNormalize';
@@ -313,6 +319,10 @@ export function getMessageText(
   // Apply localization
   let result = localizeMessage(text);
 
+  if (message.type === 'user') {
+    result = extractUserQueryContent(result);
+  }
+
   // Format <command-message> content using formatCommandForDisplay
   // Only apply to user messages - assistant messages may contain these tags in code examples
   if (message.type === 'user' && hasCommandMessageTag(result)) {
@@ -434,6 +444,16 @@ export function shouldShowMessage(
     return false;
   }
   if (message.type === 'assistant') {
+    const rawBlocks = normalizeBlocksFn(message.raw);
+    const hasToolUse =
+      Array.isArray(rawBlocks) && rawBlocks.some((block) => block.type === 'tool_use');
+    if (
+      !hasToolUse &&
+      (isSyntheticToolSummaryContent(message.content) ||
+        isSyntheticToolSummaryContent(rawText))
+    ) {
+      return false;
+    }
     return true;
   }
   if (message.type === 'user' || message.type === 'error') {

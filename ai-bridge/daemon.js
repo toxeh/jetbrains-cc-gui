@@ -538,7 +538,7 @@ async function processRequest(request) {
 // Main Entry Point
 // =============================================================================
 
-(async () => {
+async function runDaemonMain() {
   // --- Error Handlers ---
   process.on('uncaughtException', (error) => {
     _originalStderrWrite(
@@ -770,4 +770,17 @@ async function processRequest(request) {
 
   // --- Keep alive ---
   // The process stays alive as long as stdin is open (rl keeps the event loop active)
-})();
+}
+
+runDaemonMain().catch((error) => {
+  const message = error?.message || String(error);
+  const stack = error?.stack || '';
+  _originalStderrWrite(`[daemon] Fatal startup error: ${stack || message}\n`, 'utf8');
+  try {
+    sendDaemonEvent('startup_failed', { error: message, stack });
+  } catch {
+    // ignore — process is already broken
+  }
+  isDaemonMode = false;
+  setTimeout(() => _originalExit(1), 150);
+});

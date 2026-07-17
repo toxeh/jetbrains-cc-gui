@@ -10,12 +10,16 @@ import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession;
 import com.github.claudecodegui.settings.CodemossSettingsService;
+import com.github.claudecodegui.util.PlatformUtils;
 
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * Grok SDK bridge (Claude-template architecture).
@@ -383,6 +387,83 @@ public class GrokSDKBridge extends BaseSDKBridge {
 
     public void resetPersistentRuntime(String runtimeSessionEpoch) {
         daemonCoordinator.resetPersistentRuntime(runtimeSessionEpoch);
+    }
+
+    public CompletableFuture<Void> setPermissionModeLive(String sessionId, String epoch, String mode) {
+        // Grok permission handled via ACP / daemon set; stub to satisfy handler calls.
+        LOG.info("[Grok] setPermissionModeLive (stub): " + mode);
+        return CompletableFuture.completedFuture(null);
+    }
+
+    // Stubs for methods called from handlers (Grok synthesizes or delegates to daemon ACP [USAGE] etc.)
+    public CompletableFuture<JsonObject> getContextUsage(String sessionId, String cwd, String model) {
+        JsonObject err = new JsonObject();
+        err.addProperty("success", false);
+        err.addProperty("error", "Grok context usage uses persistent ACP lastUsage + static limits (see GrokMessageHandler).");
+        return CompletableFuture.completedFuture(err);
+    }
+
+    public CompletableFuture<JsonObject> getUsage(String cwd) {
+        JsonObject err = new JsonObject();
+        err.addProperty("success", false);
+        err.addProperty("error", "Use /usage command or Grok billing integration.");
+        return CompletableFuture.completedFuture(err);
+    }
+
+    /**
+     * Dynamically loads Grok models that support reasoning effort (Low/Medium/High/XHigh)
+     * by reading ~/.grok/models_cache.json .
+     * Returns { success: true, supportedModels: ["grok-build", ...] }
+     */
+    public JsonObject getReasoningSupportedModels() {
+        JsonObject result = new JsonObject();
+        JsonArray supported = new JsonArray();
+        try {
+            Path cachePath = Paths.get(PlatformUtils.getHomeDirectory(), ".grok", "models_cache.json");
+            if (!Files.exists(cachePath)) {
+                result.addProperty("success", true);
+                result.add("supportedModels", supported);
+                return result;
+            }
+            String content = Files.readString(cachePath);
+            JsonObject data = gson.fromJson(content, JsonObject.class);
+            JsonObject models = null;
+            if (data != null) {
+                if (data.has("models") && data.get("models").isJsonObject()) {
+                    models = data.getAsJsonObject("models");
+                } else {
+                    // sometimes the top level may be the models map in older caches
+                    models = data;
+                }
+            }
+            if (models != null) {
+                for (Map.Entry<String, com.google.gson.JsonElement> entry : models.entrySet()) {
+                    String id = entry.getKey();
+                    com.google.gson.JsonElement val = entry.getValue();
+                    com.google.gson.JsonObject info = null;
+                    if (val != null && val.isJsonObject()) {
+                        com.google.gson.JsonObject obj = val.getAsJsonObject();
+                        if (obj.has("info") && obj.get("info").isJsonObject()) {
+                            info = obj.getAsJsonObject("info");
+                        } else {
+                            info = obj;
+                        }
+                    }
+                    if (info != null && info.has("supports_reasoning_effort")
+                            && info.get("supports_reasoning_effort").getAsBoolean()) {
+                        supported.add(id);
+                    }
+                }
+            }
+            result.addProperty("success", true);
+            result.add("supportedModels", supported);
+        } catch (Exception e) {
+            LOG.warn("[GrokSDKBridge] Failed to load reasoning supports from cache: " + e.getMessage());
+            result.addProperty("success", false);
+            result.addProperty("error", e.getMessage());
+            result.add("supportedModels", supported);
+        }
+        return result;
     }
 
     /**

@@ -625,6 +625,22 @@ if (typeof window !== 'undefined' && !window.updatePermissionDialogTimeout) {
   };
 }
 
+// Pre-register updateGrokReasoningSupports for dynamic reasoning effort support lookup from models_cache
+if (typeof window !== 'undefined' && !window.updateGrokReasoningSupports) {
+  debugLog('[Main] Pre-registering updateGrokReasoningSupports placeholder');
+  window.updateGrokReasoningSupports = (json: string) => {
+    debugLog('[Main] Received Grok reasoning supports');
+    try {
+      const data = JSON.parse(json || '{}');
+      const list = Array.isArray(data.supportedModels) ? data.supportedModels : [];
+      window.dispatchEvent(new CustomEvent('grok-reasoning-supports-updated', { detail: list }));
+    } catch (e) {
+      debugLog('[Main] Failed to parse Grok reasoning supports', String(e));
+    }
+  };
+}
+
+
 // Pre-register onModeReceived to avoid losing early backend push before React callbacks are ready.
 if (typeof window !== 'undefined' && !window.onModeReceived) {
   debugLog('[Main] Pre-registering onModeReceived placeholder');

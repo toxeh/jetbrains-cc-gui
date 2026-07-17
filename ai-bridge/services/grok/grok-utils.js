@@ -4,7 +4,7 @@
  */
 
 import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -57,6 +57,19 @@ export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod 
   // Force non-interactive / no update noise on ACP stdio
   env.GROK_NO_AUTO_UPDATE = '1';
   env.CI = env.CI || '1';
+
+  // Sanitize IDE context variables.
+  // These can leak into Grok CLI and its run_terminal_command children (e.g. mvn),
+  // causing build tools to detect "running under IntelliJ" and attempt Apple Events
+  // to the IDE → macOS shows ""IntelliJ IDEA" would like to access data from other apps".
+  // Claude path does not leak them the same way.
+  delete env.IDEA_PROJECT_PATH;
+  delete env.PROJECT_PATH;
+  for (const k of Object.keys(env)) {
+    if (k.startsWith('IDEA_') || k.startsWith('JETBRAINS_')) {
+      delete env[k];
+    }
+  }
 
   return env;
 }
@@ -199,4 +212,33 @@ export function spawnGrok(args, env, cwd, onData) {
       }
     });
   });
+}
+
+/**
+ * Load models that support reasoning effort from the Grok CLI models cache.
+ * This provides *dynamic* lookup instead of a static hardcoded set.
+ * Returns array of model IDs (e.g. "grok-build") where supports_reasoning_effort === true.
+ * Safe: returns [] if cache missing or unreadable.
+ */
+export function getGrokReasoningSupportedModels() {
+  try {
+    const cachePath = join(homedir(), '.grok', 'models_cache.json');
+    if (!existsSync(cachePath)) {
+      return [];
+    }
+    const raw = readFileSync(cachePath, 'utf8');
+    const data = JSON.parse(raw);
+    const models = data && (data.models || data);
+    if (!models || typeof models !== 'object') {
+      return [];
+    }
+    return Object.keys(models).filter((id) => {
+      const entry = models[id];
+      const info = entry && (entry.info || entry);
+      return !!(info && info.supports_reasoning_effort === true);
+    });
+  } catch (e) {
+    console.error('[Grok] Failed to read models_cache for reasoning supports:', e?.message || e);
+    return [];
+  }
 }
