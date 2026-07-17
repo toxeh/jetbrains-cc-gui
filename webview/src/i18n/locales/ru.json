@@ -600,7 +600,7 @@
         "remarkPlaceholder": "Необязательно",
         "apiKey": "API-ключ",
         "apiKeyPlaceholder": "sk-ant-...",
-        "apiKeyHint": "Введите ваш API-ключ",
+        "apiKeyHint": "Необязательно. Для ai-proxy gateway (/claude) подойдёт любое непустое значение — реальный токен инжектит воркер server-side.",
         "apiUrl": "API Endpoint",
         "apiUrlPlaceholder": "https://api.anthropic.com",
         "apiUrlHint": "Введите адрес сервиса, совместимого с Claude API",
