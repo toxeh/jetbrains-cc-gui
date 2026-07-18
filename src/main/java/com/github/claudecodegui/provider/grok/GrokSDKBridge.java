@@ -96,19 +96,23 @@ public class GrokSDKBridge extends BaseSDKBridge {
         if (effectiveBase == null || effectiveBase.isEmpty()) {
             return;
         }
+        // Official CLI: GROK_MODELS_BASE_URL drives inference + /models (api_key path).
+        // Without it the CLI ignores XAI_API_BASE_URL and never hits local-agent.
+        String modelsList = effectiveBase.replaceAll("/+$", "") + "/models";
+        env.put("GROK_MODELS_BASE_URL", effectiveBase);
+        env.put("GROK_MODELS_LIST_URL", modelsList);
+        env.put("GROK_BASE_URL", effectiveBase);
+
         if (CodemossSettingsService.GROK_AUTH_METHOD_API_KEY.equals(authMethod)) {
             env.put("XAI_API_BASE_URL", effectiveBase);
-            env.put("GROK_BASE_URL", effectiveBase);
-            // Do not point OAuth chat proxy at /xai/v1
-            env.remove("GROK_CLI_CHAT_PROXY_BASE_URL");
+            // Chat/agent also uses cli-chat-proxy base under hosts-block setups.
+            env.put("GROK_CLI_CHAT_PROXY_BASE_URL", effectiveBase);
         } else if (CodemossSettingsService.GROK_AUTH_METHOD_OAUTH.equals(authMethod)) {
             env.put("GROK_CLI_CHAT_PROXY_BASE_URL", effectiveBase);
-            env.put("GROK_BASE_URL", effectiveBase);
             // Avoid forcing API base onto xai path when using SuperGrok OAuth
             env.remove("XAI_API_BASE_URL");
         } else {
             // auto: set both so whichever auth path the CLI picks works
-            env.put("GROK_BASE_URL", effectiveBase);
             env.put("XAI_API_BASE_URL", effectiveBase);
             env.put("GROK_CLI_CHAT_PROXY_BASE_URL", effectiveBase);
         }
