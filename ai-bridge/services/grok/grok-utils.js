@@ -78,25 +78,38 @@ export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod 
  * Apply gateway base URL overrides per auth method.
  * Empty baseUrl leaves CLI defaults (direct xAI / cli-chat-proxy.grok.com).
  *
- * - api_key → XAI_API_BASE_URL + GROK_BASE_URL (…/xai/v1)
- * - oauth   → GROK_CLI_CHAT_PROXY_BASE_URL + GROK_BASE_URL (…/grok/v1)
- * - auto    → all three (host already resolved single effective base)
+ * Official Grok CLI env (see CLI README):
+ * - GROK_CLI_CHAT_PROXY_BASE_URL — SuperGrok / cli-chat-proxy chat path
+ * - GROK_MODELS_BASE_URL — inference + GET {base}/models (api_key / custom endpoint)
+ * - GROK_MODELS_LIST_URL — optional override for model list URL
+ *
+ * Plugin-only aliases (not documented by CLI; kept for older paths):
+ * - XAI_API_BASE_URL, GROK_BASE_URL
+ *
+ * Live fix (gateway + hosts block): without GROK_MODELS_BASE_URL the CLI never
+ * hits local-agent (:18790) in api_key mode — hang + silent agent log.
+ * Always set GROK_MODELS_* alongside chat-proxy when a base is configured.
  */
 export function applyGrokBaseUrlEnv(env, authMethod, baseUrl) {
   const url = String(baseUrl || '').trim();
   if (!url) return env;
   const method = normalizeAuthMethod(authMethod) || 'oauth';
+  const modelsList = url.replace(/\/+$/, '') + '/models';
+
+  // Always: inference/models path used by api_key and many agent turns.
+  env.GROK_MODELS_BASE_URL = url;
+  env.GROK_MODELS_LIST_URL = modelsList;
+  env.GROK_BASE_URL = url;
 
   if (method === 'api_key') {
     env.XAI_API_BASE_URL = url;
-    env.GROK_BASE_URL = url;
-    delete env.GROK_CLI_CHAT_PROXY_BASE_URL;
+    // Agent/chat still uses cli-chat-proxy base; without it, default
+    // cli-chat-proxy.grok.com is hosts-blocked → hang.
+    env.GROK_CLI_CHAT_PROXY_BASE_URL = url;
   } else if (method === 'oauth') {
     env.GROK_CLI_CHAT_PROXY_BASE_URL = url;
-    env.GROK_BASE_URL = url;
     delete env.XAI_API_BASE_URL;
   } else {
-    env.GROK_BASE_URL = url;
     env.XAI_API_BASE_URL = url;
     env.GROK_CLI_CHAT_PROXY_BASE_URL = url;
   }
