@@ -268,7 +268,7 @@ public class HistoryMessageInjectorTest {
                 }
         );
 
-        return new HandlerContext(project, null, null, null, new HandlerContext.JsCallback() {
+        return new HandlerContext(project, null, null, null, null, new HandlerContext.JsCallback() {
             @Override
             public void callJavaScript(String functionName, String... args) {
             }

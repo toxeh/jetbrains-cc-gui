@@ -115,7 +115,7 @@ public class OpenClassHandlerTest {
     }
 
     private static HandlerContext createContext(Project project, CapturingJsCallback jsCallback) {
-        return new HandlerContext(project, null, null, null, jsCallback);
+        return new HandlerContext(project, null, null, null, null, jsCallback);
     }
 
     private static Project createProject() {

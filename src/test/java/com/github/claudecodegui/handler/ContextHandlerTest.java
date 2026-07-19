@@ -108,6 +108,7 @@ public class ContextHandlerTest {
                 null,
                 null,
                 null,
+                null,
                 new HandlerContext.JsCallback() {
                     @Override
                     public void callJavaScript(String functionName, String... args) {
