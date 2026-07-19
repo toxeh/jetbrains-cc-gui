@@ -40,15 +40,11 @@ public class GrokSDKBridgeTest {
     }
 
     @Test
-    void testSetPermissionModeLiveReturnsSkippedWhenNoDaemon() {
+    void testSetPermissionModeLiveCompletesWhenNoDaemon() {
         GrokSDKBridge bridge = new GrokSDKBridge();
 
-        CompletableFuture<JsonObject> result = bridge.setPermissionModeLive("sess", "ep", "bypassPermissions");
-
-        JsonObject json = result.join();
-        assertTrue(json.has("success"));
-        // When no daemon, we expect applied=false or success with reason
-        assertFalse(json.has("applied") && json.get("applied").getAsBoolean());
+        // Stub returns completed Void; must not throw when no daemon is attached.
+        bridge.setPermissionModeLive("sess", "ep", "bypassPermissions").join();
     }
 
     @Test

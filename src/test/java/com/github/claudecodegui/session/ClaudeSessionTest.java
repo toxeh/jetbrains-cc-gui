@@ -15,7 +15,7 @@ public class ClaudeSessionTest {
 
     @Test
     public void setSessionInfoNotifiesSessionIdWhenRestoringHistorySession() {
-        ClaudeSession session = new ClaudeSession(null, null, null);
+        ClaudeSession session = new ClaudeSession(null, null, null, null);
         RecordingCallback callback = new RecordingCallback();
         session.setCallback(callback);
 

@@ -43,7 +43,7 @@ public class SubagentHistoryServiceProjectKeyTest {
                 }
         );
 
-        return new HandlerContext(project, null, null, null, new NoopJsCallback());
+        return new HandlerContext(project, null, null, null, null, new NoopJsCallback());
     }
 
     private static String invokeProjectKey(SubagentHistoryService service) throws Exception {

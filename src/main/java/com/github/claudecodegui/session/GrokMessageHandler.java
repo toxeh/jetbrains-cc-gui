@@ -8,6 +8,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 
+import java.util.List;
+
 /**
  * Grok message callback handler (Claude-template protocol surface).
  *
@@ -28,6 +30,13 @@ public class GrokMessageHandler implements MessageCallback {
 
     private final StringBuilder assistantContent = new StringBuilder();
     private Message currentAssistantMessage = null;
+    /**
+     * Assistant bubble owned by the active stream. After {@code stream_start} we only
+     * attach content to this message — never to a completed previous-turn assistant
+     * (which would silently glue two answers together when the send-time user message
+     * is missing from state).
+     */
+    private Message assistantMessageForCurrentStream = null;
 
     private boolean isStreaming = false;
     private boolean streamEndedThisTurn = false;
@@ -163,32 +172,16 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
 
-            if (currentAssistantMessage != null) {
-                // Merge raw when possible
-                if (hasToolUse && currentAssistantMessage.raw != null) {
-                    currentAssistantMessage.raw = mergeAssistantRaw(currentAssistantMessage.raw, msgJson);
-                } else {
-                    currentAssistantMessage.raw = parsed.raw;
-                }
-                if (parsed.content != null && !parsed.content.isEmpty()) {
-                    if (!isStreaming || parsed.content.length() >= assistantContent.length()) {
-                        currentAssistantMessage.content = parsed.content;
-                        assistantContent.setLength(0);
-                        assistantContent.append(parsed.content);
-                    }
-                }
+            Message target = resolveAssistantMessageForStream();
+            // Merge raw when possible
+            if (hasToolUse && target.raw != null) {
+                target.raw = mergeAssistantRaw(target.raw, msgJson);
             } else {
-                if (!isLastMessageAssistant()) {
-                    state.addMessage(parsed);
-                    currentAssistantMessage = parsed;
-                } else {
-                    currentAssistantMessage = state.getMessages().get(state.getMessages().size() - 1);
-                    currentAssistantMessage.raw = parsed.raw;
-                    if (parsed.content != null && !parsed.content.isEmpty()) {
-                        currentAssistantMessage.content = parsed.content;
-                    }
-                }
-                if (parsed.content != null) {
+                target.raw = parsed.raw;
+            }
+            if (parsed.content != null && !parsed.content.isEmpty()) {
+                if (!isStreaming || parsed.content.length() >= assistantContent.length()) {
+                    target.content = parsed.content;
                     assistantContent.setLength(0);
                     assistantContent.append(parsed.content);
                 }
@@ -214,10 +207,34 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
 
-            Message parsed = new Message(Message.Type.USER, extractText(msgJson));
-            parsed.raw = msgJson;
-            state.addMessage(parsed);
-            callbackHandler.notifyMessageUpdate(state.getMessages());
+            // Live user text is owned by SessionSendService at send-time. ACP/user echoes
+            // must NOT addMessage again — that re-appends the user's first message after
+            // the assistant and glues turns in the UI. Mirror Claude: patch existing only.
+            String userText = extractText(msgJson);
+            if (userText == null || userText.isEmpty()) {
+                LOG.debug("Grok user message has no text; skipping");
+                return;
+            }
+
+            List<Message> messages = state.getMessagesReference();
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                Message msg = messages.get(i);
+                if (msg.type != Message.Type.USER) {
+                    continue;
+                }
+                if (userText.equals(msg.content)) {
+                    if (msg.raw == null) {
+                        msg.raw = msgJson;
+                    }
+                    LOG.debug("Grok user message matched existing send-time bubble; not duplicating");
+                    callbackHandler.notifyMessageUpdate(state.getMessages());
+                    return;
+                }
+            }
+            // No matching send-time bubble (edge path). Still avoid inventing a trailing
+            // user after an assistant mid-conversation — the webview optimistic path
+            // owns display until SessionSendService persists the message.
+            LOG.debug("Grok user message with no matching state entry; not adding to avoid duplicate bubble");
         } catch (Exception e) {
             LOG.warn("Failed to parse Grok user message: " + e.getMessage());
         }
@@ -292,18 +309,8 @@ public class GrokMessageHandler implements MessageCallback {
         }
         assistantContent.append(content);
 
-        if (currentAssistantMessage == null) {
-            if (!isLastMessageAssistant()) {
-                currentAssistantMessage = new Message(Message.Type.ASSISTANT, assistantContent.toString());
-                state.addMessage(currentAssistantMessage);
-            } else {
-                // Reuse last if it was already added (defensive)
-                currentAssistantMessage = state.getMessages().get(state.getMessages().size() - 1);
-                currentAssistantMessage.content = assistantContent.toString();
-            }
-        } else {
-            currentAssistantMessage.content = assistantContent.toString();
-        }
+        Message target = resolveAssistantMessageForStream();
+        target.content = assistantContent.toString();
         callbackHandler.notifyContentDelta(content);
         if (!isStreaming) {
             callbackHandler.notifyMessageUpdate(state.getMessages());
@@ -513,27 +520,35 @@ public class GrokMessageHandler implements MessageCallback {
     }
 
     private void ensureAssistantRaw() {
-        if (currentAssistantMessage == null) {
-            if (!isLastMessageAssistant()) {
-                JsonObject raw = new JsonObject();
-                raw.addProperty("type", "assistant");
-                JsonObject messageObj = new JsonObject();
-                messageObj.add("content", new JsonArray());
-                raw.add("message", messageObj);
-                currentAssistantMessage = new Message(Message.Type.ASSISTANT, "", raw);
-                state.addMessage(currentAssistantMessage);
-            } else {
-                currentAssistantMessage = state.getMessages().get(state.getMessages().size() - 1);
-            }
-        }
-        if (currentAssistantMessage.raw == null) {
+        Message target = resolveAssistantMessageForStream();
+        if (target.raw == null) {
             JsonObject raw = new JsonObject();
             raw.addProperty("type", "assistant");
             JsonObject messageObj = new JsonObject();
             messageObj.add("content", new JsonArray());
             raw.add("message", messageObj);
-            currentAssistantMessage.raw = raw;
+            target.raw = raw;
         }
+    }
+
+    /**
+     * Resolve the assistant bubble for the current stream. Always creates a new
+     * message on the first call after {@code stream_start} instead of reusing a
+     * completed previous-turn assistant (see {@link #assistantMessageForCurrentStream}).
+     */
+    private Message resolveAssistantMessageForStream() {
+        if (currentAssistantMessage != null) {
+            return currentAssistantMessage;
+        }
+        if (assistantMessageForCurrentStream != null) {
+            currentAssistantMessage = assistantMessageForCurrentStream;
+            return currentAssistantMessage;
+        }
+        Message created = new Message(Message.Type.ASSISTANT, assistantContent.toString());
+        state.addMessage(created);
+        currentAssistantMessage = created;
+        assistantMessageForCurrentStream = created;
+        return created;
     }
 
     private void appendThinkingToRaw(String delta) {
@@ -571,16 +586,6 @@ public class GrokMessageHandler implements MessageCallback {
     private void resetStreamingAccumulator() {
         assistantContent.setLength(0);
         currentAssistantMessage = null;
-    }
-
-    /**
-     * Guard against duplicate assistant messages (observed in some first-turn / persistent flows).
-     */
-    private boolean isLastMessageAssistant() {
-        if (state.getMessages().isEmpty()) {
-            return false;
-        }
-        Message last = state.getMessages().get(state.getMessages().size() - 1);
-        return last != null && last.type == Message.Type.ASSISTANT;
+        assistantMessageForCurrentStream = null;
     }
 }
