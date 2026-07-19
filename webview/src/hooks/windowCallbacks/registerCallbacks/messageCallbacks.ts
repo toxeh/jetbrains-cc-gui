@@ -250,26 +250,43 @@ export function registerMessageCallbacks(
             // FIX: In Claude mode, update streamingMessageIndexRef so that
             // onContentDelta knows which assistant message to update.
             let lastAssistantIdx = findLastAssistantIndex(result);
-            // Verify the found assistant belongs to the current streaming turn
-            if (lastAssistantIdx >= 0 && streamingTurnIdRef.current > 0 &&
-                result[lastAssistantIdx].__turnId !== streamingTurnIdRef.current) {
-              // Scan for the correct turn ID match (from end, consistent with findLastAssistantIndex)
-              for (let i = result.length - 1; i >= 0; i--) {
-                if (result[i].type === 'assistant' && result[i].__turnId === streamingTurnIdRef.current) {
-                  lastAssistantIdx = i;
-                  break;
+            const currentTurnId = streamingTurnIdRef.current;
+            let stampAllowed = false;
+            if (lastAssistantIdx >= 0) {
+              if (currentTurnId > 0) {
+                // Prefer the exact current-turn assistant if present.
+                let exactIdx = -1;
+                for (let i = result.length - 1; i >= 0; i--) {
+                  if (result[i].type === 'assistant' && result[i].__turnId === currentTurnId) {
+                    exactIdx = i;
+                    break;
+                  }
                 }
+                if (exactIdx >= 0) {
+                  lastAssistantIdx = exactIdx;
+                  stampAllowed = true;
+                } else {
+                  // No exact match: only adopt the last assistant when it has no
+                  // turn id yet (fresh backend bubble). Never stamp a previous
+                  // turn's id with the new one — that streamed the next answer
+                  // into the previous bubble.
+                  const lastTurnId = result[lastAssistantIdx].__turnId;
+                  stampAllowed = lastTurnId === undefined;
+                }
+              } else {
+                stampAllowed = true;
               }
             }
-            if (lastAssistantIdx >= 0) {
+
+            if (lastAssistantIdx >= 0 && stampAllowed) {
               streamingMessageIndexRef.current = lastAssistantIdx;
 
-              // Always stamp __turnId so ensureStreamingAssistantPreserved can find it,
+              // Stamp __turnId so ensureStreamingAssistantPreserved can find it,
               // even before any content delta arrives (streamingContentRef may be empty).
-              if (result[lastAssistantIdx]?.__turnId !== streamingTurnIdRef.current) {
+              if (currentTurnId > 0 && result[lastAssistantIdx]?.__turnId !== currentTurnId) {
                 result[lastAssistantIdx] = {
                   ...result[lastAssistantIdx],
-                  __turnId: streamingTurnIdRef.current,
+                  __turnId: currentTurnId,
                 };
               }
 
@@ -290,6 +307,8 @@ export function registerMessageCallbacks(
                 }
               }
             }
+            // else: leave streamingMessageIndexRef alone; ensureStreamingAssistantInList
+            // will re-append the current-turn bubble if it was dropped from the snapshot.
 
             return finalizeMessageList(prev, result);
           }

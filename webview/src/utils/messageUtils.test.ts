@@ -185,7 +185,10 @@ describe('mergeConsecutiveAssistantMessages', () => {
     expect(result[0].__turnId).toBe(2);
   });
 
-  it('does not add __turnId when first message has none', () => {
+  it('does not merge pure-text assistants without __turnId (lost-user glue guard)', () => {
+    // Two full text answers adjacent usually mean the intervening user bubble was
+    // dropped. Merging them was the "previous answer + current answer became one
+    // bubble" bug. Keep them separate.
     const messages: ClaudeMessage[] = [
       makeMsg('assistant', 'part1', {
         raw: { content: [{ type: 'text', text: 'part1' }] } as any,
@@ -196,7 +199,9 @@ describe('mergeConsecutiveAssistantMessages', () => {
     ];
 
     const result = mergeConsecutiveAssistantMessages(messages, normalizeBlocks);
-    expect(result).toHaveLength(1);
+    expect(result).toHaveLength(2);
+    expect(result[0].content).toBe('part1');
+    expect(result[1].content).toBe('part2');
     expect(result[0].__turnId).toBeUndefined();
   });
 
@@ -264,10 +269,11 @@ describe('mergeConsecutiveAssistantMessages', () => {
     expect(result[1].__turnId).toBe(5);
   });
 
-  it('merges history messages without __turnId together', () => {
+  it('merges history tool_use fragment with following text answer without __turnId', () => {
+    // History still needs tool→answer collapse; pure text+text must stay separate.
     const messages: ClaudeMessage[] = [
-      makeMsg('assistant', 'part1', {
-        raw: { content: [{ type: 'text', text: 'part1' }] } as any,
+      makeMsg('assistant', '', {
+        raw: { content: [{ type: 'tool_use', id: 'tool-1', name: 'read_file' }] } as any,
       }),
       makeMsg('assistant', 'part2', {
         raw: { content: [{ type: 'text', text: 'part2' }] } as any,
@@ -276,7 +282,25 @@ describe('mergeConsecutiveAssistantMessages', () => {
 
     const result = mergeConsecutiveAssistantMessages(messages, normalizeBlocks);
     expect(result).toHaveLength(1);
-    expect(result[0].content).toBe('part1\npart2');
+    expect(result[0].content).toBe('part2');
+    const blocks = (result[0].raw as any)?.content ?? [];
+    expect(blocks.some((b: any) => b.type === 'tool_use')).toBe(true);
+    expect(blocks.some((b: any) => b.type === 'text' && b.text === 'part2')).toBe(true);
+  });
+
+  it('does not merge isStreaming assistant into a finalized neighbor', () => {
+    const messages: ClaudeMessage[] = [
+      makeMsg('assistant', 'done', {
+        raw: { content: [{ type: 'text', text: 'done' }] } as any,
+      }),
+      makeMsg('assistant', 'partial', {
+        isStreaming: true,
+        raw: { content: [{ type: 'text', text: 'partial' }] } as any,
+      }),
+    ];
+
+    const result = mergeConsecutiveAssistantMessages(messages, normalizeBlocks);
+    expect(result).toHaveLength(2);
   });
 
   it('merges tool-only assistant messages across user tool_result boundaries', () => {

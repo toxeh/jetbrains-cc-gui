@@ -650,6 +650,27 @@ export function mergeConsecutiveAssistantMessages(
       return false;
     }
 
+    // Two pure-text assistants adjacent with no turn ids are almost always two
+    // distinct turns whose intervening user bubble was lost mid-stream. Merging
+    // them glues the previous answer into the current one ("my previous reply
+    // and this one became one bubble"). Only merge history fragments when at
+    // least one side carries tool_use (or lacks text) so tool→answer history
+    // still collapses correctly.
+    if (
+      bothLackTurnId
+      && previousSummary.hasText
+      && nextSummary.hasText
+      && !previousSummary.hasToolUse
+      && !nextSummary.hasToolUse
+    ) {
+      return false;
+    }
+
+    // Never merge an actively streaming bubble into a finalized neighbor.
+    if (previous.isStreaming || next.isStreaming) {
+      return false;
+    }
+
     return true;
   };
 

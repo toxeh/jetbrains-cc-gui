@@ -594,6 +594,83 @@ describe('appendOptimisticMessageIfMissing', () => {
     expect(result[0]).toBe(assistantMsg);
     expect(result[1]).toBe(backendUserMsg);
   });
+
+  it('keeps optimistic user even when a streaming assistant is already after it (mid-stream drop)', () => {
+    // Regression: user sent a message, onStreamStart appended an assistant, then a
+    // lagging snapshot arrived without the new user. Optimistic is no longer last,
+    // but must still be preserved so the user's message does not vanish.
+    const optimistic = makeUserMsg('investigate the hang', {
+      isOptimistic: true,
+      timestamp: new Date().toISOString(),
+    });
+    const streamingAsst = makeAssistantMsg('partial answer', {
+      isStreaming: true,
+      __turnId: 2,
+    });
+    const prevAnswer = makeAssistantMsg('previous answer with PR links');
+
+    const prev = [prevAnswer, optimistic, streamingAsst];
+    // Snapshot only has the previous turn — missing both optimistic user and stream bubble.
+    const next = [prevAnswer];
+
+    const result = appendOptimisticMessageIfMissing(prev, next);
+    expect(result).toContain(optimistic);
+    expect(result.some((m) => m.type === 'user' && m.content === 'investigate the hang')).toBe(true);
+  });
+
+  it('inserts optimistic before a trailing streaming assistant in the snapshot', () => {
+    const optimistic = makeUserMsg('second question', {
+      isOptimistic: true,
+      timestamp: new Date().toISOString(),
+    });
+    const prevAnswer = makeAssistantMsg('first answer');
+    const streamBubble = makeAssistantMsg('', { isStreaming: true, __turnId: 3 });
+
+    const prev = [prevAnswer, optimistic, streamBubble];
+    // Snapshot has previous answer + empty stream bubble but not the user.
+    const next = [prevAnswer, streamBubble];
+
+    const result = appendOptimisticMessageIfMissing(prev, next);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe(prevAnswer);
+    expect(result[1]).toBe(optimistic);
+    expect(result[2]).toBe(streamBubble);
+  });
+
+  it('keeps second identical prompt when history already has the same text once', () => {
+    // Regression: user sends "ok" twice. Snapshot still only has the first "ok".
+    // Content-only matching used to drop the second optimistic against the first copy.
+    const firstOk = makeUserMsg('ok', { timestamp: '2026-07-01T00:00:00.000Z' });
+    const firstAnswer = makeAssistantMsg('sure');
+    const optimistic = makeUserMsg('ok', {
+      isOptimistic: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    const prev = [firstOk, firstAnswer, optimistic];
+    const next = [firstOk, firstAnswer]; // second "ok" not persisted yet
+
+    const result = appendOptimisticMessageIfMissing(prev, next);
+    expect(result.filter((m) => m.type === 'user' && m.content === 'ok')).toHaveLength(2);
+    expect(result[result.length - 1]).toBe(optimistic);
+  });
+
+  it('drops optimistic when snapshot already has one more same-text user than history', () => {
+    const firstOk = makeUserMsg('ok', { timestamp: '2026-07-01T00:00:00.000Z' });
+    const firstAnswer = makeAssistantMsg('sure');
+    const secondOk = makeUserMsg('ok', { timestamp: new Date().toISOString() });
+    const optimistic = makeUserMsg('ok', {
+      isOptimistic: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    const prev = [firstOk, firstAnswer, optimistic];
+    const next = [firstOk, firstAnswer, secondOk];
+
+    const result = appendOptimisticMessageIfMissing(prev, next);
+    expect(result).toHaveLength(3);
+    expect(result.filter((m) => m.isOptimistic)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

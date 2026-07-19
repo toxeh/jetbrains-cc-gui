@@ -79,8 +79,13 @@ export const preserveMessageIdentity = (
 };
 
 /**
- * If the previous list ended with an optimistic user message that has not yet
- * been matched by a backend message, keep it appended to nextList.
+ * If prevList still holds an unmatched optimistic user bubble, keep it in the
+ * next snapshot so the user's own message never vanishes mid-stream.
+ *
+ * IMPORTANT: the optimistic bubble is often NOT the list tail once
+ * onStreamStart appends a streaming assistant. We therefore search for the
+ * last optimistic user anywhere in prevList — not only `prevList.at(-1)`.
+ *
  * Also merges attachment blocks from the optimistic message into the matched
  * backend message so non-image file attachments remain visible.
  */
@@ -88,10 +93,19 @@ export const appendOptimisticMessageIfMissing = (
   prevList: ClaudeMessage[],
   nextList: ClaudeMessage[],
 ): ClaudeMessage[] => {
-  const lastPrev = prevList[prevList.length - 1];
-  if (!lastPrev?.isOptimistic) return nextList;
+  // Find the most recent optimistic user (may sit before a streaming assistant).
+  let optimisticMsg: ClaudeMessage | undefined;
+  let optimisticIdx = -1;
+  for (let i = prevList.length - 1; i >= 0; i -= 1) {
+    const candidate = prevList[i];
+    if (candidate?.isOptimistic && candidate.type === 'user') {
+      optimisticMsg = candidate;
+      optimisticIdx = i;
+      break;
+    }
+  }
+  if (!optimisticMsg) return nextList;
 
-  const optimisticMsg = lastPrev;
   const optimisticText = getUserMessageComparableContent(optimisticMsg);
   const optimisticTime = getMessageTimestampMs(optimisticMsg) ?? Number.NaN;
 
@@ -124,34 +138,37 @@ export const appendOptimisticMessageIfMissing = (
     }
   }
   if (matchedIndex < 0) {
-    // No timestamp-window match. Distinguish two cases by CONTENT, not by time:
+    // No timestamp-window match. Decide by how many confirmed (non-optimistic)
+    // same-text user messages exist before the optimistic vs in the snapshot.
     //
-    // 1. The snapshot already contains a user message with identical text — that
-    //    IS the backend copy of this optimistic message, whose timestamp merely
-    //    skewed outside the match window. Appending would duplicate it, so drop
-    //    the optimistic bubble and let the backend copy stand.
-    //
-    // 2. The snapshot contains no user message with this text — the just-sent
-    //    message simply hasn't been persisted into this snapshot yet (the COMMON
-    //    case: snapshots are generated before the send lands, and even more so
-    //    now that a turn can be deferred behind an in-flight CLI run or a
-    //    background session_updated reload arrives mid-send). Keep the optimistic
-    //    bubble so the user's own message never vanishes while it's being
-    //    answered. A later snapshot that includes the persisted message matches
-    //    above and replaces it.
-    //
-    // The previous "optimistic is newer than everything in the snapshot" time
-    // heuristic could not tell these apart and dropped case 2 as well — that was
-    // the "my message disappears but the agent answers it" bug.
+    // This handles both:
+    // - lagging snapshots that omit the just-sent message entirely (keep bubble)
+    // - repeated short prompts like "ok" / "да" where an older history copy must
+    //   NOT swallow the second send (only drop when next has MORE copies than
+    //   the confirmed history before the optimistic)
     if (optimisticText) {
-      const backendCopyExists = nextList.some(
-        (m) => m.type === 'user' && getUserMessageComparableContent(m) === optimisticText,
-      );
-      if (backendCopyExists) {
+      let prevConfirmedSameText = 0;
+      for (let i = 0; i < optimisticIdx; i += 1) {
+        const m = prevList[i];
+        if (m.type === 'user' && !m.isOptimistic
+            && getUserMessageComparableContent(m) === optimisticText) {
+          prevConfirmedSameText += 1;
+        }
+      }
+      let nextSameText = 0;
+      for (const m of nextList) {
+        if (m.type === 'user' && getUserMessageComparableContent(m) === optimisticText) {
+          nextSameText += 1;
+        }
+      }
+      if (nextSameText > prevConfirmedSameText) {
+        // Backend already has the new copy (or an extra one) — drop optimistic.
         return nextList;
       }
     }
-    return [...nextList, optimisticMsg];
+    // Keep optimistic so the user still sees what they sent. Prefer placing it
+    // before a trailing streaming assistant so order stays […, user, assistant].
+    return insertOptimisticBeforeTrailingStreamingAssistant(nextList, optimisticMsg);
   }
 
   // Backend message matched the optimistic message.  Preserve attachment blocks
@@ -183,6 +200,21 @@ export const appendOptimisticMessageIfMissing = (
   }
 
   return nextList;
+};
+
+/** Insert optimistic user before a trailing streaming assistant, else append. */
+const insertOptimisticBeforeTrailingStreamingAssistant = (
+  nextList: ClaudeMessage[],
+  optimisticMsg: ClaudeMessage,
+): ClaudeMessage[] => {
+  const last = nextList[nextList.length - 1];
+  if (
+    last?.type === 'assistant'
+    && (last.isStreaming === true || (typeof last.__turnId === 'number' && last.__turnId > 0))
+  ) {
+    return [...nextList.slice(0, -1), optimisticMsg, last];
+  }
+  return [...nextList, optimisticMsg];
 };
 
 /**
