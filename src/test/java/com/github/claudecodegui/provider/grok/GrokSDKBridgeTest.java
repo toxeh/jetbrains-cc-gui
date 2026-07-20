@@ -14,7 +14,7 @@ import static org.junit.Assert.*;
 public class GrokSDKBridgeTest {
 
     @Test
-    void testBuildStdinPayloadIncludesGrokFields() {
+    public void testBuildStdinPayloadIncludesGrokFields() {
         GrokSDKBridge bridge = new GrokSDKBridge();
         bridge.setApiKey("test-key");
 
@@ -40,15 +40,32 @@ public class GrokSDKBridgeTest {
     }
 
     @Test
-    void testSetPermissionModeLiveCompletesWhenNoDaemon() {
+    public void testSetPermissionModeLiveSkipsWhenNoDaemon() {
         GrokSDKBridge bridge = new GrokSDKBridge();
 
-        // Stub returns completed Void; must not throw when no daemon is attached.
-        bridge.setPermissionModeLive("sess", "ep", "bypassPermissions").join();
+        // No daemon running: best-effort skip (must not throw / hang).
+        JsonObject result = bridge.setPermissionModeLive("sess", "ep", "bypassPermissions").join();
+        assertNotNull(result);
+        assertTrue(result.get("success").getAsBoolean());
+        assertFalse(result.get("applied").getAsBoolean());
+        assertEquals("no-daemon", result.get("reason").getAsString());
     }
 
     @Test
-    void testResetAndPrewarmMethodsDoNotThrow() {
+    public void testSetPermissionModeLiveAcceptsDefaultAndBypassModesWithoutThrowing() {
+        GrokSDKBridge bridge = new GrokSDKBridge();
+
+        JsonObject defaultResult = bridge.setPermissionModeLive("s", "e", "default").join();
+        assertTrue(defaultResult.get("success").getAsBoolean());
+        assertEquals("no-daemon", defaultResult.get("reason").getAsString());
+
+        JsonObject autoResult = bridge.setPermissionModeLive("s", "e", "bypassPermissions").join();
+        assertTrue(autoResult.get("success").getAsBoolean());
+        assertFalse(autoResult.get("applied").getAsBoolean());
+    }
+
+    @Test
+    public void testResetAndPrewarmMethodsDoNotThrow() {
         GrokSDKBridge bridge = new GrokSDKBridge();
 
         // These should be no-op or safe when no daemon
@@ -62,7 +79,7 @@ public class GrokSDKBridgeTest {
     }
 
     @Test
-    void grokMessageHandlerUsageUsesRealContextLimit() {
+    public void grokMessageHandlerUsageUsesRealContextLimit() {
         // The fix ensures GrokMessageHandler calls getModelContextLimit instead of hardcoding 0.
         // We verify the model limit helper works for Grok names.
         int limit = com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok-2");
@@ -71,7 +88,7 @@ public class GrokSDKBridgeTest {
     }
 
     @Test
-    void testGrokModelsHaveExpectedContextLimits() {
+    public void testGrokModelsHaveExpectedContextLimits() {
         assertEquals(500000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok"));
         assertEquals(128000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok-2"));
         assertEquals(500000, com.github.claudecodegui.handler.provider.ModelProviderHandler.getModelContextLimit("grok-4.5"));
