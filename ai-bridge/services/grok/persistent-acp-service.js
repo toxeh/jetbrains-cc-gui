@@ -25,6 +25,7 @@ import {
   isAutoApproveMode,
   resolveAcpPermissionDecision,
   isPermissionRequestMethod,
+  TURN_PROMPT_TIMEOUT_MS,
 } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
 import {
@@ -335,7 +336,7 @@ async function executeTurn(runtime, params, normalizer) {
       }
     };
 
-    const result = await runtime.client.prompt(sid, promptBlocks, 300_000);
+    const result = await runtime.client.prompt(sid, promptBlocks, TURN_PROMPT_TIMEOUT_MS);
 
     // restore
     runtime.client.onNotification = originalOnNotif;
