@@ -122,17 +122,24 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
 }
 
 /**
- * Apply /always-approve style command for auto-approve modes (best effort).
+ * Sync Grok CLI always-approve flag with our permission mode.
+ * Default/plan/acceptEdits must turn always-approve OFF so ACP keeps
+ * emitting session/request_permission (otherwise tools run in silence).
+ * Bypass/auto modes turn it ON.
+ *
+ * This is the single entry point for mode→CLI sync (replaces the old
+ * applyAutoApproveIfNeeded helper that only ever turned always-approve on).
  */
-export async function applyAutoApproveIfNeeded(client, sessionId, permissionMode) {
-  if (!isAutoApproveMode(permissionMode)) return;
+export async function applyPermissionModeToSession(client, sessionId, permissionMode) {
+  if (!client || !sessionId) return;
+  const cmd = isAutoApproveMode(permissionMode) ? '/always-approve on' : '/always-approve off';
   try {
     await client.request('session/prompt', {
       sessionId,
-      prompt: [{ type: 'text', text: '/always-approve on' }],
+      prompt: [{ type: 'text', text: cmd }],
     });
   } catch {
-    // ignore
+    // Best-effort: older CLIs may not support the off command.
   }
 }
 
@@ -497,7 +504,9 @@ export async function runAcpTurn({
   env.CI = env.CI || '1';
 
   const workCwd = cwd && cwd.trim() ? cwd.trim() : process.cwd();
-  const autoApprove = isAutoApproveMode(permissionMode);
+  // Normalize empty → default so one-shot path asks the user (never silent auto).
+  const effectiveMode = String(permissionMode || '').trim() || 'default';
+  const autoApprove = isAutoApproveMode(effectiveMode);
 
   const terminalHost = new AcpTerminalHost({
     defaultCwd: workCwd,
@@ -508,7 +517,7 @@ export async function runAcpTurn({
     // Gate shell spawn when not in auto-approve modes (permission dialog).
     // Agent may also call session/request_permission first; double-gate is OK.
     authorizeCreate: async (info) => {
-      if (autoApprove) return true;
+      if (isAutoApproveMode(effectiveMode)) return true;
       try {
         return await requestPermissionFromJava('run_terminal_command', {
           command: info.commandLine || info.command,
@@ -535,8 +544,8 @@ export async function runAcpTurn({
 
       // Permission / tool approval style requests → Claude-like UI in default mode
       if (isPermissionRequestMethod(method)) {
-        const decision = await resolveAcpPermissionDecision(params, permissionMode, {
-          autoApprove,
+        const decision = await resolveAcpPermissionDecision(params, effectiveMode, {
+          autoApprove: isAutoApproveMode(effectiveMode),
         });
         emit('permission_decision', {
           method,
@@ -571,9 +580,9 @@ export async function runAcpTurn({
     emit('session_id', activeSessionId);
     emit('session_new', sessionInfo.sessionMeta || {});
 
-    if (autoApprove) {
-      await applyAutoApproveIfNeeded(client, activeSessionId, permissionMode);
-    }
+    // Always sync always-approve with mode (default must turn it OFF so the agent
+    // keeps requesting session/request_permission instead of silent auto-run).
+    await applyPermissionModeToSession(client, activeSessionId, effectiveMode);
 
     const promptBlocks = buildPromptBlocks({
       message,
@@ -744,7 +753,11 @@ function isExecutionLike(toolName, kind, input) {
  * Resolve ACP permission request using Claude permission dialog when needed.
  * @returns {{ allowed: boolean, optionId: string|null, response: object, toolName: string, source: string }}
  */
-export async function resolveAcpPermissionDecision(params, permissionMode, { autoApprove = false } = {}) {
+export async function resolveAcpPermissionDecision(
+  params,
+  permissionMode,
+  { autoApprove = false, requestPermission } = {},
+) {
   const info = extractPermissionToolInfo(params || {});
   const { toolName, input, kind, options } = info;
 
@@ -780,9 +793,12 @@ export async function resolveAcpPermissionDecision(params, permissionMode, { aut
   }
 
   // default / plan / acceptEdits+exec → ask user via Claude permission IPC + dialog
+  // Tests may inject requestPermission; production uses requestPermissionFromJava.
+  const askPermission =
+    typeof requestPermission === 'function' ? requestPermission : requestPermissionFromJava;
   let allowed = false;
   try {
-    allowed = await requestPermissionFromJava(toolName, input);
+    allowed = await askPermission(toolName, input);
   } catch (e) {
     // Fail closed on IPC errors
     allowed = false;

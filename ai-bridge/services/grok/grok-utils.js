@@ -78,25 +78,38 @@ export function buildGrokEnv(baseEnv = process.env, apiKey, baseUrl, authMethod 
  * Apply gateway base URL overrides per auth method.
  * Empty baseUrl leaves CLI defaults (direct xAI / cli-chat-proxy.grok.com).
  *
- * - api_key → XAI_API_BASE_URL + GROK_BASE_URL (…/xai/v1)
- * - oauth   → GROK_CLI_CHAT_PROXY_BASE_URL + GROK_BASE_URL (…/grok/v1)
- * - auto    → all three (host already resolved single effective base)
+ * Official Grok CLI env (see CLI README):
+ * - GROK_CLI_CHAT_PROXY_BASE_URL — SuperGrok / cli-chat-proxy chat path
+ * - GROK_MODELS_BASE_URL — inference + GET {base}/models (api_key / custom endpoint)
+ * - GROK_MODELS_LIST_URL — optional override for model list URL
+ *
+ * Plugin-only aliases (not documented by CLI; kept for older paths):
+ * - XAI_API_BASE_URL, GROK_BASE_URL
+ *
+ * Live fix (gateway + hosts block): without GROK_MODELS_BASE_URL the CLI never
+ * hits local-agent (:18790) in api_key mode — hang + silent agent log.
+ * Always set GROK_MODELS_* alongside chat-proxy when a base is configured.
  */
 export function applyGrokBaseUrlEnv(env, authMethod, baseUrl) {
   const url = String(baseUrl || '').trim();
   if (!url) return env;
   const method = normalizeAuthMethod(authMethod) || 'oauth';
+  const modelsList = url.replace(/\/+$/, '') + '/models';
+
+  // Always: inference/models path used by api_key and many agent turns.
+  env.GROK_MODELS_BASE_URL = url;
+  env.GROK_MODELS_LIST_URL = modelsList;
+  env.GROK_BASE_URL = url;
 
   if (method === 'api_key') {
     env.XAI_API_BASE_URL = url;
-    env.GROK_BASE_URL = url;
-    delete env.GROK_CLI_CHAT_PROXY_BASE_URL;
+    // Agent/chat still uses cli-chat-proxy base; without it, default
+    // cli-chat-proxy.grok.com is hosts-blocked → hang.
+    env.GROK_CLI_CHAT_PROXY_BASE_URL = url;
   } else if (method === 'oauth') {
     env.GROK_CLI_CHAT_PROXY_BASE_URL = url;
-    env.GROK_BASE_URL = url;
     delete env.XAI_API_BASE_URL;
   } else {
-    env.GROK_BASE_URL = url;
     env.XAI_API_BASE_URL = url;
     env.GROK_CLI_CHAT_PROXY_BASE_URL = url;
   }
@@ -166,6 +179,226 @@ export function buildErrorPayload(error) {
     success: false,
     error: error?.message || String(error),
     stack: error?.stack,
+  };
+}
+
+/**
+ * First finite number > 0 among keys (or 0).
+ * Prefer listing snake_case before camelCase so OpenAI-shaped payloads win when both exist.
+ * @param {Record<string, unknown>} obj
+ * @param {...string} keys
+ */
+function firstPositiveNumber(obj, ...keys) {
+  if (!obj || typeof obj !== 'object') return 0;
+  for (const key of keys) {
+    const n = Number(obj[key]);
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  }
+  return 0;
+}
+
+/**
+ * Canonical OpenAI-style snake_case usage for [USAGE] tags and Java consumers.
+ * ACP often emits camelCase (totalTokens/inputTokens); normalize so snake_case is primary
+ * and dual-read extractors remain a fallback for raw payloads.
+ *
+ * @param {unknown} usage
+ * @returns {Record<string, number>|null}
+ */
+export function normalizeUsageToSnakeCase(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  const src = /** @type {Record<string, unknown>} */ (usage);
+  // Nested { usage: {...} } from some ACP envelopes
+  if (
+    src.usage &&
+    typeof src.usage === 'object' &&
+    !Array.isArray(src.usage) &&
+    !firstPositiveNumber(src, 'total_tokens', 'totalTokens', 'input_tokens', 'inputTokens')
+  ) {
+    const nested = normalizeUsageToSnakeCase(src.usage);
+    if (nested) return nested;
+  }
+
+  const total = firstPositiveNumber(src, 'total_tokens', 'totalTokens');
+  const input = firstPositiveNumber(src, 'input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens');
+  const output = firstPositiveNumber(src, 'output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens');
+  // ACP turn_completed uses reasoningTokens; chat API uses completion_tokens_details.reasoning_tokens
+  const thought = firstPositiveNumber(
+    src,
+    'thought_tokens',
+    'thoughtTokens',
+    'reasoning_tokens',
+    'reasoningTokens',
+  );
+  const cachedWrite = firstPositiveNumber(src, 'cached_write_tokens', 'cachedWriteTokens');
+  const cachedRead = firstPositiveNumber(
+    src,
+    'cached_read_tokens',
+    'cachedReadTokens',
+    'cached_tokens',
+    'cachedTokens',
+  );
+
+  if (total <= 0 && input <= 0 && output <= 0 && thought <= 0 && cachedWrite <= 0 && cachedRead <= 0) {
+    return null;
+  }
+
+  /** @type {Record<string, number>} */
+  const out = {};
+  if (input > 0) out.input_tokens = input;
+  if (output > 0) out.output_tokens = output;
+  if (thought > 0) out.thought_tokens = thought;
+  if (cachedWrite > 0) out.cached_write_tokens = cachedWrite;
+  if (cachedRead > 0) out.cached_read_tokens = cachedRead;
+  out.total_tokens =
+    total > 0 ? total : input + output + thought + cachedWrite + cachedRead;
+  return out;
+}
+
+/**
+ * Pull a usage-like object from ACP notification/result envelopes.
+ * Real Grok CLI (0.2.x) does NOT emit sessionUpdate=usage_update. Instead:
+ * - session/prompt result._meta.usage / result._meta.totalTokens
+ * - method _x.ai/session_notification, update.sessionUpdate=turn_completed + update.usage
+ * - optional nested result.usage
+ *
+ * @param {unknown} methodOrPayload  notification method string, or a prompt result object
+ * @param {unknown} [params]         notification params when methodOrPayload is a method name
+ * @returns {Record<string, unknown>|null}
+ */
+export function extractUsageFromAcpEnvelope(methodOrPayload, params) {
+  // Notification form: (method, params)
+  if (typeof methodOrPayload === 'string') {
+    const method = methodOrPayload;
+    const p = params && typeof params === 'object' ? params : null;
+    if (!p) return null;
+
+    // Standard ACP session/update usage_update (rarely emitted by current CLI)
+    if (method === 'session/update') {
+      const update = p.update || p;
+      const kind = update?.sessionUpdate || update?.type || '';
+      if (kind === 'usage_update' || kind === 'usage') {
+        return update.usage || update;
+      }
+      if (kind === 'turn_completed' && update?.usage) {
+        return update.usage;
+      }
+      if (update?.usage) return update.usage;
+      return null;
+    }
+
+    // Vendor extension: _x.ai/session_notification { update: { sessionUpdate, usage } }
+    if (
+      method === '_x.ai/session_notification' ||
+      method === 'x.ai/session_notification' ||
+      method.endsWith('/session_notification')
+    ) {
+      const update = p.update || p;
+      if (update?.usage) return update.usage;
+      if (update?.sessionUpdate === 'turn_completed' && update) {
+        // usage may be sibling fields on update
+        if (update.totalTokens || update.inputTokens) return update;
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  // Prompt-result form: object
+  const result = methodOrPayload;
+  if (!result || typeof result !== 'object') return null;
+  if (result.usage && typeof result.usage === 'object') return result.usage;
+  const meta = result._meta || result.meta;
+  if (meta && typeof meta === 'object') {
+    if (meta.usage && typeof meta.usage === 'object') return meta.usage;
+    // Flatten meta totals when usage object missing
+    if (meta.totalTokens || meta.inputTokens || meta.total_tokens) return meta;
+  }
+  // Top-level totals on some envelopes
+  if (result.totalTokens || result.inputTokens || result.total_tokens) return result;
+  return null;
+}
+
+/**
+ * Extract aggregate used-token count from a Grok/ACP usage object.
+ * Mirrors Java {@code GrokContextUsageBuilder.extractUsedTokens}.
+ * Primary: snake_case. Fallback: Grok ACP camelCase (totalTokens, inputTokens, …).
+ */
+export function extractUsedTokens(usage) {
+  if (!usage || typeof usage !== 'object') return 0;
+  const normalized = normalizeUsageToSnakeCase(usage);
+  if (normalized) {
+    const total = Number(normalized.total_tokens);
+    if (Number.isFinite(total) && total > 0) return Math.floor(total);
+    let used = 0;
+    for (const key of ['input_tokens', 'output_tokens', 'thought_tokens', 'cached_write_tokens', 'cached_read_tokens']) {
+      const n = Number(normalized[key]);
+      if (Number.isFinite(n) && n > 0) used += n;
+    }
+    if (used > 0) return Math.max(0, Math.floor(used));
+  }
+  // Last-resort dual-read without normalize (empty / exotic shapes)
+  const total = firstPositiveNumber(usage, 'total_tokens', 'totalTokens');
+  if (total > 0) return total;
+  let used = 0;
+  used += firstPositiveNumber(usage, 'input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens');
+  used += firstPositiveNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens');
+  used += firstPositiveNumber(usage, 'thought_tokens', 'thoughtTokens');
+  used += firstPositiveNumber(usage, 'cached_write_tokens', 'cachedWriteTokens');
+  used += firstPositiveNumber(usage, 'cached_read_tokens', 'cachedReadTokens');
+  return Math.max(0, Math.floor(used));
+}
+
+/**
+ * Build a ContextUsageData-compatible payload for the /context dialog.
+ * Mirrors Java {@code GrokContextUsageBuilder}.
+ */
+export function buildGrokContextUsagePayload({
+  usedTokens = 0,
+  maxTokens = 200_000,
+  model = '',
+} = {}) {
+  let used = Math.max(0, Number(usedTokens) || 0);
+  const max = Math.max(1, Number(maxTokens) || 200_000);
+  if (used > max) used = max;
+  const free = Math.max(0, max - used);
+  const percentage = Math.round((1000 * used) / max) / 10;
+
+  return {
+    success: true,
+    totalTokens: used,
+    maxTokens: max,
+    rawMaxTokens: max,
+    percentage,
+    model: model || '',
+    isAutoCompactEnabled: false,
+    source: 'grok-synthesized',
+    categories: [
+      { name: 'Conversation', tokens: used, color: 'claude' },
+      { name: 'Free space', tokens: free, color: 'inactive' },
+    ],
+    gridRows: [[
+      {
+        color: 'claude',
+        isFilled: used > 0,
+        categoryName: 'Conversation',
+        tokens: used,
+        percentage,
+        squareFullness: used > 0 ? 1 : 0,
+      },
+      {
+        color: 'inactive',
+        isFilled: false,
+        categoryName: 'Free space',
+        tokens: free,
+        percentage: Math.round((1000 * free) / max) / 10,
+        squareFullness: free > 0 ? Math.min(1, free / max) : 0,
+      },
+    ]],
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
   };
 }
 

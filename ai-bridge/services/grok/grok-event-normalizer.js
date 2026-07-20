@@ -4,7 +4,12 @@
  * Emits lines on stdout that GrokSDKBridge / ClaudeStreamAdapter-style parsers understand:
  *   [MESSAGE_START] [STREAM_START] [CONTENT_DELTA] [MESSAGE] [TOOL_RESULT]
  *   [THINKING_DELTA] [USAGE] [SESSION_ID] [STREAM_END] [MESSAGE_END] [SEND_ERROR]
+ *
+ * [USAGE] payloads are always snake_case (total_tokens/input_tokens/…) so Java
+ * consumers can treat OpenAI shape as primary; camelCase ACP is normalized here.
  */
+
+import { extractUsageFromAcpEnvelope, normalizeUsageToSnakeCase } from './grok-utils.js';
 
 export class GrokEventNormalizer {
   constructor({ log = console.log, error = console.error } = {}) {
@@ -18,6 +23,8 @@ export class GrokEventNormalizer {
     this.messageEnded = false;
     this.sessionId = null;
     this.toolCalls = new Map(); // toolCallId -> { name, args, status }
+    /** Last normalized snake_case usage for this turn (attached to final [MESSAGE]). */
+    this.lastUsage = null;
   }
 
   begin() {
@@ -42,10 +49,6 @@ export class GrokEventNormalizer {
         this.#handlePromptResult(payload);
         break;
 
-      case 'usage':
-        this.#emitUsage(payload);
-        break;
-
       case 'server_request':
         // already handled by ACP client; optionally surface status
         if (payload?.method) {
@@ -68,14 +71,21 @@ export class GrokEventNormalizer {
       ? String(resultText)
       : this.assistantText;
 
-    // Final assistant message block for history (Claude-like)
+    // Final assistant message block for history (Claude-like).
+    // Attach lastUsage so Java message.usage survives even if a mid-turn [USAGE]
+    // was overwritten by a later MESSAGE without usage.
     const assistantMessage = {
       type: 'assistant',
       message: {
         role: 'assistant',
         content: this.#buildContentBlocks(text),
+        ...(this.lastUsage ? { usage: this.lastUsage } : {}),
       },
     };
+    // Ensure [USAGE] is emitted at least once before stream ends (prompt _meta path).
+    if (this.lastUsage) {
+      this.#emit(`[USAGE] ${JSON.stringify(this.lastUsage)}`);
+    }
     this.#emit(`[MESSAGE] ${JSON.stringify(assistantMessage)}`);
 
     this.#emitStreamEndOnce();
@@ -102,7 +112,23 @@ export class GrokEventNormalizer {
     this.log(JSON.stringify(payload));
   }
 
+  #emitUsage(raw) {
+    if (!raw) return;
+    const usage = normalizeUsageToSnakeCase(raw) || raw;
+    // Avoid empty {} spam
+    if (!usage || (typeof usage === 'object' && !Object.keys(usage).length)) return;
+    this.lastUsage = usage;
+    this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
+  }
+
   #handleNotification(method, params) {
+    // Grok CLI 0.2.x: usage arrives on _x.ai/session_notification (turn_completed),
+    // not on classic sessionUpdate=usage_update.
+    const fromEnvelope = extractUsageFromAcpEnvelope(method, params);
+    if (fromEnvelope) {
+      this.#emitUsage(fromEnvelope);
+    }
+
     if (method !== 'session/update') {
       return;
     }
@@ -136,8 +162,9 @@ export class GrokEventNormalizer {
         break;
       }
       case 'usage_update':
-      case 'usage': {
-        this.#emitUsage(update);
+      case 'usage':
+      case 'turn_completed': {
+        // usage already emitted via extractUsageFromAcpEnvelope above when present
         break;
       }
       case 'user_message_chunk':
@@ -225,50 +252,15 @@ export class GrokEventNormalizer {
   }
 
   #handlePromptResult(result) {
-    // session/prompt returns completion metadata; usage may be here
-    if (result?.usage) {
-      this.#emitUsage(result.usage);
+    // session/prompt result: usage is usually under result._meta.usage (Grok CLI 0.2.x),
+    // sometimes result.usage, sometimes flat _meta.totalTokens.
+    const raw = extractUsageFromAcpEnvelope(result);
+    if (raw) {
+      this.#emitUsage(raw);
     }
     if (result?.stopReason || result?.stop_reason) {
       // optional
     }
-  }
-
-  #emitUsage(raw) {
-    if (!raw) return;
-    const usage = this.#normalizeUsage(raw.usage || raw);
-    this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
-  }
-
-  #normalizeUsage(u) {
-    if (!u || typeof u !== 'object') return u || {};
-    const out = { ...u };
-    // Map common xAI / Grok / OpenAI / other variants to the keys Java GrokMessageHandler expects
-    // for context window (input/prompt size, not including output).
-    const num = (v) => (typeof v === 'number' ? v : (typeof v === 'string' ? parseInt(v, 10) : null));
-    // prompt / input
-    if (out.prompt_tokens == null) {
-      out.prompt_tokens = num(out.promptTokenCount) ?? num(out.prompt_tokens) ?? num(out.input_tokens) ?? num(out.inputTokens) ?? num(out.input);
-    }
-    if (out.input_tokens == null && out.prompt_tokens != null) {
-      out.input_tokens = out.prompt_tokens;
-    }
-    // completion / output (not used for context bar but normalize for completeness)
-    if (out.completion_tokens == null) {
-      out.completion_tokens = num(out.completion_tokens) ?? num(out.completionTokenCount) ?? num(out.output_tokens) ?? num(out.outputTokens) ?? num(out.output);
-    }
-    if (out.output_tokens == null && out.completion_tokens != null) {
-      out.output_tokens = out.completion_tokens;
-    }
-    // total
-    if (out.total_tokens == null) {
-      out.total_tokens = num(out.total_tokens) ?? num(out.totalTokenCount) ?? num(out.totalTokens);
-    }
-    // If we have prompt+completion but no total, synthesize (for lastUsage consumers)
-    if (out.total_tokens == null && out.prompt_tokens != null && out.completion_tokens != null) {
-      out.total_tokens = out.prompt_tokens + out.completion_tokens;
-    }
-    return out;
   }
 
   #buildContentBlocks(text) {
