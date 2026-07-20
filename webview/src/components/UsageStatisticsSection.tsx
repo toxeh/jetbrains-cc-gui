@@ -11,12 +11,14 @@ const UsageStatisticsSection = ({ currentProvider }: { currentProvider?: string 
     statistics, loading, activeTab, projectScope, dateRange,
     sessionPage, sessionSortBy, tooltip, sessionsPerPage,
     filteredSessions, paginatedSessions, totalPages, filteredDailyUsage,
-    grokBilling,
+    grokBilling, activityNote, billingUnavailable, tokensFromLedger,
     setActiveTab, setDateRange, setSessionPage, setSessionSortBy, setTooltip,
     handleRefresh, handleScopeChange,
     formatNumber, formatCost, formatDate, formatChineseDate,
     formatRelativeTime, renderTrend, getTokenPercentage,
   } = useUsageStatistics(currentProvider);
+
+  const isGrok = currentProvider === 'grok';
 
   if (loading && !statistics) {
     return (
@@ -44,31 +46,92 @@ const UsageStatisticsSection = ({ currentProvider }: { currentProvider?: string 
     );
   }
 
+  const hasBilling =
+    isGrok &&
+    grokBilling &&
+    typeof grokBilling === 'object' &&
+    !(grokBilling as { unavailable?: boolean }).unavailable;
+
   return (
     <div className="usage-statistics-section">
-      {/* Estimate notice */}
-      <div className="notice-box notice-box--warning">
-        <span className="codicon codicon-warning" />
-        {t('usage.estimateNotice')}
-      </div>
+      {/* Honest notices */}
+      {isGrok ? (
+        <div className="notice-box notice-box--info">
+          <span className="codicon codicon-info" />
+          {activityNote ||
+            t('usage.grokActivityNotice', {
+              defaultValue:
+                'Grok stats are local session activity. Token totals only for turns through this plugin. Not an xAI invoice.',
+            })}
+        </div>
+      ) : (
+        <div className="notice-box notice-box--warning">
+          <span className="codicon codicon-warning" />
+          {t('usage.estimateNotice')}
+        </div>
+      )}
 
-      {/* Grok specific billing from /usage */}
-      {currentProvider === 'grok' && grokBilling && (
-        <div className="grok-billing-panel">
-          <h3>Grok Billing</h3>
-          {grokBilling.creditUsagePercent !== undefined && (
-            <div>Weekly limit: {grokBilling.creditUsagePercent}%</div>
-          )}
-          {grokBilling.nextReset && <div>Next reset: {grokBilling.nextReset}</div>}
-          {grokBilling.credits !== undefined && <div>Credits: ${grokBilling.credits}</div>}
-          {grokBilling.prepaidBalance?.val !== undefined && <div>Prepaid balance: ${grokBilling.prepaidBalance.val}</div>}
-          {grokBilling.autoTopup !== undefined && <div>Auto topup: {grokBilling.autoTopup ? 'enabled' : 'disabled'}</div>}
-          {grokBilling.productUsage && grokBilling.productUsage.length > 0 && (
-            <div>Products: {grokBilling.productUsage.map((p: any) => `${p.product} ${p.usagePercent}%`).join(', ')}</div>
-          )}
-          {grokBilling.raw && (
-            <pre style={{ fontSize: '12px', whiteSpace: 'pre-wrap', marginTop: '8px' }}>{grokBilling.raw}</pre>
-          )}
+      {isGrok && billingUnavailable && (
+        <div className="notice-box notice-box--warning" style={{ marginTop: 8 }}>
+          <span className="codicon codicon-warning" />
+          {t('usage.grokBillingUnavailable', {
+            defaultValue: 'Live billing unavailable',
+          })}
+          {': '}
+          {billingUnavailable}
+        </div>
+      )}
+
+      {isGrok && statistics.totalSessions === 0 && (
+        <div className="empty-container" style={{ marginBottom: 12 }}>
+          <span className="codicon codicon-inbox" />
+          <p>
+            {t('usage.grokNoSessions', {
+              defaultValue:
+                'No Grok sessions for this scope yet. Chat with Grok in the plugin or CLI, then refresh.',
+            })}
+          </p>
+        </div>
+      )}
+
+      {/* Optional live billing panel (does not replace activity tabs) */}
+      {hasBilling && (
+        <div className="grok-billing-panel" style={{ marginBottom: 12 }}>
+          <h3>
+            {t('usage.grokBilling', { defaultValue: 'Grok live billing' })}
+          </h3>
+          <div className="billing-cards">
+            {(grokBilling as any).creditUsagePercent !== undefined && (
+              <div className="billing-card">
+                <div className="label">Weekly limit</div>
+                <div className="value">{(grokBilling as any).creditUsagePercent}%</div>
+              </div>
+            )}
+            {(grokBilling as any).credits !== undefined && (
+              <div className="billing-card">
+                <div className="label">Credits</div>
+                <div className="value">${(grokBilling as any).credits}</div>
+              </div>
+            )}
+            {(grokBilling as any).prepaidBalance?.val !== undefined && (
+              <div className="billing-card">
+                <div className="label">Prepaid</div>
+                <div className="value">${(grokBilling as any).prepaidBalance.val}</div>
+              </div>
+            )}
+            {(grokBilling as any).nextReset && (
+              <div className="billing-card">
+                <div className="label">Next reset</div>
+                <div className="value">{(grokBilling as any).nextReset}</div>
+              </div>
+            )}
+            {(grokBilling as any).autoTopup !== undefined && (
+              <div className="billing-card">
+                <div className="label">Auto topup</div>
+                <div className="value">{(grokBilling as any).autoTopup ? 'enabled' : 'disabled'}</div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -119,121 +182,82 @@ const UsageStatisticsSection = ({ currentProvider }: { currentProvider?: string 
         </button>
       </div>
 
-      {/* Tab navigation - hide for Grok billing which has its own panel */}
-      {!(currentProvider === 'grok' && grokBilling) && (
-        <div className="usage-tabs">
-          <button className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-            <span className="codicon codicon-dashboard" />
-            {t('usage.overview')}
-          </button>
-          <button className={`tab-btn ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>
-            <span className="codicon codicon-symbol-class" />
-            {t('usage.models')}
-          </button>
-          <button className={`tab-btn ${activeTab === 'sessions' ? 'active' : ''}`} onClick={() => setActiveTab('sessions')}>
-            <span className="codicon codicon-list-unordered" />
-            {t('usage.sessions')}
-          </button>
-          <button className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} onClick={() => setActiveTab('timeline')}>
-            <span className="codicon codicon-graph-line" />
-            {t('usage.timeline')}
-          </button>
+      {isGrok && statistics.totalSessions > 0 && !tokensFromLedger && (
+        <div className="notice-box notice-box--info" style={{ marginBottom: 8 }}>
+          <span className="codicon codicon-info" />
+          {t('usage.grokTokensPending', {
+            defaultValue:
+              'Session list is ready; token totals fill in after new Grok turns run through this plugin.',
+          })}
         </div>
       )}
 
-      {/* Tab content or Grok billing */}
+      {/* Always show activity tabs (including Grok) */}
+      <div className="usage-tabs">
+        <button className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+          <span className="codicon codicon-dashboard" />
+          {t('usage.overview')}
+        </button>
+        <button className={`tab-btn ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>
+          <span className="codicon codicon-symbol-class" />
+          {t('usage.models')}
+        </button>
+        <button className={`tab-btn ${activeTab === 'sessions' ? 'active' : ''}`} onClick={() => setActiveTab('sessions')}>
+          <span className="codicon codicon-list-unordered" />
+          {t('usage.sessions')}
+        </button>
+        <button className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`} onClick={() => setActiveTab('timeline')}>
+          <span className="codicon codicon-graph-line" />
+          {t('usage.timeline')}
+        </button>
+      </div>
+
       <div className="usage-content">
-        {currentProvider === 'grok' && grokBilling ? (
-          <div className="grok-billing-content">
-            <div className="billing-cards">
-              {grokBilling.creditUsagePercent !== undefined && (
-                <div className="billing-card">
-                  <div className="label">Weekly limit</div>
-                  <div className="value">{grokBilling.creditUsagePercent}%</div>
-                </div>
-              )}
-              {grokBilling.credits !== undefined && (
-                <div className="billing-card">
-                  <div className="label">Credits</div>
-                  <div className="value">${grokBilling.credits}</div>
-                </div>
-              )}
-              {grokBilling.prepaidBalance?.val !== undefined && (
-                <div className="billing-card">
-                  <div className="label">Prepaid</div>
-                  <div className="value">${grokBilling.prepaidBalance.val}</div>
-                </div>
-              )}
-              {grokBilling.nextReset && (
-                <div className="billing-card">
-                  <div className="label">Next reset</div>
-                  <div className="value">{grokBilling.nextReset}</div>
-                </div>
-              )}
-              {grokBilling.autoTopup !== undefined && (
-                <div className="billing-card">
-                  <div className="label">Auto topup</div>
-                  <div className="value">{grokBilling.autoTopup ? 'enabled' : 'disabled'}</div>
-                </div>
-              )}
-            </div>
-            {grokBilling.raw && (
-              <details className="raw-output">
-                <summary>Raw output</summary>
-                <pre>{grokBilling.raw}</pre>
-              </details>
-            )}
-          </div>
-        ) : (
-          <>
-            {activeTab === 'overview' && (
-              <UsageOverviewTab
-                statistics={statistics}
-                formatCost={formatCost}
-                formatNumber={formatNumber}
-                renderTrend={renderTrend}
-                getTokenPercentage={getTokenPercentage}
-              />
-            )}
+        {activeTab === 'overview' && (
+          <UsageOverviewTab
+            statistics={statistics}
+            formatCost={formatCost}
+            formatNumber={formatNumber}
+            renderTrend={renderTrend}
+            getTokenPercentage={getTokenPercentage}
+          />
+        )}
 
-            {activeTab === 'models' && (
-              <UsageModelsTab
-                models={statistics.byModel}
-                formatCost={formatCost}
-                formatNumber={formatNumber}
-              />
-            )}
+        {activeTab === 'models' && (
+          <UsageModelsTab
+            models={statistics.byModel}
+            formatCost={formatCost}
+            formatNumber={formatNumber}
+          />
+        )}
 
-            {activeTab === 'sessions' && (
-              <UsageSessionsTab
-                filteredSessions={filteredSessions}
-                paginatedSessions={paginatedSessions}
-                sessionPage={sessionPage}
-                totalPages={totalPages}
-                sessionsPerPage={sessionsPerPage}
-                sessionSortBy={sessionSortBy}
-                setSessionPage={setSessionPage}
-                setSessionSortBy={setSessionSortBy}
-                formatDate={formatDate}
-                formatCost={formatCost}
-                formatNumber={formatNumber}
-              />
-            )}
+        {activeTab === 'sessions' && (
+          <UsageSessionsTab
+            filteredSessions={filteredSessions}
+            paginatedSessions={paginatedSessions}
+            sessionPage={sessionPage}
+            totalPages={totalPages}
+            sessionsPerPage={sessionsPerPage}
+            sessionSortBy={sessionSortBy}
+            setSessionPage={setSessionPage}
+            setSessionSortBy={setSessionSortBy}
+            formatDate={formatDate}
+            formatCost={formatCost}
+            formatNumber={formatNumber}
+          />
+        )}
 
-            {activeTab === 'timeline' && (
-              <UsageTimelineTab
-                filteredDailyUsage={filteredDailyUsage}
-                tooltip={tooltip}
-                setTooltip={setTooltip}
-                formatCost={formatCost}
-                formatChineseDate={formatChineseDate}
-              />
-            )}
-          </>
+        {activeTab === 'timeline' && (
+          <UsageTimelineTab
+            filteredDailyUsage={filteredDailyUsage}
+            tooltip={tooltip}
+            setTooltip={setTooltip}
+            formatCost={formatCost}
+            formatChineseDate={formatChineseDate}
+          />
         )}
       </div>
 
-      {/* Last updated time */}
       {statistics.lastUpdated && (
         <div className="last-updated">
           <span className="codicon codicon-sync" />

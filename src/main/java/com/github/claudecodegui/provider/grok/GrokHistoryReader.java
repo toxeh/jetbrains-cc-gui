@@ -48,6 +48,8 @@ public class GrokHistoryReader {
         public long firstTimestamp;
         public String cwd;
         public long fileSize;
+        /** From summary {@code current_model_id} when present. */
+        public String model;
     }
 
     public String getSessionsForProjectAsJson(String projectPath) {
@@ -120,6 +122,30 @@ public class GrokHistoryReader {
         }
     }
 
+    /**
+     * All sessions under {@code ~/.grok/sessions} (any project cwd).
+     */
+    public List<SessionInfo> listAllSessions() throws IOException {
+        if (!Files.isDirectory(sessionsRoot)) {
+            return List.of();
+        }
+        List<SessionInfo> sessions = new ArrayList<>();
+        try (Stream<Path> cwdGroups = Files.list(sessionsRoot)) {
+            for (Path cwdGroup : cwdGroups.filter(Files::isDirectory).toList()) {
+                try (Stream<Path> sessionDirs = Files.list(cwdGroup)) {
+                    for (Path sessionDir : sessionDirs.filter(Files::isDirectory).toList()) {
+                        SessionInfo info = readSessionInfo(sessionDir);
+                        if (info != null) {
+                            sessions.add(info);
+                        }
+                    }
+                }
+            }
+        }
+        sessions.sort(Comparator.comparingLong((SessionInfo s) -> s.lastTimestamp).reversed());
+        return sessions;
+    }
+
     List<SessionInfo> listSessionsForProject(String projectPath) throws IOException {
         String normalizedProject = normalizePath(projectPath);
         if (!Files.isDirectory(sessionsRoot)) {
@@ -185,6 +211,9 @@ public class GrokHistoryReader {
                 info.messageCount = summary.get("num_chat_messages").getAsInt();
             } else if (summary.has("num_messages")) {
                 info.messageCount = summary.get("num_messages").getAsInt();
+            }
+            if (summary.has("current_model_id") && !summary.get("current_model_id").isJsonNull()) {
+                info.model = summary.get("current_model_id").getAsString();
             }
             info.firstTimestamp = parseIsoMillis(summary, "created_at");
             info.lastTimestamp = parseIsoMillis(summary, "updated_at");

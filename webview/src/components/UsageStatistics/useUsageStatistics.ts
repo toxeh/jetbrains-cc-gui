@@ -29,6 +29,17 @@ function normalizeProjectStatistics(data: Partial<ProjectStatistics> | null | un
     estimatedCost: data.estimatedCost ?? 0,
     dailyUsage: data.dailyUsage ?? [],
     byModel: data.byModel ?? [],
+    weeklyComparison: data.weeklyComparison ?? {
+      currentWeek: { sessions: 0, cost: 0, tokens: 0 },
+      lastWeek: { sessions: 0, cost: 0, tokens: 0 },
+      trends: { sessions: 0, cost: 0, tokens: 0 },
+    },
+    provider: data.provider,
+    source: data.source,
+    activityNote: data.activityNote,
+    tokensFromLedger: data.tokensFromLedger,
+    grokBilling: data.grokBilling ?? null,
+    billingUnavailable: data.billingUnavailable,
   } as ProjectStatistics;
 }
 
@@ -68,9 +79,39 @@ export function useUsageStatistics(currentProvider?: string) {
     window.updateUsageStatistics = (jsonStr: string) => {
       try {
         const data: any = JSON.parse(jsonStr);
-        if (data && (data.data || data.output)) {
+
+        // Billing-only enrichment patch (after activity stats already loaded).
+        if (data && data.billingEnrichment) {
+          setStatistics((prev) => {
+            if (!prev) {
+              return normalizeProjectStatistics({
+                sessions: [],
+                totalSessions: 0,
+                totalUsage: { totalTokens: 0 } as ProjectStatistics['totalUsage'],
+                estimatedCost: 0,
+                dailyUsage: [],
+                provider: 'grok',
+                grokBilling: data.grokBilling ?? null,
+                billingUnavailable: data.billingUnavailable,
+              } as Partial<ProjectStatistics>);
+            }
+            return {
+              ...prev,
+              grokBilling: data.grokBilling ?? prev.grokBilling ?? null,
+              billingUnavailable: data.billingUnavailable ?? prev.billingUnavailable,
+            };
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Legacy pure /usage CLI payload (no sessions array) — treat as billing attach.
+        const looksLikeActivity =
+          Array.isArray(data?.sessions) ||
+          typeof data?.totalSessions === 'number' ||
+          data?.source === 'local-activity';
+        if (data && (data.data || data.output) && !looksLikeActivity) {
           let grokData = data.data || { raw: data.output };
-          // Normalize the API response (with .config) to a convenient flat + full shape
           if (grokData && grokData.config) {
             const c = grokData.config;
             grokData = {
@@ -90,33 +131,49 @@ export function useUsageStatistics(currentProvider?: string) {
             };
           }
           console.log('[Grok /usage]', grokData);
-          // Honest fallback when plugin cannot fetch live billing (no hang).
-          if (grokData && grokData.unavailable) {
-            setStatistics(normalizeProjectStatistics({
+          setStatistics((prev) => {
+            const base = prev ?? normalizeProjectStatistics({
               sessions: [],
               totalSessions: 0,
               totalUsage: { totalTokens: 0 } as ProjectStatistics['totalUsage'],
               estimatedCost: 0,
               dailyUsage: [],
-              grokBilling: grokData,
               provider: 'grok',
-              error: grokData.message || 'Grok billing unavailable',
-            } as Partial<ProjectStatistics>));
-            setLoading(false);
-            return;
-          }
-          setStatistics(normalizeProjectStatistics({
-            sessions: [],
-            totalSessions: 0,
-            totalUsage: { totalTokens: 0 } as ProjectStatistics['totalUsage'],
-            estimatedCost: 0,
-            dailyUsage: [],
-            grokBilling: grokData,
-            provider: 'grok',
-          } as Partial<ProjectStatistics>));
+            } as Partial<ProjectStatistics>);
+            if (!base) return null;
+            if (grokData && grokData.unavailable) {
+              return {
+                ...base,
+                provider: 'grok',
+                billingUnavailable: grokData.message || 'Grok billing unavailable',
+                grokBilling: null,
+              };
+            }
+            return {
+              ...base,
+              provider: 'grok',
+              grokBilling: grokData,
+              billingUnavailable: undefined,
+            };
+          });
           setLoading(false);
           return;
         }
+
+        // Normalize nested billing if backend embedded config shape
+        if (data?.grokBilling?.config) {
+          const c = data.grokBilling.config;
+          data.grokBilling = {
+            ...data.grokBilling,
+            creditUsagePercent: c.creditUsagePercent,
+            credits: c.prepaidBalance?.val,
+            nextReset: c.currentPeriod?.end,
+            prepaidBalance: c.prepaidBalance,
+            productUsage: c.productUsage,
+            weeklyLimitPercent: c.creditUsagePercent,
+          };
+        }
+
         setStatistics(normalizeProjectStatistics(data));
         setLoading(false);
       } catch (error) {
@@ -253,7 +310,10 @@ export function useUsageStatistics(currentProvider?: string) {
 
   const filteredDailyUsage = getFilteredDailyUsage();
 
-  const grokBilling = statistics && (statistics as any).grokBilling ? (statistics as any).grokBilling : null;
+  const grokBilling = statistics?.grokBilling ?? null;
+  const activityNote = statistics?.activityNote;
+  const billingUnavailable = statistics?.billingUnavailable;
+  const tokensFromLedger = !!statistics?.tokensFromLedger;
 
   return {
     // State
@@ -261,7 +321,7 @@ export function useUsageStatistics(currentProvider?: string) {
     sessionPage, sessionSortBy, tooltip, sessionsPerPage,
     // Derived
     filteredSessions, paginatedSessions, totalPages, filteredDailyUsage,
-    grokBilling,
+    grokBilling, activityNote, billingUnavailable, tokensFromLedger,
     // Actions
     setActiveTab, setDateRange, setSessionPage, setSessionSortBy, setTooltip,
     handleRefresh, handleScopeChange,

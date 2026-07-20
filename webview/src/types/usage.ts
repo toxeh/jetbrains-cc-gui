@@ -63,4 +63,17 @@ export interface ProjectStatistics {
   weeklyComparison: WeeklyComparison;
   byModel: ModelUsage[];
   lastUpdated: number;
+  /** Provider that produced this payload (e.g. grok). */
+  provider?: string;
+  /** e.g. local-activity */
+  source?: string;
+  /** Honest note for empty / partial Grok stats. */
+  activityNote?: string;
+  /** Tokens came from plugin ACP ledger. */
+  tokensFromLedger?: boolean;
+  /** Live Grok billing snapshot (optional enrichment). */
+  grokBilling?: Record<string, unknown> | null;
+  /** Why live billing is missing (honest empty state). */
+  billingUnavailable?: string;
+  error?: string;
 }
