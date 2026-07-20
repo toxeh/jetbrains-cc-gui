@@ -15,6 +15,7 @@ import com.github.claudecodegui.util.PlatformUtils;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.nio.file.Files;
@@ -393,10 +394,100 @@ public class GrokSDKBridge extends BaseSDKBridge {
         daemonCoordinator.resetPersistentRuntime(runtimeSessionEpoch);
     }
 
-    public CompletableFuture<Void> setPermissionModeLive(String sessionId, String epoch, String mode) {
-        // Grok permission handled via ACP / daemon set; stub to satisfy handler calls.
-        LOG.info("[Grok] setPermissionModeLive (stub): " + mode);
-        return CompletableFuture.completedFuture(null);
+    /**
+     * Push permission mode to the live Grok daemon runtime so Auto/bypass takes
+     * effect mid-turn (session/request_permission + always-approve), not only on
+     * the next user message.
+     *
+     * <p>Mirrors {@code ClaudeSDKBridge#setPermissionModeLive}: best-effort against
+     * an already-running daemon only (no spawn). A fresh daemon has no runtime, so
+     * {@code setPermissionModePersistent} would be a no-op.
+     *
+     * @return JSON with success/applied/reason (or error) for diagnostics
+     */
+    public CompletableFuture<JsonObject> setPermissionModeLive(String sessionId, String epoch, String mode) {
+        // Non-spawning accessor: only push to an already-running daemon.
+        DaemonBridge db = this.daemonCoordinator.getCurrentDaemonBridge();
+        if (db == null || !db.isAlive()) {
+            JsonObject skipped = new JsonObject();
+            skipped.addProperty("success", true);
+            skipped.addProperty("applied", false);
+            skipped.addProperty("reason", "no-daemon");
+            LOG.info("[Grok] setPermissionModeLive skipped (no live daemon): mode=" + mode);
+            return CompletableFuture.completedFuture(skipped);
+        }
+
+        JsonObject params = new JsonObject();
+        if (sessionId != null && !sessionId.isEmpty()) {
+            params.addProperty("sessionId", sessionId);
+        }
+        if (epoch != null && !epoch.isEmpty()) {
+            params.addProperty("runtimeSessionEpoch", epoch);
+        }
+        if (mode != null && !mode.isEmpty()) {
+            params.addProperty("permissionMode", mode);
+        }
+
+        CompletableFuture<JsonObject> resultFuture = new CompletableFuture<>();
+
+        // setPermissionMode only emits {id, done, success} — complete from onComplete/onError.
+        DaemonBridge.DaemonOutputCallback callback = new DaemonBridge.DaemonOutputCallback() {
+            @Override
+            public void onLine(String line) { }
+
+            @Override
+            public void onStderr(String text) { }
+
+            @Override
+            public void onError(String error) {
+                if (!resultFuture.isDone()) {
+                    JsonObject err = new JsonObject();
+                    err.addProperty("success", false);
+                    err.addProperty("error", error != null ? error : "unknown");
+                    resultFuture.complete(err);
+                }
+            }
+
+            @Override
+            public void onComplete(boolean success) {
+                if (!resultFuture.isDone()) {
+                    JsonObject ok = new JsonObject();
+                    ok.addProperty("success", success);
+                    // Daemon applied flag is best-effort; success=true means command finished.
+                    ok.addProperty("applied", success);
+                    resultFuture.complete(ok);
+                }
+            }
+        };
+
+        try {
+            LOG.info("[Grok] setPermissionModeLive → grok.setPermissionMode mode=" + mode
+                    + " sessionId=" + (sessionId != null ? sessionId : "(none)")
+                    + " epoch=" + (epoch != null ? epoch : "(none)"));
+            CompletableFuture<Boolean> commandFuture = db.sendCommand("grok.setPermissionMode", params, callback);
+            commandFuture.exceptionally(ex -> {
+                if (!resultFuture.isDone()) {
+                    JsonObject err = new JsonObject();
+                    err.addProperty("success", false);
+                    err.addProperty("error", ex.getMessage() != null ? ex.getMessage() : "sendCommand failed");
+                    resultFuture.complete(err);
+                }
+                return false;
+            });
+        } catch (Exception e) {
+            LOG.error("[Grok] setPermissionModeLive failed: " + e.getMessage(), e);
+            JsonObject err = new JsonObject();
+            err.addProperty("success", false);
+            err.addProperty("error", e.getMessage() != null ? e.getMessage() : "exception");
+            return CompletableFuture.completedFuture(err);
+        }
+
+        return resultFuture.orTimeout(10, TimeUnit.SECONDS).exceptionally(ex -> {
+            JsonObject err = new JsonObject();
+            err.addProperty("success", false);
+            err.addProperty("error", "setPermissionMode timed out after 10 seconds");
+            return err;
+        });
     }
 
     // Stubs for methods called from handlers (Grok synthesizes or delegates to daemon ACP [USAGE] etc.)
