@@ -31,6 +31,7 @@ public class GrokHistoryReaderTest {
                     "cwd": "/tmp/grok-test-project"
                   },
                   "generated_title": "Test Grok session",
+                  "current_model_id": "grok-build",
                   "created_at": "2026-07-11T08:16:08.194019Z",
                   "updated_at": "2026-07-11T08:38:31.631666Z",
                   "num_chat_messages": 2
@@ -52,6 +53,9 @@ public class GrokHistoryReaderTest {
         assertEquals(1, sessions.size());
         assertEquals("019f503f-858d-7ec0-bf57-209926c427bd", sessions.get(0).sessionId);
         assertEquals("Test Grok session", sessions.get(0).title);
+        assertEquals("grok-build", sessions.get(0).model);
+
+        assertEquals(1, reader.listAllSessions().size());
 
         List<JsonObject> messages = reader.getSessionMessages("019f503f-858d-7ec0-bf57-209926c427bd");
         assertEquals(2, messages.size());

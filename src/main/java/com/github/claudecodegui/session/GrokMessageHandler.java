@@ -3,12 +3,12 @@ package com.github.claudecodegui.session;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession.Message;
-import com.github.claudecodegui.handler.SettingsHandler;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
+
+import java.util.List;
 
 /**
  * Grok message callback handler (Claude-template protocol surface).
@@ -30,6 +30,13 @@ public class GrokMessageHandler implements MessageCallback {
 
     private final StringBuilder assistantContent = new StringBuilder();
     private Message currentAssistantMessage = null;
+    /**
+     * Assistant bubble owned by the active stream. After {@code stream_start} we only
+     * attach content to this message — never to a completed previous-turn assistant
+     * (which would silently glue two answers together when the send-time user message
+     * is missing from state).
+     */
+    private Message assistantMessageForCurrentStream = null;
 
     private boolean isStreaming = false;
     private boolean streamEndedThisTurn = false;
@@ -165,32 +172,16 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
 
-            if (currentAssistantMessage != null) {
-                // Merge raw when possible
-                if (hasToolUse && currentAssistantMessage.raw != null) {
-                    currentAssistantMessage.raw = mergeAssistantRaw(currentAssistantMessage.raw, msgJson);
-                } else {
-                    currentAssistantMessage.raw = parsed.raw;
-                }
-                if (parsed.content != null && !parsed.content.isEmpty()) {
-                    if (!isStreaming || parsed.content.length() >= assistantContent.length()) {
-                        currentAssistantMessage.content = parsed.content;
-                        assistantContent.setLength(0);
-                        assistantContent.append(parsed.content);
-                    }
-                }
+            Message target = resolveAssistantMessageForStream();
+            // Merge raw when possible
+            if (hasToolUse && target.raw != null) {
+                target.raw = mergeAssistantRaw(target.raw, msgJson);
             } else {
-                if (!isLastMessageAssistant()) {
-                    state.addMessage(parsed);
-                    currentAssistantMessage = parsed;
-                } else {
-                    currentAssistantMessage = state.getMessages().get(state.getMessages().size() - 1);
-                    currentAssistantMessage.raw = parsed.raw;
-                    if (parsed.content != null && !parsed.content.isEmpty()) {
-                        currentAssistantMessage.content = parsed.content;
-                    }
-                }
-                if (parsed.content != null) {
+                target.raw = parsed.raw;
+            }
+            if (parsed.content != null && !parsed.content.isEmpty()) {
+                if (!isStreaming || parsed.content.length() >= assistantContent.length()) {
+                    target.content = parsed.content;
                     assistantContent.setLength(0);
                     assistantContent.append(parsed.content);
                 }
@@ -216,10 +207,34 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
 
-            Message parsed = new Message(Message.Type.USER, extractText(msgJson));
-            parsed.raw = msgJson;
-            state.addMessage(parsed);
-            callbackHandler.notifyMessageUpdate(state.getMessages());
+            // Live user text is owned by SessionSendService at send-time. ACP/user echoes
+            // must NOT addMessage again — that re-appends the user's first message after
+            // the assistant and glues turns in the UI. Mirror Claude: patch existing only.
+            String userText = extractText(msgJson);
+            if (userText == null || userText.isEmpty()) {
+                LOG.debug("Grok user message has no text; skipping");
+                return;
+            }
+
+            List<Message> messages = state.getMessagesReference();
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                Message msg = messages.get(i);
+                if (msg.type != Message.Type.USER) {
+                    continue;
+                }
+                if (userText.equals(msg.content)) {
+                    if (msg.raw == null) {
+                        msg.raw = msgJson;
+                    }
+                    LOG.debug("Grok user message matched existing send-time bubble; not duplicating");
+                    callbackHandler.notifyMessageUpdate(state.getMessages());
+                    return;
+                }
+            }
+            // No matching send-time bubble (edge path). Still avoid inventing a trailing
+            // user after an assistant mid-conversation — the webview optimistic path
+            // owns display until SessionSendService persists the message.
+            LOG.debug("Grok user message with no matching state entry; not adding to avoid duplicate bubble");
         } catch (Exception e) {
             LOG.warn("Failed to parse Grok user message: " + e.getMessage());
         }
@@ -235,35 +250,8 @@ public class GrokMessageHandler implements MessageCallback {
                 if (currentAssistantMessage.raw == null) {
                     currentAssistantMessage.raw = new JsonObject();
                 }
-                JsonElement usageEl = resultJson.get("usage");
-                currentAssistantMessage.raw.add("turnUsage", usageEl.deepCopy());
+                currentAssistantMessage.raw.add("turnUsage", resultJson.get("usage").deepCopy());
                 callbackHandler.notifyMessageUpdate(state.getMessages());
-
-                // Also drive the context bar from result.usage if we got here (defensive for Grok)
-                try {
-                    JsonObject u = usageEl != null && usageEl.isJsonObject() ? usageEl.getAsJsonObject() : null;
-                    if (u != null && u.has("usage") && u.get("usage").isJsonObject()) {
-                        u = u.getAsJsonObject("usage");
-                    }
-                    if (u != null) {
-                        int used = 0;
-                        if (u.has("input_tokens")) {
-                            used = u.get("input_tokens").getAsInt();
-                        } else if (u.has("prompt_tokens")) {
-                            used = u.get("prompt_tokens").getAsInt();
-                        } else if (u.has("total_tokens")) {
-                            used = u.get("total_tokens").getAsInt();
-                        } else if (u.has("promptTokenCount")) {
-                            used = u.get("promptTokenCount").getAsInt();
-                        } else if (u.has("inputTokenCount")) {
-                            used = u.get("inputTokenCount").getAsInt();
-                        }
-                        int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
-                        if (used > 0 || maxTokens > 0) {
-                            callbackHandler.notifyUsageUpdate(used, maxTokens);
-                        }
-                    }
-                } catch (Exception ignored) {}
             }
         } catch (Exception e) {
             LOG.debug("Grok result parse skipped: " + e.getMessage());
@@ -283,13 +271,6 @@ public class GrokMessageHandler implements MessageCallback {
         streamEndedThisTurn = false;
         resetStreamingAccumulator();
         callbackHandler.notifyStreamStart();
-
-        // Do not force notifyUsageUpdate(0, max) here.
-        // Forcing 0 made the context indicator drop to 0% at the start of every Grok turn.
-        // The max (and a reasonable used value) is populated by:
-        //  - model/provider change -> UsagePushService
-        //  - [USAGE] events in handleUsage (which always include real max)
-        // This keeps the previous context size visible during generation for the current turn.
     }
 
     private void handleStreamEnd() {
@@ -328,18 +309,8 @@ public class GrokMessageHandler implements MessageCallback {
         }
         assistantContent.append(content);
 
-        if (currentAssistantMessage == null) {
-            if (!isLastMessageAssistant()) {
-                currentAssistantMessage = new Message(Message.Type.ASSISTANT, assistantContent.toString());
-                state.addMessage(currentAssistantMessage);
-            } else {
-                // Reuse last if it was already added (defensive)
-                currentAssistantMessage = state.getMessages().get(state.getMessages().size() - 1);
-                currentAssistantMessage.content = assistantContent.toString();
-            }
-        } else {
-            currentAssistantMessage.content = assistantContent.toString();
-        }
+        Message target = resolveAssistantMessageForStream();
+        target.content = assistantContent.toString();
         callbackHandler.notifyContentDelta(content);
         if (!isStreaming) {
             callbackHandler.notifyMessageUpdate(state.getMessages());
@@ -417,37 +388,39 @@ public class GrokMessageHandler implements MessageCallback {
             message.add("usage", usage);
             currentAssistantMessage.raw.add("message", message);
 
-            // For the context window bar, use the *input/prompt* size (the context fed to the model for this call).
-            // This is the current context window usage. Do not add output (generated after).
-            // NOTE for Grok: the exact semantics of "usage" from ACP are not fully documented like Claude's context_window.
-            // We take the last reported input/prompt size as best approximation of current context fed (history + new).
-            // Max is from model catalog (500k for grok-4.x). May not be 100% precise.
-            // Unwrap if the JSON was { "usage": { ... } }
-            JsonObject u = usage;
-            if (u.has("usage") && u.get("usage").isJsonObject()) {
-                u = u.getAsJsonObject("usage");
-            }
             int used = 0;
-            if (u.has("input_tokens")) {
-                used = u.get("input_tokens").getAsInt();
-            } else if (u.has("prompt_tokens")) {
-                used = u.get("prompt_tokens").getAsInt();
-            } else if (u.has("total_tokens")) {
-                used = u.get("total_tokens").getAsInt();
-            } else if (u.has("promptTokenCount")) {
-                used = u.get("promptTokenCount").getAsInt();
-            } else if (u.has("inputTokenCount")) {
-                used = u.get("inputTokenCount").getAsInt();
-            } else if (u.has("totalTokenCount")) {
-                used = u.get("totalTokenCount").getAsInt();
-            } else if (!u.has("prompt_tokens") && u.has("input") && u.get("input").isJsonPrimitive()) {
-                // rare fallback
-                try { used = u.get("input").getAsInt(); } catch (Exception ignored) {}
+            if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
+                used = usage.get("total_tokens").getAsInt();
+            } else {
+                if (usage.has("input_tokens") && !usage.get("input_tokens").isJsonNull()) {
+                    used += usage.get("input_tokens").getAsInt();
+                }
+                if (usage.has("output_tokens") && !usage.get("output_tokens").isJsonNull()) {
+                    used += usage.get("output_tokens").getAsInt();
+                }
+                if (usage.has("prompt_tokens") && !usage.get("prompt_tokens").isJsonNull()) {
+                    used += usage.get("prompt_tokens").getAsInt();
+                }
             }
-            int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
-            // Always include real maxTokens (from model limits) so the context bar
-            // shows "X / Y Context" (e.g. 12k / 500k) instead of just % with no limit.
-            callbackHandler.notifyUsageUpdate(used, maxTokens);
+            if (used > 0) {
+                int maxTokens = com.github.claudecodegui.handler.provider.ModelProviderHandler
+                        .getModelContextLimit(state.getModel());
+                callbackHandler.notifyUsageUpdate(used, maxTokens);
+            }
+            // C: plugin ACP usage ledger for Usage Statistics token totals
+            try {
+                String sid = state.getSessionId();
+                if (sid != null && !sid.isBlank()) {
+                    new com.github.claudecodegui.provider.grok.GrokUsageLedger().record(
+                            sid,
+                            state.getModel(),
+                            null,
+                            usage
+                    );
+                }
+            } catch (Exception ledgerEx) {
+                LOG.debug("Grok usage ledger skip: " + ledgerEx.getMessage());
+            }
             callbackHandler.notifyMessageUpdate(state.getMessages());
         } catch (Exception e) {
             LOG.debug("Grok usage parse skipped: " + e.getMessage());
@@ -566,27 +539,35 @@ public class GrokMessageHandler implements MessageCallback {
     }
 
     private void ensureAssistantRaw() {
-        if (currentAssistantMessage == null) {
-            if (!isLastMessageAssistant()) {
-                JsonObject raw = new JsonObject();
-                raw.addProperty("type", "assistant");
-                JsonObject messageObj = new JsonObject();
-                messageObj.add("content", new JsonArray());
-                raw.add("message", messageObj);
-                currentAssistantMessage = new Message(Message.Type.ASSISTANT, "", raw);
-                state.addMessage(currentAssistantMessage);
-            } else {
-                currentAssistantMessage = state.getMessages().get(state.getMessages().size() - 1);
-            }
-        }
-        if (currentAssistantMessage.raw == null) {
+        Message target = resolveAssistantMessageForStream();
+        if (target.raw == null) {
             JsonObject raw = new JsonObject();
             raw.addProperty("type", "assistant");
             JsonObject messageObj = new JsonObject();
             messageObj.add("content", new JsonArray());
             raw.add("message", messageObj);
-            currentAssistantMessage.raw = raw;
+            target.raw = raw;
         }
+    }
+
+    /**
+     * Resolve the assistant bubble for the current stream. Always creates a new
+     * message on the first call after {@code stream_start} instead of reusing a
+     * completed previous-turn assistant (see {@link #assistantMessageForCurrentStream}).
+     */
+    private Message resolveAssistantMessageForStream() {
+        if (currentAssistantMessage != null) {
+            return currentAssistantMessage;
+        }
+        if (assistantMessageForCurrentStream != null) {
+            currentAssistantMessage = assistantMessageForCurrentStream;
+            return currentAssistantMessage;
+        }
+        Message created = new Message(Message.Type.ASSISTANT, assistantContent.toString());
+        state.addMessage(created);
+        currentAssistantMessage = created;
+        assistantMessageForCurrentStream = created;
+        return created;
     }
 
     private void appendThinkingToRaw(String delta) {
@@ -624,16 +605,6 @@ public class GrokMessageHandler implements MessageCallback {
     private void resetStreamingAccumulator() {
         assistantContent.setLength(0);
         currentAssistantMessage = null;
-    }
-
-    /**
-     * Guard against duplicate assistant messages (observed in some first-turn / persistent flows).
-     */
-    private boolean isLastMessageAssistant() {
-        if (state.getMessages().isEmpty()) {
-            return false;
-        }
-        Message last = state.getMessages().get(state.getMessages().size() - 1);
-        return last != null && last.type == Message.Type.ASSISTANT;
+        assistantMessageForCurrentStream = null;
     }
 }
