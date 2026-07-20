@@ -183,6 +183,22 @@ export function buildErrorPayload(error) {
 }
 
 /**
+ * Extract aggregate used-token count from a Grok/ACP usage object.
+ * Mirrors Java {@code GrokContextUsageBuilder.extractUsedTokens}.
+ */
+export function extractUsedTokens(usage) {
+  if (!usage || typeof usage !== 'object') return 0;
+  const total = Number(usage.total_tokens);
+  if (Number.isFinite(total) && total > 0) return Math.floor(total);
+  let used = 0;
+  for (const key of ['input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens']) {
+    const n = Number(usage[key]);
+    if (Number.isFinite(n) && n > 0) used += n;
+  }
+  return Math.max(0, Math.floor(used));
+}
+
+/**
  * Build a ContextUsageData-compatible payload for the /context dialog.
  * Mirrors Java {@code GrokContextUsageBuilder}.
  */

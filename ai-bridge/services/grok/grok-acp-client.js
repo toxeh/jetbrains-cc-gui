@@ -130,16 +130,24 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
  * This is the single entry point for mode→CLI sync (replaces the old
  * applyAutoApproveIfNeeded helper that only ever turned always-approve on).
  */
+/** Control-plane prompts (/always-approve) should not wait the full turn timeout. */
+const PERMISSION_MODE_SYNC_TIMEOUT_MS = 20_000;
+
 export async function applyPermissionModeToSession(client, sessionId, permissionMode) {
   if (!client || !sessionId) return;
   const cmd = isAutoApproveMode(permissionMode) ? '/always-approve on' : '/always-approve off';
   try {
-    await client.request('session/prompt', {
-      sessionId,
-      prompt: [{ type: 'text', text: cmd }],
-    });
+    await client.request(
+      'session/prompt',
+      {
+        sessionId,
+        prompt: [{ type: 'text', text: cmd }],
+      },
+      PERMISSION_MODE_SYNC_TIMEOUT_MS,
+    );
   } catch {
     // Best-effort: older CLIs may not support the off command.
+    // Timeouts mark the client unhealthy so the next turn recycles the runtime.
   }
 }
 
@@ -222,8 +230,15 @@ export class GrokAcpClient {
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        // Abandoning an in-flight JSON-RPC id makes the ACP stream untrustworthy:
+        // the agent may still be busy on the old session/prompt, so the next turn
+        // would hang again. Mark unhealthy + kill so the runtime is recycled.
+        const err = new Error(`ACP timeout waiting for ${method}`);
+        err.code = 'ACP_TIMEOUT';
+        err.method = method;
         this.pending.delete(id);
-        reject(new Error(`ACP timeout waiting for ${method}`));
+        this.markUnhealthy(err.message, { killProcess: true });
+        reject(err);
       }, timeoutMs);
 
       this.pending.set(id, {
@@ -239,6 +254,50 @@ export class GrokAcpClient {
 
       this.proc.stdin.write(JSON.stringify(payload) + '\n');
     });
+  }
+
+  /**
+   * Mark this client unusable for further turns.
+   * After an ACP timeout (or similar stream corruption), the daemon must dispose
+   * the runtime and create a fresh agent — otherwise session/prompt never recovers.
+   */
+  markUnhealthy(reason = 'ACP client unhealthy', { killProcess = false } = {}) {
+    this.unhealthy = true;
+    this.unhealthyReason = reason;
+    this.closed = true;
+
+    const err = new Error(reason);
+    err.code = 'ACP_UNHEALTHY';
+    for (const [, p] of this.pending) {
+      try {
+        p.reject(err);
+      } catch {
+        // ignore double-reject
+      }
+    }
+    this.pending.clear();
+
+    if (killProcess && this.proc && !this.proc.killed) {
+      try {
+        this.proc.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      // Best-effort SIGKILL after a short grace (fire-and-forget; close() also kills).
+      const proc = this.proc;
+      setTimeout(() => {
+        try {
+          if (proc && !proc.killed) proc.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+      }, 300).unref?.();
+    }
+  }
+
+  /** True when a prior timeout/corruption requires runtime recycle. */
+  isUnhealthy() {
+    return !!(this.unhealthy || this.closed);
   }
 
   respond(id, result) {
