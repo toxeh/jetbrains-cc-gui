@@ -146,7 +146,9 @@ class GrokDaemonCoordinator {
                 params.addProperty("cwd", cwd != null ? cwd : "");
                 params.addProperty("sessionId", sessionId != null ? sessionId : "");
                 params.addProperty("runtimeSessionEpoch", runtimeSessionEpoch != null ? runtimeSessionEpoch : "");
-                params.addProperty("permissionMode", "");
+                // Match UI default so preconnect runtime is reused by default-mode sends
+                // and tools go through the permission dialog (not a silent empty mode).
+                params.addProperty("permissionMode", "default");
                 params.addProperty("model", "");
                 params.addProperty("streaming", true);
                 // Grok env is mostly XAI_ / GROK_ ; bridge will enrich via its env config
