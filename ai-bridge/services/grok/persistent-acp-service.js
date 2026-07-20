@@ -27,11 +27,40 @@ import {
   isPermissionRequestMethod,
 } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
-import { buildGrokEnv, buildGrokContextUsagePayload } from './grok-utils.js';
+import {
+  buildGrokEnv,
+  buildGrokContextUsagePayload,
+  extractUsedTokens,
+} from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
 
-export { buildGrokContextUsagePayload };
+export { buildGrokContextUsagePayload, extractUsedTokens };
+
+/**
+ * Remember last ACP usage total on the runtime for /context synthesis.
+ */
+function rememberUsageOnRuntime(runtime, usage) {
+  if (!runtime || !usage) return;
+  const used = extractUsedTokens(usage);
+  if (used > 0) {
+    runtime.lastUsedTokens = used;
+  }
+}
+
+/**
+ * Pull usage from session/update notifications when present.
+ */
+function usageFromNotification(method, params) {
+  if (method !== 'session/update') return null;
+  const update = params?.update || params;
+  if (!update) return null;
+  const kind = update.sessionUpdate || update.type || '';
+  if (kind === 'usage_update' || kind === 'usage') {
+    return update.usage || update;
+  }
+  return null;
+}
 
 // =============================================================================
 // Runtime registry (lightweight, Grok-specific)
@@ -106,7 +135,13 @@ async function createRuntime(params, { log } = {}) {
   const key = makeRuntimeKey(params);
   const existing = getRuntime(key);
   if (existing && !existing.closed) {
-    return existing;
+    // Drop half-dead clients left after ACP timeout so the next turn recovers.
+    const client = existing.client;
+    if (client && (client.closed || client.unhealthy || client.isUnhealthy?.())) {
+      await disposeRuntime(existing);
+    } else {
+      return existing;
+    }
   }
 
   const workCwd = (params.cwd || '').trim() || process.cwd();
@@ -207,6 +242,8 @@ async function createRuntime(params, { log } = {}) {
       permissionMode: live.permissionMode,
       /** Shared with authorizeCreate / onServerRequest — mutate for live mode changes. */
       _livePermission: live,
+      /** Last ACP [USAGE] total — used by getContextUsage when Java has no snapshot. */
+      lastUsedTokens: 0,
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
       activeTurnCount: 0,
@@ -290,6 +327,8 @@ async function executeTurn(runtime, params, normalizer) {
     // Wire notifications for this turn into the normalizer
     const originalOnNotif = runtime.client.onNotification;
     runtime.client.onNotification = (method, p) => {
+      const usage = usageFromNotification(method, p);
+      if (usage) rememberUsageOnRuntime(runtime, usage);
       emit('notification', { method, params: p });
       if (typeof originalOnNotif === 'function') {
         try { originalOnNotif(method, p); } catch {}
@@ -301,6 +340,10 @@ async function executeTurn(runtime, params, normalizer) {
     // restore
     runtime.client.onNotification = originalOnNotif;
 
+    if (result?.usage) {
+      rememberUsageOnRuntime(runtime, result.usage);
+    }
+
     emit('prompt_result', result);
     normalizer.finishSuccess(sid || runtime.sessionId, normalizer.assistantText);
 
@@ -308,12 +351,22 @@ async function executeTurn(runtime, params, normalizer) {
     return { sessionId: runtime.sessionId, success: true };
   } catch (err) {
     normalizer.finishError(err);
+    // Ensure timeout / stream corruption always recycles (even if markUnhealthy raced).
+    if (err?.code === 'ACP_TIMEOUT' || /ACP timeout waiting for/i.test(String(err?.message || ''))) {
+      try {
+        runtime.client?.markUnhealthy?.(err.message || 'ACP timeout', { killProcess: true });
+      } catch {
+        // ignore
+      }
+    }
     throw err;
   } finally {
     runtime.activeTurnCount = Math.max((runtime.activeTurnCount || 1) - 1, 0);
     clearActiveIf(runtime);
-    // If client died during turn, drop runtime
-    if (runtime.client && runtime.client.closed) {
+    // If client died or became unhealthy (timeout), drop runtime so the next send
+    // creates a fresh ACP session instead of hanging on a stuck agent.
+    const client = runtime.client;
+    if (client && (client.closed || client.unhealthy || client.isUnhealthy?.())) {
       await disposeRuntime(runtime);
     }
   }

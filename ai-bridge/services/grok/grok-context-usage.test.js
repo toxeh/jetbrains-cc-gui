@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGrokContextUsagePayload } from './grok-utils.js';
+import { buildGrokContextUsagePayload, extractUsedTokens } from './grok-utils.js';
 import {
   getContextUsagePersistent,
   getUsagePersistent,
@@ -8,6 +8,12 @@ import {
 } from './persistent-acp-service.js';
 
 const { resetRegistry, createTestRuntime, forceSetActiveTurn } = __testing;
+
+test('extractUsedTokens mirrors Java GrokContextUsageBuilder', () => {
+  assert.equal(extractUsedTokens({ total_tokens: 42, input_tokens: 1 }), 42);
+  assert.equal(extractUsedTokens({ input_tokens: 10, output_tokens: 5, completion_tokens: 1 }), 16);
+  assert.equal(extractUsedTokens({}), 0);
+});
 
 test('buildGrokContextUsagePayload synthesizes conversation + free space', () => {
   const payload = buildGrokContextUsagePayload({
