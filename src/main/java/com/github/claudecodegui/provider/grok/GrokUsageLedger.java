@@ -171,10 +171,14 @@ public final class GrokUsageLedger {
         try (BufferedReader r = Files.newBufferedReader(ledgerPath, StandardCharsets.UTF_8)) {
             String line;
             while ((line = r.readLine()) != null) {
-                if (line.isBlank()) continue;
+                if (line.isBlank()) {
+                    continue;
+                }
                 try {
                     Entry e = GSON.fromJson(line, Entry.class);
-                    if (e != null) out.add(e);
+                    if (e != null) {
+                        out.add(e);
+                    }
                 } catch (Exception ignored) {
                 }
             }
