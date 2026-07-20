@@ -183,6 +183,58 @@ export function buildErrorPayload(error) {
 }
 
 /**
+ * Build a ContextUsageData-compatible payload for the /context dialog.
+ * Mirrors Java {@code GrokContextUsageBuilder}.
+ */
+export function buildGrokContextUsagePayload({
+  usedTokens = 0,
+  maxTokens = 200_000,
+  model = '',
+} = {}) {
+  let used = Math.max(0, Number(usedTokens) || 0);
+  const max = Math.max(1, Number(maxTokens) || 200_000);
+  if (used > max) used = max;
+  const free = Math.max(0, max - used);
+  const percentage = Math.round((1000 * used) / max) / 10;
+
+  return {
+    success: true,
+    totalTokens: used,
+    maxTokens: max,
+    rawMaxTokens: max,
+    percentage,
+    model: model || '',
+    isAutoCompactEnabled: false,
+    source: 'grok-synthesized',
+    categories: [
+      { name: 'Conversation', tokens: used, color: 'claude' },
+      { name: 'Free space', tokens: free, color: 'inactive' },
+    ],
+    gridRows: [[
+      {
+        color: 'claude',
+        isFilled: used > 0,
+        categoryName: 'Conversation',
+        tokens: used,
+        percentage,
+        squareFullness: used > 0 ? 1 : 0,
+      },
+      {
+        color: 'inactive',
+        isFilled: false,
+        categoryName: 'Free space',
+        tokens: free,
+        percentage: Math.round((1000 * free) / max) / 10,
+        squareFullness: free > 0 ? Math.min(1, free / max) : 0,
+      },
+    ]],
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
+  };
+}
+
+/**
  * Simple spawn wrapper (headless secondary path / diagnostics).
  */
 export function spawnGrok(args, env, cwd, onData) {

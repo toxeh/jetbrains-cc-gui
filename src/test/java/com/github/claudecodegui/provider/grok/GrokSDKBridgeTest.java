@@ -52,6 +52,37 @@ public class GrokSDKBridgeTest {
     }
 
     @Test
+    public void getContextUsageSynthesizesFromLastUsageWithoutDaemon() {
+        GrokSDKBridge bridge = new GrokSDKBridge();
+        bridge.setLastUsedTokensForTest(12_000);
+
+        JsonObject result = bridge.getContextUsage("sess", "/tmp", "grok-2").join();
+        assertTrue(result.get("success").getAsBoolean());
+        assertEquals(12_000, result.get("totalTokens").getAsInt());
+        assertEquals(128_000, result.get("maxTokens").getAsInt()); // grok-2 limit
+        assertEquals("grok-2", result.get("model").getAsString());
+        assertEquals("grok-synthesized", result.get("source").getAsString());
+    }
+
+    @Test
+    public void getUsageReturnsStructuredUnavailableWithoutHangingWhenNoDaemon() {
+        GrokSDKBridge bridge = new GrokSDKBridge();
+        JsonObject result = bridge.getUsage("/tmp").join();
+        assertTrue(result.get("success").getAsBoolean());
+        assertTrue(result.has("data"));
+        assertTrue(result.getAsJsonObject("data").get("unavailable").getAsBoolean());
+        assertTrue(result.getAsJsonObject("data").get("message").getAsString().length() > 0);
+    }
+
+    @Test
+    public void buildUsageUnavailableHasUiShape() {
+        JsonObject result = GrokSDKBridge.buildUsageUnavailable("test msg");
+        assertTrue(result.get("success").getAsBoolean());
+        assertEquals("test msg", result.getAsJsonObject("data").get("message").getAsString());
+        assertEquals("plugin-fallback", result.getAsJsonObject("data").get("source").getAsString());
+    }
+
+    @Test
     public void testSetPermissionModeLiveAcceptsDefaultAndBypassModesWithoutThrowing() {
         GrokSDKBridge bridge = new GrokSDKBridge();
 

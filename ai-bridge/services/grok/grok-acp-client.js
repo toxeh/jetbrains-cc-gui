@@ -122,24 +122,13 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
 }
 
 /**
- * Apply /always-approve style command for auto-approve modes (best effort).
- */
-export async function applyAutoApproveIfNeeded(client, sessionId, permissionMode) {
-  if (!isAutoApproveMode(permissionMode)) return;
-  try {
-    await client.request('session/prompt', {
-      sessionId,
-      prompt: [{ type: 'text', text: '/always-approve on' }],
-    });
-  } catch {
-    // ignore
-  }
-}
-
-/**
  * Sync Grok CLI always-approve flag with our permission mode.
  * Default/plan/acceptEdits must turn always-approve OFF so ACP keeps
  * emitting session/request_permission (otherwise tools run in silence).
+ * Bypass/auto modes turn it ON.
+ *
+ * This is the single entry point for mode→CLI sync (replaces the old
+ * applyAutoApproveIfNeeded helper that only ever turned always-approve on).
  */
 export async function applyPermissionModeToSession(client, sessionId, permissionMode) {
   if (!client || !sessionId) return;

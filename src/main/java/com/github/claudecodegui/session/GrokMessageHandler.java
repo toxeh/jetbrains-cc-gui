@@ -389,18 +389,23 @@ public class GrokMessageHandler implements MessageCallback {
             currentAssistantMessage.raw.add("message", message);
 
             int used = 0;
-            if (usage.has("input_tokens")) {
-                used += usage.get("input_tokens").getAsInt();
-            }
-            if (usage.has("output_tokens")) {
-                used += usage.get("output_tokens").getAsInt();
-            }
-            if (usage.has("total_tokens")) {
+            if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
                 used = usage.get("total_tokens").getAsInt();
+            } else {
+                if (usage.has("input_tokens") && !usage.get("input_tokens").isJsonNull()) {
+                    used += usage.get("input_tokens").getAsInt();
+                }
+                if (usage.has("output_tokens") && !usage.get("output_tokens").isJsonNull()) {
+                    used += usage.get("output_tokens").getAsInt();
+                }
+                if (usage.has("prompt_tokens") && !usage.get("prompt_tokens").isJsonNull()) {
+                    used += usage.get("prompt_tokens").getAsInt();
+                }
             }
-            // Best-effort; max tokens unknown for Grok models yet
             if (used > 0) {
-                callbackHandler.notifyUsageUpdate(used, 0);
+                int maxTokens = com.github.claudecodegui.handler.provider.ModelProviderHandler
+                        .getModelContextLimit(state.getModel());
+                callbackHandler.notifyUsageUpdate(used, maxTokens);
             }
             callbackHandler.notifyMessageUpdate(state.getMessages());
         } catch (Exception e) {
