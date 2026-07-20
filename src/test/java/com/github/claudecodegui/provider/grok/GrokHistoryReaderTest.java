@@ -105,8 +105,12 @@ public class GrokHistoryReaderTest {
     public void stripUserQueryWrapperExtractsInnerPrompt() {
         assertEquals("hello world",
                 GrokHistoryReader.stripUserQueryWrapper("<user_query>\nhello world\n</user_query>"));
-        assertEquals("javadoc fix",
-                GrokHistoryReader.formatSessionTitlePreview("<user_query>javadoc fix for module</user_query>", 15));
+        // maxLen=15 truncates with ellipsis (full stripped title is longer)
+        assertEquals("javadoc fix for...",
+                GrokHistoryReader.formatSessionTitlePreview(
+                        "<user_query>javadoc fix for module</user_query>", 15));
+        assertEquals("short",
+                GrokHistoryReader.formatSessionTitlePreview("short", 40));
     }
 
     @Test
