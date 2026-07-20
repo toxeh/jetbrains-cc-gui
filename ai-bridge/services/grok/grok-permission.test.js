@@ -323,11 +323,11 @@ test('applyPermissionModeToSession swallows CLI errors (best effort)', async () 
   await assert.doesNotReject(() => applyPermissionModeToSession(client, 's', 'default'));
 });
 
-test('applyPermissionModeToSession uses a short control-plane timeout', async () => {
+test('applyPermissionModeToSession uses a short control-plane timeout without recycle', async () => {
   const client = {
     calls: [],
-    async request(method, params, timeoutMs) {
-      this.calls.push({ method, params, timeoutMs });
+    async request(method, params, timeoutMs, options) {
+      this.calls.push({ method, params, timeoutMs, options });
       return {};
     },
   };
@@ -337,5 +337,10 @@ test('applyPermissionModeToSession uses a short control-plane timeout', async ()
   assert.ok(
     Number.isFinite(client.calls[0].timeoutMs) && client.calls[0].timeoutMs <= 30_000,
     'control /always-approve must not use the full turn timeout',
+  );
+  assert.equal(
+    client.calls[0].options?.recycleOnTimeout,
+    false,
+    'must not kill agent on /always-approve timeout',
   );
 });

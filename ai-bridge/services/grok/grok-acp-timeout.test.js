@@ -53,6 +53,26 @@ test('request timeout rejects with ACP_TIMEOUT and marks client unhealthy', asyn
   assert.equal(client.isUnhealthy(), true);
 });
 
+test('request soft timeout (recycleOnTimeout:false) does not kill the agent', async () => {
+  const client = mockClientForRequest();
+
+  await assert.rejects(
+    () =>
+      client.request(
+        'session/prompt',
+        { sessionId: 's1', prompt: [{ type: 'text', text: '/always-approve off' }] },
+        30,
+        { recycleOnTimeout: false },
+      ),
+    (err) => err.code === 'ACP_TIMEOUT',
+  );
+
+  assert.equal(client.closed, false, 'control-plane timeout must not close client');
+  assert.equal(client.unhealthy, undefined);
+  assert.equal(client.proc.killed, false, 'must not kill mid-turn agent');
+  assert.equal(client.pending.size, 0);
+});
+
 test('markUnhealthy rejects other in-flight requests', async () => {
   const client = mockClientForRequest();
 

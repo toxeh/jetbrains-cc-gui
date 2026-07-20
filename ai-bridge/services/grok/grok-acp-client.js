@@ -153,7 +153,12 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
  * This is the single entry point for mode→CLI sync (replaces the old
  * applyAutoApproveIfNeeded helper that only ever turned always-approve on).
  */
-/** Control-plane prompts (/always-approve) should not wait the full turn timeout. */
+/**
+ * Control-plane prompts (/always-approve on|off) should not wait the full turn
+ * timeout. They are best-effort and must never kill a healthy mid-turn agent:
+ * recycleOnTimeout is false so a slow/busy session only skips the mode sync
+ * (error swallowed) instead of popping ACP timeout UI or recycling the runtime.
+ */
 const PERMISSION_MODE_SYNC_TIMEOUT_MS = 20_000;
 
 export async function applyPermissionModeToSession(client, sessionId, permissionMode) {
@@ -167,10 +172,11 @@ export async function applyPermissionModeToSession(client, sessionId, permission
         prompt: [{ type: 'text', text: cmd }],
       },
       PERMISSION_MODE_SYNC_TIMEOUT_MS,
+      { recycleOnTimeout: false },
     );
   } catch {
-    // Best-effort: older CLIs may not support the off command.
-    // Timeouts mark the client unhealthy so the next turn recycles the runtime.
+    // Best-effort: older CLIs may not support the command, or the agent is busy
+    // on a user turn. Never surface to UI; live.permissionMode still drives dialogs.
   }
 }
 
@@ -244,23 +250,34 @@ export class GrokAcpClient {
     });
   }
 
-  async request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  /**
+   * @param {string} method
+   * @param {object} [params]
+   * @param {number} [timeoutMs]
+   * @param {{ recycleOnTimeout?: boolean }} [options]
+   *   recycleOnTimeout (default true): on timeout, mark unhealthy + kill process
+   *   so the next user turn recovers. Set false for best-effort control prompts
+   *   (/always-approve) that must not abort an in-flight user turn.
+   */
+  async request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS, options = {}) {
     if (!this.proc || this.closed) {
       throw new Error('ACP client is not running');
     }
+    const recycleOnTimeout = options.recycleOnTimeout !== false;
     const id = this.nextId++;
     const payload = { jsonrpc: '2.0', id, method, params };
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        // Abandoning an in-flight JSON-RPC id makes the ACP stream untrustworthy:
-        // the agent may still be busy on the old session/prompt, so the next turn
-        // would hang again. Mark unhealthy + kill so the runtime is recycled.
         const err = new Error(`ACP timeout waiting for ${method}`);
         err.code = 'ACP_TIMEOUT';
         err.method = method;
         this.pending.delete(id);
-        this.markUnhealthy(err.message, { killProcess: true });
+        if (recycleOnTimeout) {
+          // Abandoning a user-turn RPC leaves the agent busy → recycle.
+          this.markUnhealthy(err.message, { killProcess: true });
+        }
+        // Soft timeout: leave client alive (control-plane /always-approve).
         reject(err);
       }, timeoutMs);
 
