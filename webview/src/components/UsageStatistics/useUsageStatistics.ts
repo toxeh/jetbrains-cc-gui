@@ -90,6 +90,21 @@ export function useUsageStatistics(currentProvider?: string) {
             };
           }
           console.log('[Grok /usage]', grokData);
+          // Honest fallback when plugin cannot fetch live billing (no hang).
+          if (grokData && grokData.unavailable) {
+            setStatistics(normalizeProjectStatistics({
+              sessions: [],
+              totalSessions: 0,
+              totalUsage: { totalTokens: 0 } as ProjectStatistics['totalUsage'],
+              estimatedCost: 0,
+              dailyUsage: [],
+              grokBilling: grokData,
+              provider: 'grok',
+              error: grokData.message || 'Grok billing unavailable',
+            } as Partial<ProjectStatistics>));
+            setLoading(false);
+            return;
+          }
           setStatistics(normalizeProjectStatistics({
             sessions: [],
             totalSessions: 0,

@@ -5,7 +5,6 @@ import {
   resolveAcpPermissionDecision,
   isAutoApproveMode,
   applyPermissionModeToSession,
-  applyAutoApproveIfNeeded,
 } from './grok-acp-client.js';
 
 // ---------------------------------------------------------------------------
@@ -298,14 +297,14 @@ test('applyPermissionModeToSession sends /always-approve on for bypass', async (
   assert.equal(client.prompts[0].params.prompt[0].text, '/always-approve on');
 });
 
-test('applyAutoApproveIfNeeded only acts for auto modes (does not turn off for default)', async () => {
+test('applyPermissionModeToSession is the sole always-approve sync path (on and off)', async () => {
   const client = fakeClientCapturingPrompts();
-  await applyAutoApproveIfNeeded(client, 'sess-1', 'default');
-  assert.equal(client.prompts.length, 0, 'legacy helper must not send anything for default');
-
-  await applyAutoApproveIfNeeded(client, 'sess-1', 'bypassPermissions');
-  assert.equal(client.prompts.length, 1);
-  assert.equal(client.prompts[0].params.prompt[0].text, '/always-approve on');
+  await applyPermissionModeToSession(client, 'sess-1', 'default');
+  await applyPermissionModeToSession(client, 'sess-1', 'bypassPermissions');
+  assert.deepEqual(
+    client.prompts.map((p) => p.params.prompt[0].text),
+    ['/always-approve off', '/always-approve on'],
+  );
 });
 
 test('applyPermissionModeToSession is no-op without sessionId', async () => {

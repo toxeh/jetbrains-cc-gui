@@ -4,7 +4,10 @@
  */
 
 import { sendMessage as grokSendMessage } from '../services/grok/message-service.js';
-import { getGrokReasoningSupportedModels } from '../services/grok/grok-utils.js';
+import {
+  getGrokReasoningSupportedModels,
+  buildGrokContextUsagePayload,
+} from '../services/grok/grok-utils.js';
 
 export async function handleGrokCommand(command, args, stdinData) {
   switch (command) {
@@ -43,19 +46,25 @@ export async function handleGrokCommand(command, args, stdinData) {
     }
 
     case 'getContextUsage': {
-      // Requires persistent daemon mode (like Claude), for rich /context dialog.
-      console.log(JSON.stringify({
-        success: false,
-        error: 'getContextUsage requires daemon/persistent runtime for Grok. Use persistent mode.'
-      }));
+      // One-shot path: synthesize from Java-supplied used/max when present.
+      const payload = buildGrokContextUsagePayload({
+        usedTokens: stdinData?.usedTokens ?? 0,
+        maxTokens: stdinData?.maxTokens ?? 200_000,
+        model: stdinData?.model || '',
+      });
+      console.log(JSON.stringify(payload));
       break;
     }
     case 'getUsage': {
-      // For /usage billing info, prefer persistent but allow direct in fallback.
-      // Will be handled by daemon in main path.
+      // One-shot path: structured unavailable (billing needs auth/daemon).
       console.log(JSON.stringify({
-        success: false,
-        error: 'getUsage requires daemon for consistent auth. Use persistent Grok mode.'
+        success: true,
+        data: {
+          unavailable: true,
+          message:
+            'Grok billing snapshot requires the persistent daemon. Use /usage in chat or open a Grok session first.',
+          source: 'channel-fallback',
+        },
       }));
       break;
     }

@@ -27,9 +27,11 @@ import {
   isPermissionRequestMethod,
 } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
-import { buildGrokEnv } from './grok-utils.js';
+import { buildGrokEnv, buildGrokContextUsagePayload } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
+
+export { buildGrokContextUsagePayload };
 
 // =============================================================================
 // Runtime registry (lightweight, Grok-specific)
@@ -507,25 +509,78 @@ export async function setPermissionModePersistent(params = {}) {
 }
 
 /**
- * Context usage for Grok is derived from lastUsage + static model limits on the Java side.
- * Persistent daemon path returns a structured "not available here" so the UI can fall back.
+ * Context usage for /context dialog. Prefer Java-supplied used/max when present;
+ * otherwise use lastUsage stored on the active runtime.
  */
-export async function getContextUsagePersistent(_params = {}) {
-  const payload = {
-    success: false,
-    error: 'Grok context usage uses persistent ACP lastUsage + static limits (see GrokMessageHandler / GrokSDKBridge).',
-  };
+export async function getContextUsagePersistent(params = {}) {
+  const active = activeTurnRuntime && !activeTurnRuntime.closed ? activeTurnRuntime : null;
+  let used = Number(params.usedTokens);
+  if (!Number.isFinite(used) || used < 0) {
+    used = Number(active?.lastUsedTokens) || 0;
+  }
+  let max = Number(params.maxTokens);
+  if (!Number.isFinite(max) || max <= 0) {
+    max = 200_000;
+  }
+  const model = params.model || active?.model || '';
+  const payload = buildGrokContextUsagePayload({ usedTokens: used, maxTokens: max, model });
   console.log(JSON.stringify(payload));
   return payload;
 }
 
 /**
- * Usage / billing endpoint stub for daemon symmetry with Claude.
+ * Live Grok billing/credits. Best-effort headless `grok -p "/usage"`; otherwise a
+ * structured unavailable payload so the Settings panel stops spinning (never hangs).
  */
-export async function getUsagePersistent(_params = {}) {
+export async function getUsagePersistent(params = {}) {
+  const cwd = (params.cwd || process.cwd()).trim() || process.cwd();
+  try {
+    const { spawnGrok, buildGrokEnv } = await import('./grok-utils.js');
+    const env = buildGrokEnv(
+      process.env,
+      params.apiKey || '',
+      params.baseUrl || '',
+      params.authMethod || process.env.GROK_AUTH_METHOD || '',
+    );
+
+    const result = await Promise.race([
+      spawnGrok(
+        ['-p', '/usage', '--output-format', 'json', '--always-approve'],
+        env,
+        cwd,
+      ),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('grok /usage timed out')), 20_000);
+      }),
+    ]);
+
+    const trimmed = String(result?.stdout || '').trim();
+    if (trimmed) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const payload = parsed.data || parsed.config
+          ? { success: true, data: parsed.data || parsed }
+          : { success: true, data: { raw: parsed }, output: trimmed };
+        console.log(JSON.stringify(payload));
+        return payload;
+      } catch {
+        const payload = { success: true, data: { raw: trimmed }, output: trimmed };
+        console.log(JSON.stringify(payload));
+        return payload;
+      }
+    }
+  } catch (e) {
+    console.error('[GROK-DAEMON] getUsagePersistent failed:', e?.message || e);
+  }
+
   const payload = {
-    success: false,
-    error: 'Grok getUsage is not implemented on the persistent ACP path yet.',
+    success: true,
+    data: {
+      unavailable: true,
+      message:
+        'Grok billing snapshot is not available here. Use the /usage slash command in chat, or check account limits on grok.com / console.x.ai.',
+      source: 'plugin-fallback',
+    },
   };
   console.log(JSON.stringify(payload));
   return payload;
