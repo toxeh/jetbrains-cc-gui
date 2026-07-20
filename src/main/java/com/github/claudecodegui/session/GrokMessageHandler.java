@@ -407,6 +407,20 @@ public class GrokMessageHandler implements MessageCallback {
                         .getModelContextLimit(state.getModel());
                 callbackHandler.notifyUsageUpdate(used, maxTokens);
             }
+            // C: plugin ACP usage ledger for Usage Statistics token totals
+            try {
+                String sid = state.getSessionId();
+                if (sid != null && !sid.isBlank()) {
+                    new com.github.claudecodegui.provider.grok.GrokUsageLedger().record(
+                            sid,
+                            state.getModel(),
+                            null,
+                            usage
+                    );
+                }
+            } catch (Exception ledgerEx) {
+                LOG.debug("Grok usage ledger skip: " + ledgerEx.getMessage());
+            }
             callbackHandler.notifyMessageUpdate(state.getMessages());
         } catch (Exception e) {
             LOG.debug("Grok usage parse skipped: " + e.getMessage());

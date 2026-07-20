@@ -777,9 +777,22 @@ public class ProjectConfigHandler {
                              ", cost: " + stats.estimatedCost + ", total tokens: " + stats.totalUsage.totalTokens);
                     json = gson.toJson(stats);
                 } else if ("grok".equals(provider)) {
-                    // For Grok use live billing via /usage
-                    handleGetGrokUsage(null);
-                    return; // will push via the callback in handleGetGrokUsage
+                    // Local session activity (+ plugin ACP ledger tokens). Billing is optional enrichment.
+                    com.github.claudecodegui.provider.grok.GrokUsageAggregator aggregator =
+                            new com.github.claudecodegui.provider.grok.GrokUsageAggregator();
+                    com.github.claudecodegui.provider.grok.GrokUsageAggregator.ProjectStatistics stats =
+                            aggregator.getProjectStatistics(projectPath, cutoffTime);
+                    json = gson.toJson(stats);
+                    LOG.info("[ProjectConfigHandler] Grok activity - sessions: " + stats.totalSessions
+                            + ", tokensFromLedger: " + stats.tokensFromLedger
+                            + ", total tokens: " + stats.totalUsage.totalTokens);
+                    final String activityJson = json;
+                    ApplicationManager.getApplication().invokeLater(() ->
+                            context.callJavaScript("window.updateUsageStatistics",
+                                    context.escapeJs(activityJson)));
+                    // Best-effort live billing attach (does not block / replace activity).
+                    enrichGrokUsageWithBilling(projectPath);
+                    return;
                 } else {
                     ClaudeHistoryReader reader = new ClaudeHistoryReader();
                     json = gson.toJson(reader.getProjectStatistics(projectPath, cutoffTime));
@@ -876,6 +889,62 @@ public class ProjectConfigHandler {
                     showError("Failed to get Grok usage: " + e.getMessage());
                 }
             });
+        });
+    }
+
+    /**
+     * Optionally merge live {@code /usage} billing into the activity stats already shown.
+     * On failure, pushes a small patch with {@code billingUnavailable} so the UI stays honest.
+     */
+    private void enrichGrokUsageWithBilling(String projectPath) {
+        GrokSDKBridge grokBridge = context.getGrokSDKBridge();
+        if (grokBridge == null) {
+            return;
+        }
+        String cwd = context.getProject() != null ? context.getProject().getBasePath() : projectPath;
+        if ("all".equals(cwd)) {
+            cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
+        }
+        grokBridge.getUsage(cwd).thenAccept(result -> {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    JsonObject patch = new JsonObject();
+                    patch.addProperty("provider", "grok");
+                    patch.addProperty("billingEnrichment", true);
+                    if (result != null && result.has("data") && result.get("data").isJsonObject()) {
+                        JsonObject data = result.getAsJsonObject("data");
+                        if (data.has("unavailable") && data.get("unavailable").getAsBoolean()) {
+                            patch.addProperty(
+                                    "billingUnavailable",
+                                    data.has("message") ? data.get("message").getAsString()
+                                            : "Grok live billing unavailable");
+                        } else {
+                            patch.add("grokBilling", data);
+                        }
+                    } else if (result != null && result.has("success")
+                            && !result.get("success").getAsBoolean()) {
+                        patch.addProperty(
+                                "billingUnavailable",
+                                result.has("error") ? result.get("error").getAsString()
+                                        : "Grok live billing unavailable");
+                    } else if (result != null) {
+                        // Raw CLI shape — pass through for the billing panel
+                        if (result.has("data")) {
+                            patch.add("grokBilling", result.get("data"));
+                        } else {
+                            patch.add("grokBilling", result);
+                        }
+                    }
+                    context.callJavaScript(
+                            "window.updateUsageStatistics",
+                            context.escapeJs(gson.toJson(patch)));
+                } catch (Exception e) {
+                    LOG.debug("[ProjectConfigHandler] Grok billing enrich skipped: " + e.getMessage());
+                }
+            });
+        }).exceptionally(ex -> {
+            LOG.debug("[ProjectConfigHandler] Grok billing enrich failed: " + ex.getMessage());
+            return null;
         });
     }
 
