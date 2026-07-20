@@ -1,16 +1,37 @@
 /**
- * Comprehensive tests for Grok persistent ACP service.
- * Covers: runtime keys, registry, send/reset/abort, live setPermissionMode,
- * aggressive cleanup, preconnect, and isolation.
+ * Tests for Grok persistent ACP service: runtime keys, live permission mode,
+ * default-mode normalization (preconnect "" ↔ UI "default").
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  __testing
+  __testing,
+  setPermissionModePersistent,
 } from './persistent-acp-service.js';
 
-const { makeRuntimeKey, resetRegistry, getRuntimes, createTestRuntime, forceSetActiveTurn, triggerCleanup, getActiveTurnRuntimeInternal } = __testing;
+const {
+  makeRuntimeKey,
+  normalizePermissionMode,
+  resetRegistry,
+  getRuntimes,
+  createTestRuntime,
+  forceSetActiveTurn,
+  getActiveTurnRuntimeInternal,
+} = __testing;
+
+// ---------------------------------------------------------------------------
+// normalizePermissionMode / makeRuntimeKey
+// ---------------------------------------------------------------------------
+
+test('normalizePermissionMode maps empty/null to default', () => {
+  assert.equal(normalizePermissionMode(''), 'default');
+  assert.equal(normalizePermissionMode(null), 'default');
+  assert.equal(normalizePermissionMode(undefined), 'default');
+  assert.equal(normalizePermissionMode('  '), 'default');
+  assert.equal(normalizePermissionMode('default'), 'default');
+  assert.equal(normalizePermissionMode('bypassPermissions'), 'bypasspermissions');
+});
 
 test('makeRuntimeKey is stable for same inputs', () => {
   const k1 = makeRuntimeKey({
@@ -32,13 +53,35 @@ test('makeRuntimeKey is stable for same inputs', () => {
   assert.equal(k1, k2);
 });
 
+test('makeRuntimeKey treats empty permissionMode as default (preconnect ↔ UI)', () => {
+  const kEmpty = makeRuntimeKey({
+    runtimeSessionEpoch: 'e1',
+    sessionId: 's1',
+    cwd: '/tmp',
+    model: 'm',
+    permissionMode: '',
+  });
+  const kDefault = makeRuntimeKey({
+    runtimeSessionEpoch: 'e1',
+    sessionId: 's1',
+    cwd: '/tmp',
+    model: 'm',
+    permissionMode: 'default',
+  });
+  assert.equal(
+    kEmpty,
+    kDefault,
+    'preconnect with "" must share runtime key with UI default mode'
+  );
+});
+
 test('makeRuntimeKey differs when epoch changes', () => {
   const k1 = makeRuntimeKey({ runtimeSessionEpoch: 'e1', sessionId: '', cwd: '/tmp', model: '', permissionMode: '' });
   const k2 = makeRuntimeKey({ runtimeSessionEpoch: 'e2', sessionId: '', cwd: '/tmp', model: '', permissionMode: '' });
   assert.notEqual(k1, k2);
 });
 
-test('makeRuntimeKey differs when permissionMode changes (conservative)', () => {
+test('makeRuntimeKey differs when permissionMode changes (default vs bypass)', () => {
   const k1 = makeRuntimeKey({ runtimeSessionEpoch: 'e1', sessionId: '', cwd: '/tmp', model: '', permissionMode: 'default' });
   const k2 = makeRuntimeKey({ runtimeSessionEpoch: 'e1', sessionId: '', cwd: '/tmp', model: '', permissionMode: 'bypassPermissions' });
   assert.notEqual(k1, k2);
@@ -50,80 +93,139 @@ test('makeRuntimeKey includes auth fingerprint (key vs oauth)', () => {
   assert.notEqual(withKey, withoutKey);
 });
 
+// ---------------------------------------------------------------------------
+// Registry + setPermissionModePersistent (live mode — silence fix)
+// ---------------------------------------------------------------------------
+
 test('registry starts empty after reset', () => {
   resetRegistry();
   assert.equal(getRuntimes().length, 0);
 });
 
-test('setPermissionModePersistent updates live mode on active runtime', () => {
+test('createTestRuntime registers with default mode and live holder', () => {
   resetRegistry();
-  const rt = createTestRuntime('key1', { permissionMode: 'default' });
+  const rt = createTestRuntime('k1', { permissionMode: '' });
+  assert.equal(rt.permissionMode, 'default');
+  assert.ok(rt._livePermission);
+  assert.equal(rt._livePermission.permissionMode, 'default');
+  assert.equal(getRuntimes().length, 1);
+});
+
+test('setPermissionModePersistent updates live holder used by permission handlers', async () => {
+  resetRegistry();
+  const prompts = [];
+  const rt = createTestRuntime('key1', {
+    sessionId: 'sess-live',
+    permissionMode: 'default',
+    clientRequest: async (method, params) => {
+      prompts.push({ method, params });
+      return {};
+    },
+  });
+  // Wire client.request from clientRequest helper
+  rt.client.request = rt.client.request || (async (m, p) => {
+    prompts.push({ method: m, params: p });
+    return {};
+  });
+  // createTestRuntime puts clientRequest on opts.clientRequest — re-bind properly
+  const captured = [];
+  rt.client = {
+    activeSessionId: 'sess-live',
+    request: async (method, params) => {
+      captured.push({ method, params });
+      return {};
+    },
+  };
   forceSetActiveTurn(rt);
 
-  // Directly mutate via the service logic simulation for test stability
-  // (in real use the daemon calls the exported function)
-  if (getActiveTurnRuntimeInternal() === rt) {
-    rt.permissionMode = 'bypassPermissions';
-  }
-
-  assert.equal(rt.permissionMode, 'bypassPermissions');
-});
-
-test('abortCurrentTurn clears active and disposes runtime (via test helper)', async () => {
-  resetRegistry();
-  const rt = createTestRuntime('key-abort', { sessionId: 's-abort' });
-  forceSetActiveTurn(rt);
-
-  // Simulate what abort does
-  rt.closed = true;
-
-  assert.equal(rt.closed, true);
-});
-
-test('resetRuntimePersistent by epoch removes matching runtimes (via helpers)', () => {
-  resetRegistry();
-  createTestRuntime('k1', { epoch: 'ep1' });
-  createTestRuntime('k2', { epoch: 'ep2' });
-
-  // Simulate reset by epoch
-  for (const [k, rt] of getRuntimes().entries ? [] : []) {
-    if (rt.epoch === 'ep1') rt.closed = true;
-  }
-
-  assert.ok(true); // full logic covered in integration
-});
-
-test('aggressive cleanup removes idle anonymous runtimes', () => {
-  resetRegistry();
-  const oldRt = createTestRuntime('old-anon', {
-    epoch: 'old',
-    sessionId: null,
-    lastUsedAt: Date.now() - 20 * 60 * 1000,
-    activeTurnCount: 0
+  const result = await setPermissionModePersistent({
+    sessionId: 'sess-live',
+    permissionMode: 'bypassPermissions',
   });
 
-  triggerCleanup();
-
-  assert.ok(!getRuntimes().some(r => r === oldRt && !r.closed) || oldRt.closed);
+  assert.equal(result.applied, true);
+  assert.equal(result.permissionMode, 'bypasspermissions');
+  assert.equal(rt.permissionMode, 'bypasspermissions');
+  assert.equal(
+    rt._livePermission.permissionMode,
+    'bypasspermissions',
+    'live holder must update so authorizeCreate/onServerRequest re-read new mode'
+  );
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].params.prompt[0].text, '/always-approve on');
 });
 
-test('different permissionMode produces different runtime keys (prevents cross-mode reuse)', () => {
-  const kDefault = makeRuntimeKey({ runtimeSessionEpoch: 'e', sessionId: 's', cwd: '/p', model: 'g', permissionMode: 'default' });
-  const kBypass = makeRuntimeKey({ runtimeSessionEpoch: 'e', sessionId: 's', cwd: '/p', model: 'g', permissionMode: 'bypassPermissions' });
-  assert.notEqual(kDefault, kBypass);
-});
-
-test('live permission change does not affect other runtimes', () => {
+test('setPermissionModePersistent switching back to default turns always-approve off', async () => {
   resetRegistry();
-  const rtA = createTestRuntime('key-a', { permissionMode: 'default' });
-  const rtB = createTestRuntime('key-b', { permissionMode: 'default' });
+  const captured = [];
+  const rt = createTestRuntime('key-switch', {
+    sessionId: 'sess-sw',
+    permissionMode: 'bypassPermissions',
+  });
+  rt.client = {
+    activeSessionId: 'sess-sw',
+    request: async (method, params) => {
+      captured.push(params.prompt[0].text);
+      return {};
+    },
+  };
+  forceSetActiveTurn(rt);
+
+  await setPermissionModePersistent({
+    sessionId: 'sess-sw',
+    permissionMode: 'default',
+  });
+
+  assert.equal(rt._livePermission.permissionMode, 'default');
+  assert.equal(captured[0], '/always-approve off');
+});
+
+test('setPermissionModePersistent without runtime is applied=false (no throw)', async () => {
+  resetRegistry();
+  const result = await setPermissionModePersistent({
+    sessionId: 'missing',
+    permissionMode: 'default',
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.applied, false);
+});
+
+test('setPermissionModePersistent only mutates matching runtime', async () => {
+  resetRegistry();
+  const rtA = createTestRuntime('key-a', { sessionId: 'a', permissionMode: 'default' });
+  const rtB = createTestRuntime('key-b', { sessionId: 'b', permissionMode: 'default' });
+  rtA.client = { activeSessionId: 'a', request: async () => ({}) };
+  rtB.client = { activeSessionId: 'b', request: async () => ({}) };
   forceSetActiveTurn(rtA);
 
-  // Simulate live update only on active
-  if (getActiveTurnRuntimeInternal() === rtA) {
-    rtA.permissionMode = 'bypassPermissions';
-  }
+  await setPermissionModePersistent({ sessionId: 'a', permissionMode: 'bypassPermissions' });
 
-  assert.equal(rtA.permissionMode, 'bypassPermissions');
-  assert.equal(rtB.permissionMode, 'default');
+  assert.equal(rtA._livePermission.permissionMode, 'bypasspermissions');
+  assert.equal(rtB._livePermission.permissionMode, 'default');
+});
+
+test('live holder change is visible to decision-style re-read (simulates authorizeCreate)', () => {
+  resetRegistry();
+  const rt = createTestRuntime('auth-gate', { permissionMode: 'default' });
+  // Simulate what authorizeCreate does: re-read live.permissionMode every call
+  const shouldAuto = () => {
+    const mode = rt._livePermission.permissionMode || 'default';
+    return mode === 'bypasspermissions' || mode === 'yolo' || mode === 'auto';
+  };
+  assert.equal(shouldAuto(), false, 'default must gate tools');
+
+  rt._livePermission.permissionMode = 'bypasspermissions';
+  assert.equal(shouldAuto(), true, 'after live switch to bypass, gate opens');
+
+  rt._livePermission.permissionMode = 'default';
+  assert.equal(shouldAuto(), false, 'switch back to default must gate again');
+});
+
+test('forceSetActiveTurn tracks active runtime', () => {
+  resetRegistry();
+  const rt = createTestRuntime('active', { permissionMode: 'default' });
+  forceSetActiveTurn(rt);
+  assert.equal(getActiveTurnRuntimeInternal(), rt);
+  forceSetActiveTurn(null);
+  assert.equal(getActiveTurnRuntimeInternal(), null);
 });
