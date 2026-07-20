@@ -426,34 +426,50 @@ export async function setPermissionModePersistent(params = {}) {
   const sessionId = (params.sessionId || '').trim() || null;
   const epoch = params.runtimeSessionEpoch || params.epoch || null;
 
-  let runtime = null;
+  // Collect every runtime that should flip mode now. Mid-turn Auto switches must
+  // hit the active turn even when Java's sessionId does not match the ACP id
+  // (permission-service key vs Grok thread id) — that mismatch was a residual
+  // path where dialogs kept appearing after the user selected Auto.
+  const targets = [];
+  const seen = new Set();
+  const addTarget = (rt) => {
+    if (!rt || rt.closed || seen.has(rt)) return;
+    seen.add(rt);
+    targets.push(rt);
+  };
+
+  // 1) Always prefer the in-flight turn (sessionId mismatch safe).
+  if (activeTurnRuntime && !activeTurnRuntime.closed) {
+    addTarget(activeTurnRuntime);
+  }
+
+  // 2) Exact ACP / host session match.
   if (sessionId) {
     for (const rt of getAllRuntimes()) {
       if (!rt.closed && rt.sessionId === sessionId) {
-        runtime = rt;
-        break;
-      }
-    }
-  }
-  if (!runtime || runtime.closed) {
-    const active = activeTurnRuntime;
-    if (active && !active.closed && (!sessionId || active.sessionId === sessionId)) {
-      runtime = active;
-    }
-  }
-  if (!runtime || runtime.closed) {
-    // Best-effort: update any runtime matching epoch (preconnect may not have session id yet)
-    if (epoch) {
-      for (const rt of getAllRuntimes()) {
-        if (!rt.closed && rt.epoch === epoch) {
-          runtime = rt;
-          break;
-        }
+        addTarget(rt);
       }
     }
   }
 
-  if (!runtime || runtime.closed) {
+  // 3) Same epoch (preconnect + send share epoch; covers id-less runtimes).
+  if (epoch) {
+    for (const rt of getAllRuntimes()) {
+      if (!rt.closed && rt.epoch === epoch) {
+        addTarget(rt);
+      }
+    }
+  }
+
+  // 4) Last resort: single open runtime in the process.
+  if (targets.length === 0) {
+    const open = getAllRuntimes().filter((rt) => !rt.closed);
+    if (open.length === 1) {
+      addTarget(open[0]);
+    }
+  }
+
+  if (targets.length === 0) {
     console.log(
       '[GROK-DAEMON] setPermissionModePersistent skipped: no live runtime'
       + ` sessionId=${sessionId || '(none)'} epoch=${epoch || '(none)'} mode=${targetMode}`
@@ -461,24 +477,33 @@ export async function setPermissionModePersistent(params = {}) {
     return { success: true, applied: false, permissionMode: targetMode };
   }
 
-  runtime.permissionMode = targetMode;
-  if (runtime._livePermission) {
-    runtime._livePermission.permissionMode = targetMode;
-  }
+  for (const runtime of targets) {
+    runtime.permissionMode = targetMode;
+    if (runtime._livePermission) {
+      runtime._livePermission.permissionMode = targetMode;
+    }
 
-  if (runtime.client?.activeSessionId || runtime.sessionId) {
-    await applyPermissionModeToSession(
-      runtime.client,
-      runtime.sessionId || runtime.client.activeSessionId,
-      targetMode,
+    const sid =
+      runtime.sessionId
+      || runtime.client?.activeSessionId
+      || null;
+    if (runtime.client && sid) {
+      await applyPermissionModeToSession(runtime.client, sid, targetMode);
+    }
+
+    console.log(
+      '[GROK-DAEMON] setPermissionModePersistent applied mode=' + targetMode
+      + ' sessionId=' + (runtime.sessionId || '(none)')
+      + ' epoch=' + (runtime.epoch || '(none)')
     );
   }
 
-  console.log(
-    '[GROK-DAEMON] setPermissionModePersistent applied mode=' + targetMode
-    + ' sessionId=' + (runtime.sessionId || '(none)')
-  );
-  return { success: true, applied: true, permissionMode: targetMode };
+  return {
+    success: true,
+    applied: true,
+    permissionMode: targetMode,
+    runtimeCount: targets.length,
+  };
 }
 
 /**

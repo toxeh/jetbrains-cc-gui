@@ -190,7 +190,66 @@ test('setPermissionModePersistent without runtime is applied=false (no throw)', 
   assert.equal(result.applied, false);
 });
 
-test('setPermissionModePersistent only mutates matching runtime', async () => {
+test('setPermissionModePersistent updates active turn even when sessionId mismatches', async () => {
+  // Regression: Java may pass permission-service / host session id while the Grok
+  // runtime stores the ACP thread id. Live Auto switch must still hit the active turn.
+  resetRegistry();
+  const captured = [];
+  const rt = createTestRuntime('key-active', {
+    sessionId: 'acp-thread-xyz',
+    permissionMode: 'default',
+  });
+  rt.client = {
+    activeSessionId: 'acp-thread-xyz',
+    request: async (_m, params) => {
+      captured.push(params.prompt[0].text);
+      return {};
+    },
+  };
+  forceSetActiveTurn(rt);
+
+  const result = await setPermissionModePersistent({
+    sessionId: 'host-permission-uuid-different',
+    permissionMode: 'bypassPermissions',
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(rt._livePermission.permissionMode, 'bypasspermissions');
+  assert.equal(captured[0], '/always-approve on');
+});
+
+test('setPermissionModePersistent updates all runtimes in the same epoch', async () => {
+  resetRegistry();
+  const rtA = createTestRuntime('key-a', {
+    sessionId: 'a',
+    epoch: 'ep-shared',
+    permissionMode: 'default',
+  });
+  const rtB = createTestRuntime('key-b', {
+    sessionId: 'b',
+    epoch: 'ep-shared',
+    permissionMode: 'default',
+  });
+  const rtOther = createTestRuntime('key-other', {
+    sessionId: 'c',
+    epoch: 'ep-other',
+    permissionMode: 'default',
+  });
+  rtA.client = { activeSessionId: 'a', request: async () => ({}) };
+  rtB.client = { activeSessionId: 'b', request: async () => ({}) };
+  rtOther.client = { activeSessionId: 'c', request: async () => ({}) };
+
+  await setPermissionModePersistent({
+    runtimeSessionEpoch: 'ep-shared',
+    permissionMode: 'bypassPermissions',
+  });
+
+  assert.equal(rtA._livePermission.permissionMode, 'bypasspermissions');
+  assert.equal(rtB._livePermission.permissionMode, 'bypasspermissions');
+  assert.equal(rtOther._livePermission.permissionMode, 'default');
+});
+
+test('setPermissionModePersistent only mutates active when targeting session without epoch', async () => {
   resetRegistry();
   const rtA = createTestRuntime('key-a', { sessionId: 'a', permissionMode: 'default' });
   const rtB = createTestRuntime('key-b', { sessionId: 'b', permissionMode: 'default' });
@@ -198,6 +257,7 @@ test('setPermissionModePersistent only mutates matching runtime', async () => {
   rtB.client = { activeSessionId: 'b', request: async () => ({}) };
   forceSetActiveTurn(rtA);
 
+  // Active is always updated; exact session match also updates A.
   await setPermissionModePersistent({ sessionId: 'a', permissionMode: 'bypassPermissions' });
 
   assert.equal(rtA._livePermission.permissionMode, 'bypasspermissions');
