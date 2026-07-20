@@ -18,6 +18,29 @@ import { AcpTerminalHost, isTerminalMethod } from './acp-terminal-host.js';
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
+ * User-turn session/prompt budget. Long agentic runs (tools + terminal) routinely
+ * exceed 5 minutes; 300s was killing healthy turns with ACP timeout.
+ * Override: GROK_ACP_TURN_TIMEOUT_MS (clamped 5m … 4h).
+ */
+const DEFAULT_TURN_PROMPT_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+const MIN_TURN_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_TURN_PROMPT_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
+export function resolveTurnPromptTimeoutMs(env = process.env) {
+  const raw = env?.GROK_ACP_TURN_TIMEOUT_MS;
+  if (raw == null || String(raw).trim() === '') {
+    return DEFAULT_TURN_PROMPT_TIMEOUT_MS;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    return DEFAULT_TURN_PROMPT_TIMEOUT_MS;
+  }
+  return Math.min(MAX_TURN_PROMPT_TIMEOUT_MS, Math.max(MIN_TURN_PROMPT_TIMEOUT_MS, Math.floor(n)));
+}
+
+export const TURN_PROMPT_TIMEOUT_MS = resolveTurnPromptTimeoutMs();
+
+/**
  * Reusable helpers for both one-shot (runAcpTurn) and persistent runtime paths.
  * These allow init+auth+session to be done once, then prompt() reused.
  */
@@ -353,8 +376,9 @@ export class GrokAcpClient {
   /**
    * Perform a prompt on an already-initialized/authenticated session.
    * Client must be started and session active.
+   * Default timeout is long (see TURN_PROMPT_TIMEOUT_MS / GROK_ACP_TURN_TIMEOUT_MS).
    */
-  async prompt(sessionId, promptBlocks, timeoutMs = 300_000) {
+  async prompt(sessionId, promptBlocks, timeoutMs = TURN_PROMPT_TIMEOUT_MS) {
     if (!this.proc || this.closed) {
       throw new Error('ACP client is not running');
     }
@@ -646,7 +670,7 @@ export async function runAcpTurn({
         sessionId: activeSessionId,
         prompt: promptBlocks,
       },
-      300_000
+      TURN_PROMPT_TIMEOUT_MS
     );
     emit('prompt_result', promptResult);
 

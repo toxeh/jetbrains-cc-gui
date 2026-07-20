@@ -5,7 +5,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GrokAcpClient } from './grok-acp-client.js';
+import {
+  GrokAcpClient,
+  resolveTurnPromptTimeoutMs,
+  TURN_PROMPT_TIMEOUT_MS,
+} from './grok-acp-client.js';
 import {
   __testing,
   getContextUsagePersistent,
@@ -95,4 +99,24 @@ test('createTestRuntime can simulate unhealthy client for recycle path', () => {
   const rt = createTestRuntime('dead-rt', { client, sessionId: 's' });
   assert.equal(getRuntimes().length, 1);
   assert.ok(rt.client.unhealthy);
+});
+
+test('default turn prompt timeout is at least 30 minutes (long agentic runs)', () => {
+  assert.ok(
+    TURN_PROMPT_TIMEOUT_MS >= 30 * 60 * 1000,
+    `expected >= 30m, got ${TURN_PROMPT_TIMEOUT_MS}ms`,
+  );
+  assert.equal(resolveTurnPromptTimeoutMs({}), 60 * 60 * 1000);
+});
+
+test('resolveTurnPromptTimeoutMs honors GROK_ACP_TURN_TIMEOUT_MS with clamps', () => {
+  assert.equal(resolveTurnPromptTimeoutMs({ GROK_ACP_TURN_TIMEOUT_MS: '900000' }), 900_000);
+  // below 5m floor
+  assert.equal(resolveTurnPromptTimeoutMs({ GROK_ACP_TURN_TIMEOUT_MS: '1000' }), 5 * 60 * 1000);
+  // above 4h ceiling
+  assert.equal(
+    resolveTurnPromptTimeoutMs({ GROK_ACP_TURN_TIMEOUT_MS: String(99 * 60 * 60 * 1000) }),
+    4 * 60 * 60 * 1000,
+  );
+  assert.equal(resolveTurnPromptTimeoutMs({ GROK_ACP_TURN_TIMEOUT_MS: 'nope' }), 60 * 60 * 1000);
 });
