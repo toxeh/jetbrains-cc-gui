@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getFileIcon } from '../../utils/fileIcons';
+import { useGrokPlanUsage } from '../../hooks/useGrokPlanUsage';
+import { GrokPlanUsageIndicator } from './GrokPlanUsageIndicator';
 import { TokenIndicator } from './TokenIndicator';
 import type { SelectedAgent } from './types';
 
@@ -63,6 +65,8 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isGrok = currentProvider === 'grok';
+  const grokPlanUsage = useGrokPlanUsage(currentProvider);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [showEnablePopover, setShowEnablePopover] = useState(false);
 
@@ -263,8 +267,16 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
         </div>
       )}
 
-      {/* Right side tools - StatusPanel toggle and Rewind button */}
+      {/* Right side tools - Grok plan usage, StatusPanel toggle, Rewind */}
       <div className="context-tools-right">
+        {/* Grok plan % usage + reset (between File Context and Collapse) */}
+        {isGrok && (
+          <GrokPlanUsageIndicator
+            snapshot={grokPlanUsage.snapshot}
+            status={grokPlanUsage.status}
+          />
+        )}
+
         {/* StatusPanel expand/collapse toggle - always visible */}
         {onToggleStatusPanel && (
           <button

@@ -72,6 +72,83 @@
   align-items: center;
   gap: 4px;
   margin-left: auto;
+  min-width: 0;
+}
+
+/* Grok plan usage (layout D: mini-bar + % + short reset) */
+.grok-plan-usage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 160px;
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  flex-shrink: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.grok-plan-usage-bar {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--input-border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.grok-plan-usage-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--text-secondary);
+  transition: width 0.25s ease, background 0.2s ease;
+}
+
+.grok-plan-usage-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.grok-plan-usage-reset {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+  opacity: 0.9;
+}
+
+.grok-plan-usage.pace-green .grok-plan-usage-fill {
+  background: #3ba55d;
+}
+.grok-plan-usage.pace-green .grok-plan-usage-pct {
+  color: #3ba55d;
+}
+
+.grok-plan-usage.pace-yellow .grok-plan-usage-fill {
+  background: #d4a017;
+}
+.grok-plan-usage.pace-yellow .grok-plan-usage-pct {
+  color: #d4a017;
+}
+
+.grok-plan-usage.pace-red .grok-plan-usage-fill {
+  background: #e34850;
+}
+.grok-plan-usage.pace-red .grok-plan-usage-pct {
+  color: #e34850;
+}
+
+.grok-plan-usage.unavailable {
+  opacity: 0.75;
+}
+
+.grok-plan-usage-label {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 /* StatusPanel toggle button */

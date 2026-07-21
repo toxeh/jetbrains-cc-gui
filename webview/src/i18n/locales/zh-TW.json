@@ -55,6 +55,13 @@
     "context": "上下文",
     "usage": "上下文",
     "usagePercentage": "上下文: {{percentage}}",
+    "grokPlanUsage": {
+      "dash": "Usage —",
+      "unavailable": "Usage unavailable",
+      "tooltip": "Weekly limit {{percent}}%",
+      "tooltipWithReset": "Weekly limit {{percent}}% · Resets {{value}}",
+      "resetShort": "Reset {{value}}"
+    },
     "noMatchingFiles": "無匹配檔案",
     "noMatchingCommands": "無匹配指令",
     "noMatchingHistory": "無匹配歷史",

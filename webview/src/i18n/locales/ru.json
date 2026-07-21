@@ -55,6 +55,13 @@
     "context": "Контекст",
     "usage": "Использование",
     "usagePercentage": "Использование: {{percentage}}",
+    "grokPlanUsage": {
+      "dash": "Usage —",
+      "unavailable": "Usage недоступен",
+      "tooltip": "Недельный лимит {{percent}}%",
+      "tooltipWithReset": "Недельный лимит {{percent}}% · Сброс {{value}}",
+      "resetShort": "Reset {{value}}"
+    },
     "noMatchingFiles": "Файлы не найдены",
     "noMatchingCommands": "Команды не найдены",
     "noMatchingHistory": "Ничего не найдено",
