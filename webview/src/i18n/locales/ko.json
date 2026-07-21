@@ -55,6 +55,13 @@
     "context": "컨텍스트",
     "usage": "사용량",
     "usagePercentage": "사용량: {{percentage}}",
+    "grokPlanUsage": {
+      "dash": "Usage —",
+      "unavailable": "Usage unavailable",
+      "tooltip": "Weekly limit {{percent}}%",
+      "tooltipWithReset": "Weekly limit {{percent}}% · Resets {{value}}",
+      "resetShort": "Reset {{value}}"
+    },
     "noMatchingFiles": "일치하는 파일 없음",
     "noMatchingCommands": "일치하는 명령어 없음",
     "noMatchingHistory": "일치하는 히스토리 없음",

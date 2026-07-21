@@ -21,6 +21,11 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -892,6 +897,191 @@ public class ProjectConfigHandler {
                 }
             });
         });
+    }
+
+    /**
+     * ContextBar plan-usage snapshot for Grok: prefer local-agent/gateway {@code GET /capacity},
+     * else CLI {@code /usage}. Pushes {@code window.updateGrokPlanUsage} (does not hijack Settings handlers).
+     */
+    public void handleGetGrokPlanUsage() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            JsonObject payload = resolveGrokPlanUsagePayload();
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    context.callJavaScript("window.updateGrokPlanUsage",
+                            context.escapeJs(gson.toJson(payload)));
+                } catch (Exception e) {
+                    LOG.debug("[ProjectConfigHandler] updateGrokPlanUsage failed: " + e.getMessage());
+                }
+            });
+        });
+    }
+
+    /** Package-visible for tests: dual-source plan usage payload. */
+    JsonObject resolveGrokPlanUsagePayload() {
+        // 1) local-agent /capacity from configured bases (no cold daemon)
+        for (String base : new String[] {
+                safeGrokString(settingsService::getGrokOauthBaseUrl),
+                safeGrokString(settingsService::getGrokApiBaseUrl)
+        }) {
+            String capacityUrl = capacityUrlFromBase(base);
+            if (capacityUrl == null) {
+                continue;
+            }
+            JsonObject fromCapacity = fetchCapacityJson(capacityUrl);
+            if (fromCapacity != null && isPresentCapacity(fromCapacity)) {
+                fromCapacity.addProperty("ok", true);
+                if (!fromCapacity.has("source")) {
+                    fromCapacity.addProperty("source", "local-agent");
+                }
+                return fromCapacity;
+            }
+        }
+
+        // 2) CLI /usage via daemon (best-effort; may be unavailable)
+        GrokSDKBridge grokBridge = context.getGrokSDKBridge();
+        if (grokBridge != null) {
+            try {
+                String cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
+                JsonObject result = grokBridge.getUsage(cwd).get(20, java.util.concurrent.TimeUnit.SECONDS);
+                JsonObject normalized = normalizeCliUsageToPlan(result);
+                if (normalized != null) {
+                    return normalized;
+                }
+            } catch (Exception e) {
+                LOG.debug("[ProjectConfigHandler] CLI plan usage failed: " + e.getMessage());
+            }
+        }
+
+        JsonObject unavailable = new JsonObject();
+        unavailable.addProperty("ok", true);
+        unavailable.addProperty("present", false);
+        unavailable.addProperty("message", "Usage unavailable");
+        unavailable.addProperty("source", "plugin");
+        return unavailable;
+    }
+
+    private static String safeGrokString(ThrowingStringSupplier s) {
+        try {
+            return s.get();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingStringSupplier { String get() throws Exception; }
+
+    /** http://127.0.0.1:18790/v1 → http://127.0.0.1:18790/capacity */
+    static String capacityUrlFromBase(String baseUrl) {
+        if (baseUrl == null) {
+            return null;
+        }
+        String raw = baseUrl.trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        try {
+            URI u = URI.create(raw);
+            if (u.getScheme() == null || u.getHost() == null) {
+                return null;
+            }
+            if (!u.getScheme().startsWith("http")) {
+                return null;
+            }
+            int port = u.getPort();
+            String authority = port > 0 ? u.getHost() + ":" + port : u.getHost();
+            return u.getScheme() + "://" + authority + "/capacity";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private JsonObject fetchCapacityJson(String url) {
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(3))
+                    .build();
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(8))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200 || resp.body() == null || resp.body().isBlank()) {
+                return null;
+            }
+            return gson.fromJson(resp.body(), JsonObject.class);
+        } catch (Exception e) {
+            LOG.debug("[ProjectConfigHandler] capacity fetch " + url + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean isPresentCapacity(JsonObject o) {
+        if (o == null) {
+            return false;
+        }
+        if (o.has("present") && o.get("present").isJsonPrimitive()
+                && o.get("present").getAsJsonPrimitive().isBoolean()
+                && !o.get("present").getAsBoolean()) {
+            return false;
+        }
+        return o.has("capacity_pct") || o.has("used_pct") || o.has("capacityPct");
+    }
+
+    /**
+     * Map CLI /usage envelope into local-agent capacity shape for the webview.
+     */
+    static JsonObject normalizeCliUsageToPlan(JsonObject result) {
+        if (result == null) {
+            return null;
+        }
+        JsonObject data = result;
+        if (result.has("data") && result.get("data").isJsonObject()) {
+            data = result.getAsJsonObject("data");
+        }
+        if (data.has("unavailable") && data.get("unavailable").getAsBoolean()) {
+            JsonObject out = new JsonObject();
+            out.addProperty("ok", true);
+            out.addProperty("present", false);
+            out.addProperty("message", data.has("message") ? data.get("message").getAsString()
+                    : "Grok billing unavailable");
+            out.addProperty("source", "cli");
+            return out;
+        }
+        JsonObject config = data;
+        if (data.has("config") && data.get("config").isJsonObject()) {
+            config = data.getAsJsonObject("config");
+        }
+        Double pct = null;
+        if (config.has("creditUsagePercent") && config.get("creditUsagePercent").isJsonPrimitive()) {
+            pct = config.get("creditUsagePercent").getAsDouble();
+        } else if (data.has("creditUsagePercent") && data.get("creditUsagePercent").isJsonPrimitive()) {
+            pct = data.get("creditUsagePercent").getAsDouble();
+        }
+        if (pct == null || !Double.isFinite(pct)) {
+            return null;
+        }
+        JsonObject out = new JsonObject();
+        out.addProperty("ok", true);
+        out.addProperty("present", true);
+        out.addProperty("capacity_pct", pct);
+        out.addProperty("source", "cli");
+        if (config.has("currentPeriod") && config.get("currentPeriod").isJsonObject()) {
+            JsonObject period = config.getAsJsonObject("currentPeriod");
+            if (period.has("end") && period.get("end").isJsonPrimitive()) {
+                out.addProperty("reset_at", period.get("end").getAsString());
+            }
+            if (period.has("start") && period.get("start").isJsonPrimitive()) {
+                out.addProperty("period_start", period.get("start").getAsString());
+            }
+            if (period.has("type") && period.get("type").isJsonPrimitive()) {
+                out.addProperty("period_type", period.get("type").getAsString());
+            }
+        } else if (data.has("nextReset") && data.get("nextReset").isJsonPrimitive()) {
+            out.addProperty("reset_at", data.get("nextReset").getAsString());
+        }
+        return out;
     }
 
     /**

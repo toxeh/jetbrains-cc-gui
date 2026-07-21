@@ -55,6 +55,13 @@
     "context": "コンテキスト",
     "usage": "使用状況",
     "usagePercentage": "使用率: {{percentage}}",
+    "grokPlanUsage": {
+      "dash": "Usage —",
+      "unavailable": "Usage unavailable",
+      "tooltip": "Weekly limit {{percent}}%",
+      "tooltipWithReset": "Weekly limit {{percent}}% · Resets {{value}}",
+      "resetShort": "Reset {{value}}"
+    },
     "noMatchingFiles": "一致するファイルがありません",
     "noMatchingCommands": "一致するコマンドがありません",
     "noMatchingHistory": "一致する履歴がありません",

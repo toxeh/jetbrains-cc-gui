@@ -55,6 +55,13 @@
     "context": "संदर्भ",
     "usage": "उपयोग",
     "usagePercentage": "उपयोग: {{percentage}}",
+    "grokPlanUsage": {
+      "dash": "Usage —",
+      "unavailable": "Usage unavailable",
+      "tooltip": "Weekly limit {{percent}}%",
+      "tooltipWithReset": "Weekly limit {{percent}}% · Resets {{value}}",
+      "resetShort": "Reset {{value}}"
+    },
     "noMatchingFiles": "कोई मेल खाने वाली फाइलें नहीं",
     "noMatchingCommands": "कोई मेल खाने वाली कमांड नहीं",
     "noMatchingHistory": "कोई मेल खाने वाली इतिहास नहीं",

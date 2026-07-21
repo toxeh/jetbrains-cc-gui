@@ -1,0 +1,142 @@
+import { describe, expect, it } from 'vitest';
+import {
+  capacityUrlFromBase,
+  clampPercent,
+  computeTimeBudgetPercent,
+  derivePeriodStart,
+  paceColor,
+  parseCapacityPayload,
+  parseCliUsagePayload,
+  resolveTimeBudget,
+} from './grokBillingPace';
+
+describe('clampPercent', () => {
+  it('clamps to 0–100', () => {
+    expect(clampPercent(-5)).toBe(0);
+    expect(clampPercent(150)).toBe(100);
+    expect(clampPercent(47.2)).toBe(47.2);
+  });
+});
+
+describe('derivePeriodStart', () => {
+  it('WEEKLY is end − 7d', () => {
+    const end = new Date('2026-07-28T00:00:00Z');
+    const start = derivePeriodStart(end, 'WEEKLY');
+    expect(start?.toISOString()).toBe('2026-07-21T00:00:00.000Z');
+  });
+
+  it('accepts USAGE_PERIOD_TYPE_WEEKLY enum', () => {
+    const end = new Date('2026-07-28T00:00:00Z');
+    const start = derivePeriodStart(end, 'USAGE_PERIOD_TYPE_WEEKLY');
+    expect(start?.toISOString()).toBe('2026-07-21T00:00:00.000Z');
+  });
+
+  it('monthly is end − 30d', () => {
+    const end = new Date('2026-08-01T00:00:00Z');
+    const start = derivePeriodStart(end, 'monthly');
+    expect(start?.toISOString()).toBe('2026-07-02T00:00:00.000Z');
+  });
+
+  it('unknown type → null', () => {
+    expect(derivePeriodStart(new Date(), 'DAILY')).toBeNull();
+  });
+});
+
+describe('computeTimeBudgetPercent / resolveTimeBudget', () => {
+  it('mid-window → TT 50', () => {
+    const start = new Date('2026-07-01T00:00:00Z');
+    const end = new Date('2026-07-11T00:00:00Z');
+    const now = new Date('2026-07-06T00:00:00Z');
+    expect(computeTimeBudgetPercent(now, start, end)).toBe(50);
+  });
+
+  it('resolve from period_type WEEKLY', () => {
+    // end 2026-07-28, start = 07-21, now mid → ~50
+    const now = new Date('2026-07-24T12:00:00Z');
+    const tt = resolveTimeBudget(
+      { resetAt: '2026-07-28T00:00:00Z', periodType: 'WEEKLY' },
+      now,
+    );
+    expect(tt).not.toBeNull();
+    expect(tt!).toBeGreaterThan(40);
+    expect(tt!).toBeLessThan(60);
+  });
+});
+
+describe('paceColor matrix', () => {
+  it('green when TP < TT', () => {
+    expect(paceColor(40, 50)).toBe('green');
+  });
+
+  it('yellow when TT ≤ TP ≤ TT+5', () => {
+    expect(paceColor(50, 50)).toBe('yellow');
+    expect(paceColor(52, 50)).toBe('yellow');
+    expect(paceColor(55, 50)).toBe('yellow');
+  });
+
+  it('red when TP > TT+5', () => {
+    expect(paceColor(56, 50)).toBe('red');
+    expect(paceColor(90, 50)).toBe('red');
+  });
+
+  it('neutral without TT', () => {
+    expect(paceColor(40, null)).toBe('neutral');
+  });
+});
+
+describe('parseCapacityPayload', () => {
+  it('happy path', () => {
+    const s = parseCapacityPayload({
+      ok: true,
+      present: true,
+      capacity_pct: 47.5,
+      reset_at: '2026-07-28T00:00:00Z',
+      period_type: 'WEEKLY',
+      source: 'local-agent',
+    });
+    expect(s.present).toBe(true);
+    expect(s.capacityPct).toBe(47.5);
+    expect(s.resetAt).toBe('2026-07-28T00:00:00Z');
+    expect(s.periodType).toBe('WEEKLY');
+  });
+
+  it('unavailable', () => {
+    const s = parseCapacityPayload({ ok: true, present: false, message: 'down' });
+    expect(s.present).toBe(false);
+    expect(s.message).toBe('down');
+  });
+});
+
+describe('parseCliUsagePayload', () => {
+  it('nested config creditUsagePercent', () => {
+    const s = parseCliUsagePayload({
+      success: true,
+      data: {
+        config: {
+          creditUsagePercent: 33,
+          currentPeriod: { type: 'WEEKLY', start: '2026-07-21T00:00:00Z', end: '2026-07-28T00:00:00Z' },
+        },
+      },
+    });
+    expect(s.present).toBe(true);
+    expect(s.capacityPct).toBe(33);
+    expect(s.resetAt).toBe('2026-07-28T00:00:00Z');
+    expect(s.periodStart).toBe('2026-07-21T00:00:00Z');
+  });
+});
+
+describe('capacityUrlFromBase', () => {
+  it('strips path to origin + /capacity', () => {
+    expect(capacityUrlFromBase('http://127.0.0.1:18790/v1')).toBe(
+      'http://127.0.0.1:18790/capacity',
+    );
+    expect(capacityUrlFromBase('http://127.0.0.1:18790/grok/v1')).toBe(
+      'http://127.0.0.1:18790/capacity',
+    );
+  });
+
+  it('empty → null', () => {
+    expect(capacityUrlFromBase('')).toBeNull();
+    expect(capacityUrlFromBase(null)).toBeNull();
+  });
+});
