@@ -1,11 +1,16 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   clampPercent,
   formatFullReset,
   formatShortReset,
+  nextWindowId,
   paceColor,
+  readStoredWindowId,
+  resolveDisplayWindow,
   resolveTimeBudget,
+  windowShortLabel,
+  writeStoredWindowId,
   type GrokPlanUsageSnapshot,
 } from '../../utils/grokBillingPace';
 
@@ -15,21 +20,47 @@ export interface GrokPlanUsageIndicatorProps {
 }
 
 /**
- * Layout D: mini progress bar + % + short reset date.
- * Shown only by parent when provider === grok.
+ * Layout D: mini progress bar + % + window switcher + short reset.
+ * Click the window chip (7d / mo) to cycle weekly ↔ monthly (or 5h ↔ 7d).
  */
 export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = memo(({
   snapshot,
   status,
 }) => {
   const { t, i18n } = useTranslation();
+  const [windowId, setWindowId] = useState<string | null>(() => readStoredWindowId());
 
-  const present = !!snapshot?.present && typeof snapshot.capacityPct === 'number';
-  const tp = present ? clampPercent(snapshot!.capacityPct!) : 0;
-  const tt = present ? resolveTimeBudget(snapshot!) : null;
+  const display = useMemo(() => {
+    if (!snapshot?.present) return null;
+    return resolveDisplayWindow(snapshot, windowId);
+  }, [snapshot, windowId]);
+
+  const windows = snapshot?.windows ?? [];
+  const canSwitch = windows.length > 1;
+
+  const onCycleWindow = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!canSwitch) return;
+    const next = nextWindowId(windows, display?.windowId ?? windowId);
+    if (!next) return;
+    setWindowId(next);
+    writeStoredWindowId(next);
+  }, [canSwitch, windows, display?.windowId, windowId]);
+
+  const present = !!display && typeof display.capacityPct === 'number' && !!snapshot?.present;
+  const tp = present ? clampPercent(display!.capacityPct) : 0;
+  const tt = present
+    ? resolveTimeBudget({
+      resetAt: display!.resetAt,
+      periodStart: snapshot?.periodStart,
+      periodType: display!.periodType,
+    })
+    : null;
   const color = present ? paceColor(tp, tt) : 'neutral';
-  const shortReset = present ? formatShortReset(snapshot!.resetAt, i18n.language) : '';
-  const fullReset = present ? formatFullReset(snapshot!.resetAt, i18n.language) : '';
+  const shortReset = present ? formatShortReset(display!.resetAt, i18n.language) : '';
+  const fullReset = present ? formatFullReset(display!.resetAt, i18n.language) : '';
+  const winLabel = windowShortLabel(display?.windowId || display?.periodType);
 
   const tooltip = useMemo(() => {
     if (!present) {
@@ -37,22 +68,45 @@ export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = mem
         || t('chat.grokPlanUsage.unavailable', { defaultValue: 'Usage unavailable' });
     }
     const pct = Math.round(tp);
+    const period = display?.periodType || display?.windowId || 'limit';
+    const lines: string[] = [];
     if (fullReset) {
-      return t('chat.grokPlanUsage.tooltipWithReset', {
-        percent: pct,
-        value: fullReset,
-        defaultValue: 'Weekly limit {{percent}}% · Resets {{value}}',
-      });
+      lines.push(
+        t('chat.grokPlanUsage.tooltipWindowWithReset', {
+          period,
+          percent: pct,
+          value: fullReset,
+          defaultValue: '{{period}} {{percent}}% · Resets {{value}}',
+        }),
+      );
+    } else {
+      lines.push(
+        t('chat.grokPlanUsage.tooltipWindow', {
+          period,
+          percent: pct,
+          defaultValue: '{{period}} {{percent}}%',
+        }),
+      );
     }
-    return t('chat.grokPlanUsage.tooltip', {
-      percent: pct,
-      defaultValue: 'Weekly limit {{percent}}%',
-    });
-  }, [present, snapshot?.message, tp, fullReset, t]);
+    if (windows.length > 1) {
+      const others = windows
+        .map((w) => `${w.id} ${Math.round(w.usedPct)}%`)
+        .join(' · ');
+      lines.push(others);
+      lines.push(
+        t('chat.grokPlanUsage.clickToSwitch', {
+          defaultValue: 'Click period label to switch window',
+        }),
+      );
+    }
+    if (snapshot?.workerId) {
+      lines.push(snapshot.workerId);
+    }
+    return lines.join('\n');
+  }, [present, snapshot?.message, snapshot?.workerId, tp, fullReset, display, windows, t]);
 
   if (status === 'idle') return null;
 
-  // First load: do not flash "Usage —" as if hard-failed.
   if (!present && status === 'loading') {
     return (
       <div
@@ -93,13 +147,25 @@ export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = mem
         <div className="grok-plan-usage-fill" style={{ width: fillWidth }} />
       </div>
       <span className="grok-plan-usage-pct">{labelPct}</span>
+      {canSwitch || winLabel !== '·' ? (
+        <button
+          type="button"
+          className={`grok-plan-usage-window${canSwitch ? ' switchable' : ''}`}
+          onClick={onCycleWindow}
+          disabled={!canSwitch}
+          title={
+            canSwitch
+              ? t('chat.grokPlanUsage.clickToSwitch', {
+                defaultValue: 'Click to switch weekly / monthly',
+              })
+              : undefined
+          }
+        >
+          {winLabel}
+        </button>
+      ) : null}
       {shortReset ? (
-        <span className="grok-plan-usage-reset">
-          {t('chat.grokPlanUsage.resetShort', {
-            value: shortReset,
-            defaultValue: 'Reset {{value}}',
-          })}
-        </span>
+        <span className="grok-plan-usage-reset">{shortReset}</span>
       ) : null}
     </div>
   );

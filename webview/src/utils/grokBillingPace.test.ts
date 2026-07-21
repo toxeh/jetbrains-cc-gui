@@ -4,10 +4,14 @@ import {
   clampPercent,
   computeTimeBudgetPercent,
   derivePeriodStart,
+  formatShortReset,
+  nextWindowId,
   paceColor,
   parseCapacityPayload,
   parseCliUsagePayload,
+  resolveDisplayWindow,
   resolveTimeBudget,
+  windowShortLabel,
 } from './grokBillingPace';
 
 describe('clampPercent', () => {
@@ -100,6 +104,29 @@ describe('parseCapacityPayload', () => {
     expect(s.periodType).toBe('WEEKLY');
   });
 
+  it('parses windows[] and allows weekly selection', () => {
+    const s = parseCapacityPayload({
+      ok: true,
+      present: true,
+      used_pct: 12,
+      capacity_pct: 12,
+      reset_at: '2026-07-22T15:21:57Z',
+      period_type: 'weekly',
+      windows: [
+        { id: 'weekly', used_pct: 12, reset_at: '2026-07-22T15:21:57Z', period_type: 'weekly' },
+        { id: 'monthly', used_pct: 4.57, reset_at: '2026-08-01T00:00:00Z', period_type: 'monthly' },
+      ],
+      source: 'gateway',
+    });
+    expect(s.windows).toHaveLength(2);
+    const weekly = resolveDisplayWindow(s, 'weekly');
+    expect(weekly.capacityPct).toBe(12);
+    expect(weekly.resetAt).toBe('2026-07-22T15:21:57Z');
+    const monthly = resolveDisplayWindow(s, 'monthly');
+    expect(monthly.capacityPct).toBe(4.57);
+    expect(monthly.resetAt).toBe('2026-08-01T00:00:00Z');
+  });
+
   it('unavailable', () => {
     const s = parseCapacityPayload({ ok: true, present: false, message: 'down' });
     expect(s.present).toBe(false);
@@ -138,5 +165,33 @@ describe('capacityUrlFromBase', () => {
   it('empty → null', () => {
     expect(capacityUrlFromBase('')).toBeNull();
     expect(capacityUrlFromBase(null)).toBeNull();
+  });
+});
+
+describe('formatShortReset', () => {
+  it('includes day, month, and 24h time (local TZ)', () => {
+    // Fixed ISO midnight UTC — local hours depend on TZ, but shape is stable.
+    const s = formatShortReset('2026-08-01T00:00:00Z', 'en-GB');
+    expect(s).toMatch(/\d/);
+    expect(s).toMatch(/:/);
+    // 24h: hour part 00–23, not am/pm
+    expect(s.toLowerCase()).not.toMatch(/\bam\b|\bpm\b/);
+  });
+});
+
+describe('window helpers', () => {
+  it('windowShortLabel maps weekly/monthly', () => {
+    expect(windowShortLabel('weekly')).toBe('7d');
+    expect(windowShortLabel('monthly')).toBe('mo');
+    expect(windowShortLabel('5h')).toBe('5h');
+  });
+
+  it('nextWindowId cycles', () => {
+    const wins = [
+      { id: 'weekly', usedPct: 12 },
+      { id: 'monthly', usedPct: 4 },
+    ];
+    expect(nextWindowId(wins, 'weekly')).toBe('monthly');
+    expect(nextWindowId(wins, 'monthly')).toBe('weekly');
   });
 });
