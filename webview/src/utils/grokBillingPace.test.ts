@@ -12,6 +12,8 @@ import {
   resolveDisplayWindow,
   resolveTimeBudget,
   windowShortLabel,
+  worsePace,
+  worstPaceColor,
 } from './grokBillingPace';
 
 describe('clampPercent', () => {
@@ -169,13 +171,14 @@ describe('capacityUrlFromBase', () => {
 });
 
 describe('formatShortReset', () => {
-  it('includes day, month, and 24h time (local TZ)', () => {
+  it('includes day, month, and 24h time (local TZ) with trailing period', () => {
     // Fixed ISO midnight UTC — local hours depend on TZ, but shape is stable.
     const s = formatShortReset('2026-08-01T00:00:00Z', 'en-GB');
     expect(s).toMatch(/\d/);
     expect(s).toMatch(/:/);
     // 24h: hour part 00–23, not am/pm
     expect(s.toLowerCase()).not.toMatch(/\bam\b|\bpm\b/);
+    expect(s.endsWith('.')).toBe(true);
   });
 });
 
@@ -193,5 +196,45 @@ describe('window helpers', () => {
     ];
     expect(nextWindowId(wins, 'weekly')).toBe('monthly');
     expect(nextWindowId(wins, 'monthly')).toBe('weekly');
+  });
+});
+
+describe('worstPaceColor', () => {
+  it('worsePace ranks red highest', () => {
+    expect(worsePace('green', 'yellow')).toBe('yellow');
+    expect(worsePace('yellow', 'red')).toBe('red');
+    expect(worsePace('green', 'neutral')).toBe('green');
+  });
+
+  it('dot is red if any window is red even when selected is green', () => {
+    // weekly: TP 10, mid-window → green; monthly: TP 95, mid-window → red-ish
+    const now = new Date('2026-07-25T12:00:00Z');
+    const snap = parseCapacityPayload({
+      present: true,
+      capacity_pct: 10,
+      reset_at: '2026-07-28T00:00:00Z',
+      period_type: 'weekly',
+      windows: [
+        {
+          id: 'weekly',
+          used_pct: 10,
+          reset_at: '2026-07-28T00:00:00Z',
+          period_type: 'weekly',
+        },
+        {
+          id: 'monthly',
+          used_pct: 95,
+          reset_at: '2026-08-01T00:00:00Z',
+          period_type: 'monthly',
+        },
+      ],
+    });
+    expect(worstPaceColor(snap, now)).toBe('red');
+    // selected weekly alone would be green
+    const weeklyTt = resolveTimeBudget(
+      { resetAt: '2026-07-28T00:00:00Z', periodType: 'weekly' },
+      now,
+    );
+    expect(paceColor(10, weeklyTt)).toBe('green');
   });
 });

@@ -92,6 +92,32 @@
   overflow: hidden;
 }
 
+/* Leading dot = worst pace across all windows (not just selected). */
+.grok-plan-usage-worst-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-secondary);
+  opacity: 0.85;
+}
+.grok-plan-usage-worst-dot.pace-green {
+  background: #3ba55d;
+  opacity: 1;
+}
+.grok-plan-usage-worst-dot.pace-yellow {
+  background: #d4a017;
+  opacity: 1;
+}
+.grok-plan-usage-worst-dot.pace-red {
+  background: #e34850;
+  opacity: 1;
+}
+.grok-plan-usage-worst-dot.pace-neutral {
+  background: var(--text-secondary);
+  opacity: 0.5;
+}
+
 .grok-plan-usage-bar {
   width: 36px;
   height: 4px;

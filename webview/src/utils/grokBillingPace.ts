@@ -118,9 +118,50 @@ export function paceColor(tp: number, tt: number | null): GrokPaceColor {
   return 'red';
 }
 
+const PACE_RANK: Record<GrokPaceColor, number> = {
+  neutral: 0,
+  green: 1,
+  yellow: 2,
+  red: 3,
+};
+
+/** Worse of two pace colors (red > yellow > green > neutral). */
+export function worsePace(a: GrokPaceColor, b: GrokPaceColor): GrokPaceColor {
+  return PACE_RANK[a] >= PACE_RANK[b] ? a : b;
+}
+
+/**
+ * Worst pace across all windows (or single top-level snapshot when no windows[]).
+ * Used for the leading status dot so a green selected window cannot hide a red other.
+ */
+export function worstPaceColor(
+  snapshot: GrokPlanUsageSnapshot,
+  now: Date = new Date(),
+): GrokPaceColor {
+  if (!snapshot.present) return 'neutral';
+  const windows = snapshot.windows ?? [];
+  if (windows.length === 0) {
+    const tt = resolveTimeBudget(snapshot, now);
+    return paceColor(snapshot.capacityPct ?? 0, tt);
+  }
+  let worst: GrokPaceColor = 'neutral';
+  for (const w of windows) {
+    const tt = resolveTimeBudget(
+      {
+        resetAt: w.resetAt,
+        periodStart: snapshot.periodStart,
+        periodType: w.periodType ?? w.id,
+      },
+      now,
+    );
+    worst = worsePace(worst, paceColor(w.usedPct, tt));
+  }
+  return worst;
+}
+
 /**
  * Compact reset label for the bar: day + short month + 24h time in local TZ.
- * Example (Europe/Moscow): "1 Aug 03:00"
+ * Example (Europe/Moscow): "1 Aug 03:00."
  */
 export function formatShortReset(resetAt?: string | null, locale?: string): string {
   const d = parseDate(resetAt ?? null);
@@ -134,11 +175,13 @@ export function formatShortReset(resetAt?: string | null, locale?: string): stri
     });
     // Some locales still emit 24h with a trailing day-period; strip common noise.
     const time = timePart.replace(/\u202f/g, ' ').trim();
-    return `${datePart} ${time}`;
+    // Drop locale abbreviations' trailing dots (e.g. "июл.") — no period after reset.
+    const date = datePart.replace(/\./g, '').trim();
+    return `${date} ${time} `;
   } catch {
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
-    return `${d.getDate()} ${d.getMonth() + 1} ${hh}:${mm}`;
+    return `${d.getDate()} ${d.getMonth() + 1} ${hh}:${mm} `;
   }
 }
 

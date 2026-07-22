@@ -10,6 +10,7 @@ import {
   resolveDisplayWindow,
   resolveTimeBudget,
   windowShortLabel,
+  worstPaceColor,
   writeStoredWindowId,
   type GrokPlanUsageSnapshot,
 } from '../../utils/grokBillingPace';
@@ -57,7 +58,9 @@ export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = mem
       periodType: display!.periodType,
     })
     : null;
+  // Bar/% = selected window; leading dot = worst across all windows.
   const color = present ? paceColor(tp, tt) : 'neutral';
+  const worstColor = present && snapshot ? worstPaceColor(snapshot) : 'neutral';
   const shortReset = present ? formatShortReset(display!.resetAt, i18n.language) : '';
   const fullReset = present ? formatFullReset(display!.resetAt, i18n.language) : '';
   const winLabel = windowShortLabel(display?.windowId || display?.periodType);
@@ -93,6 +96,14 @@ export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = mem
         .map((w) => `${w.id} ${Math.round(w.usedPct)}%`)
         .join(' · ');
       lines.push(others);
+      if (worstColor !== color && worstColor !== 'neutral' && worstColor !== 'green') {
+        lines.push(
+          t('chat.grokPlanUsage.worstHint', {
+            color: worstColor,
+            defaultValue: 'Dot shows worst window ({{color}})',
+          }),
+        );
+      }
       lines.push(
         t('chat.grokPlanUsage.clickToSwitch', {
           defaultValue: 'Click period label to switch window',
@@ -103,7 +114,7 @@ export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = mem
       lines.push(snapshot.workerId);
     }
     return lines.join('\n');
-  }, [present, snapshot?.message, snapshot?.workerId, tp, fullReset, display, windows, t]);
+  }, [present, snapshot?.message, snapshot?.workerId, tp, fullReset, display, windows, worstColor, color, t]);
 
   if (status === 'idle') return null;
 
@@ -167,6 +178,19 @@ export const GrokPlanUsageIndicator: React.FC<GrokPlanUsageIndicatorProps> = mem
       {shortReset ? (
         <span className="grok-plan-usage-reset">{shortReset}</span>
       ) : null}
+      {/* Worst pace across all windows — after reset date */}
+      <span
+        className={`grok-plan-usage-worst-dot pace-${worstColor}`}
+        aria-hidden
+        title={
+          worstColor !== 'neutral'
+            ? t('chat.grokPlanUsage.worstDot', {
+              color: worstColor,
+              defaultValue: 'Worst window: {{color}}',
+            })
+            : undefined
+        }
+      />
     </div>
   );
 });
