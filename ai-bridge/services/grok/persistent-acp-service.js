@@ -331,21 +331,24 @@ async function executeTurn(runtime, params, normalizer) {
       }
     };
 
-    const result = await runtime.client.prompt(sid, promptBlocks, TURN_PROMPT_TIMEOUT_MS);
+    try {
+      const result = await runtime.client.prompt(sid, promptBlocks, TURN_PROMPT_TIMEOUT_MS);
 
-    // restore
-    runtime.client.onNotification = originalOnNotif;
+      // Keep turn notification handler until after prompt_result is normalized —
+      // late turn_completed must not be dropped by restoring the previous handler early.
+      const resultUsage = extractUsageFromAcpEnvelope(result) || result?.usage;
+      if (resultUsage) {
+        rememberUsageOnRuntime(runtime, resultUsage);
+      }
 
-    const resultUsage = extractUsageFromAcpEnvelope(result) || result?.usage;
-    if (resultUsage) {
-      rememberUsageOnRuntime(runtime, resultUsage);
+      emit('prompt_result', result);
+      normalizer.finishSuccess(sid || runtime.sessionId, normalizer.assistantText);
+
+      runtime.sessionId = sid || runtime.client.activeSessionId;
+      return { sessionId: runtime.sessionId, success: true };
+    } finally {
+      runtime.client.onNotification = originalOnNotif;
     }
-
-    emit('prompt_result', result);
-    normalizer.finishSuccess(sid || runtime.sessionId, normalizer.assistantText);
-
-    runtime.sessionId = sid || runtime.client.activeSessionId;
-    return { sessionId: runtime.sessionId, success: true };
   } catch (err) {
     normalizer.finishError(err);
     // Ensure timeout / stream corruption always recycles (even if markUnhealthy raced).

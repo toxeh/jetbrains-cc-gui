@@ -195,4 +195,31 @@ public class GrokMessageHandlerTest {
                 assistant.raw.getAsJsonObject("message").getAsJsonObject("usage").get("total_tokens").getAsInt()
         );
     }
+
+    @Test
+    public void finalMessageWithoutUsageDoesNotWipePriorUsage() {
+        SessionState state = new SessionState();
+        state.setModel("grok-4.5");
+        state.addMessage(new Message(Message.Type.USER, "q"));
+
+        RecordingCallback callback = new RecordingCallback();
+        GrokMessageHandler handler = newHandler(state, callback);
+        handler.onMessage("stream_start", "");
+        handler.onMessage("usage", "{\"totalTokens\":17571,\"inputTokens\":17557,\"outputTokens\":14}");
+        // Final assistant MESSAGE historically had no usage and wiped the ring snapshot.
+        handler.onMessage("message",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"pong\"}]}}");
+        handler.onMessage("stream_end", "");
+
+        Message assistant = state.getMessages().get(1);
+        assertTrue(assistant.raw.getAsJsonObject("message").has("usage"));
+        assertEquals(
+                17571,
+                assistant.raw.getAsJsonObject("message").getAsJsonObject("usage").get("total_tokens").getAsInt()
+        );
+        // stream_end re-pushes context usage
+        assertTrue(callback.usageUpdates.size() >= 2);
+        int lastUsed = callback.usageUpdates.get(callback.usageUpdates.size() - 1)[0];
+        assertEquals(17571, lastUsed);
+    }
 }

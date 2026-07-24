@@ -23,6 +23,8 @@ export class GrokEventNormalizer {
     this.messageEnded = false;
     this.sessionId = null;
     this.toolCalls = new Map(); // toolCallId -> { name, args, status }
+    /** Last normalized snake_case usage for this turn (attached to final [MESSAGE]). */
+    this.lastUsage = null;
   }
 
   begin() {
@@ -69,14 +71,21 @@ export class GrokEventNormalizer {
       ? String(resultText)
       : this.assistantText;
 
-    // Final assistant message block for history (Claude-like)
+    // Final assistant message block for history (Claude-like).
+    // Attach lastUsage so Java message.usage survives even if a mid-turn [USAGE]
+    // was overwritten by a later MESSAGE without usage.
     const assistantMessage = {
       type: 'assistant',
       message: {
         role: 'assistant',
         content: this.#buildContentBlocks(text),
+        ...(this.lastUsage ? { usage: this.lastUsage } : {}),
       },
     };
+    // Ensure [USAGE] is emitted at least once before stream ends (prompt _meta path).
+    if (this.lastUsage) {
+      this.#emit(`[USAGE] ${JSON.stringify(this.lastUsage)}`);
+    }
     this.#emit(`[MESSAGE] ${JSON.stringify(assistantMessage)}`);
 
     this.#emitStreamEndOnce();
@@ -108,6 +117,7 @@ export class GrokEventNormalizer {
     const usage = normalizeUsageToSnakeCase(raw) || raw;
     // Avoid empty {} spam
     if (!usage || (typeof usage === 'object' && !Object.keys(usage).length)) return;
+    this.lastUsage = usage;
     this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
   }
 
