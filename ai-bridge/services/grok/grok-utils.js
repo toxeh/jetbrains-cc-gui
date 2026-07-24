@@ -183,18 +183,170 @@ export function buildErrorPayload(error) {
 }
 
 /**
+ * First finite number > 0 among keys (or 0).
+ * Prefer listing snake_case before camelCase so OpenAI-shaped payloads win when both exist.
+ * @param {Record<string, unknown>} obj
+ * @param {...string} keys
+ */
+function firstPositiveNumber(obj, ...keys) {
+  if (!obj || typeof obj !== 'object') return 0;
+  for (const key of keys) {
+    const n = Number(obj[key]);
+    if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  }
+  return 0;
+}
+
+/**
+ * Canonical OpenAI-style snake_case usage for [USAGE] tags and Java consumers.
+ * ACP often emits camelCase (totalTokens/inputTokens); normalize so snake_case is primary
+ * and dual-read extractors remain a fallback for raw payloads.
+ *
+ * @param {unknown} usage
+ * @returns {Record<string, number>|null}
+ */
+export function normalizeUsageToSnakeCase(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
+  const src = /** @type {Record<string, unknown>} */ (usage);
+  // Nested { usage: {...} } from some ACP envelopes
+  if (
+    src.usage &&
+    typeof src.usage === 'object' &&
+    !Array.isArray(src.usage) &&
+    !firstPositiveNumber(src, 'total_tokens', 'totalTokens', 'input_tokens', 'inputTokens')
+  ) {
+    const nested = normalizeUsageToSnakeCase(src.usage);
+    if (nested) return nested;
+  }
+
+  const total = firstPositiveNumber(src, 'total_tokens', 'totalTokens');
+  const input = firstPositiveNumber(src, 'input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens');
+  const output = firstPositiveNumber(src, 'output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens');
+  // ACP turn_completed uses reasoningTokens; chat API uses completion_tokens_details.reasoning_tokens
+  const thought = firstPositiveNumber(
+    src,
+    'thought_tokens',
+    'thoughtTokens',
+    'reasoning_tokens',
+    'reasoningTokens',
+  );
+  const cachedWrite = firstPositiveNumber(src, 'cached_write_tokens', 'cachedWriteTokens');
+  const cachedRead = firstPositiveNumber(
+    src,
+    'cached_read_tokens',
+    'cachedReadTokens',
+    'cached_tokens',
+    'cachedTokens',
+  );
+
+  if (total <= 0 && input <= 0 && output <= 0 && thought <= 0 && cachedWrite <= 0 && cachedRead <= 0) {
+    return null;
+  }
+
+  /** @type {Record<string, number>} */
+  const out = {};
+  if (input > 0) out.input_tokens = input;
+  if (output > 0) out.output_tokens = output;
+  if (thought > 0) out.thought_tokens = thought;
+  if (cachedWrite > 0) out.cached_write_tokens = cachedWrite;
+  if (cachedRead > 0) out.cached_read_tokens = cachedRead;
+  out.total_tokens =
+    total > 0 ? total : input + output + thought + cachedWrite + cachedRead;
+  return out;
+}
+
+/**
+ * Pull a usage-like object from ACP notification/result envelopes.
+ * Real Grok CLI (0.2.x) does NOT emit sessionUpdate=usage_update. Instead:
+ * - session/prompt result._meta.usage / result._meta.totalTokens
+ * - method _x.ai/session_notification, update.sessionUpdate=turn_completed + update.usage
+ * - optional nested result.usage
+ *
+ * @param {unknown} methodOrPayload  notification method string, or a prompt result object
+ * @param {unknown} [params]         notification params when methodOrPayload is a method name
+ * @returns {Record<string, unknown>|null}
+ */
+export function extractUsageFromAcpEnvelope(methodOrPayload, params) {
+  // Notification form: (method, params)
+  if (typeof methodOrPayload === 'string') {
+    const method = methodOrPayload;
+    const p = params && typeof params === 'object' ? params : null;
+    if (!p) return null;
+
+    // Standard ACP session/update usage_update (rarely emitted by current CLI)
+    if (method === 'session/update') {
+      const update = p.update || p;
+      const kind = update?.sessionUpdate || update?.type || '';
+      if (kind === 'usage_update' || kind === 'usage') {
+        return update.usage || update;
+      }
+      if (kind === 'turn_completed' && update?.usage) {
+        return update.usage;
+      }
+      if (update?.usage) return update.usage;
+      return null;
+    }
+
+    // Vendor extension: _x.ai/session_notification { update: { sessionUpdate, usage } }
+    if (
+      method === '_x.ai/session_notification' ||
+      method === 'x.ai/session_notification' ||
+      method.endsWith('/session_notification')
+    ) {
+      const update = p.update || p;
+      if (update?.usage) return update.usage;
+      if (update?.sessionUpdate === 'turn_completed' && update) {
+        // usage may be sibling fields on update
+        if (update.totalTokens || update.inputTokens) return update;
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  // Prompt-result form: object
+  const result = methodOrPayload;
+  if (!result || typeof result !== 'object') return null;
+  if (result.usage && typeof result.usage === 'object') return result.usage;
+  const meta = result._meta || result.meta;
+  if (meta && typeof meta === 'object') {
+    if (meta.usage && typeof meta.usage === 'object') return meta.usage;
+    // Flatten meta totals when usage object missing
+    if (meta.totalTokens || meta.inputTokens || meta.total_tokens) return meta;
+  }
+  // Top-level totals on some envelopes
+  if (result.totalTokens || result.inputTokens || result.total_tokens) return result;
+  return null;
+}
+
+/**
  * Extract aggregate used-token count from a Grok/ACP usage object.
  * Mirrors Java {@code GrokContextUsageBuilder.extractUsedTokens}.
+ * Primary: snake_case. Fallback: Grok ACP camelCase (totalTokens, inputTokens, …).
  */
 export function extractUsedTokens(usage) {
   if (!usage || typeof usage !== 'object') return 0;
-  const total = Number(usage.total_tokens);
-  if (Number.isFinite(total) && total > 0) return Math.floor(total);
-  let used = 0;
-  for (const key of ['input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens']) {
-    const n = Number(usage[key]);
-    if (Number.isFinite(n) && n > 0) used += n;
+  const normalized = normalizeUsageToSnakeCase(usage);
+  if (normalized) {
+    const total = Number(normalized.total_tokens);
+    if (Number.isFinite(total) && total > 0) return Math.floor(total);
+    let used = 0;
+    for (const key of ['input_tokens', 'output_tokens', 'thought_tokens', 'cached_write_tokens', 'cached_read_tokens']) {
+      const n = Number(normalized[key]);
+      if (Number.isFinite(n) && n > 0) used += n;
+    }
+    if (used > 0) return Math.max(0, Math.floor(used));
   }
+  // Last-resort dual-read without normalize (empty / exotic shapes)
+  const total = firstPositiveNumber(usage, 'total_tokens', 'totalTokens');
+  if (total > 0) return total;
+  let used = 0;
+  used += firstPositiveNumber(usage, 'input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens');
+  used += firstPositiveNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens');
+  used += firstPositiveNumber(usage, 'thought_tokens', 'thoughtTokens');
+  used += firstPositiveNumber(usage, 'cached_write_tokens', 'cachedWriteTokens');
+  used += firstPositiveNumber(usage, 'cached_read_tokens', 'cachedReadTokens');
   return Math.max(0, Math.floor(used));
 }
 

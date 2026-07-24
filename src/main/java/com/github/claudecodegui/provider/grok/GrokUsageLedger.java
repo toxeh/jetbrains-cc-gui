@@ -68,11 +68,17 @@ public final class GrokUsageLedger {
         if (sessionId == null || sessionId.isBlank() || usage == null) {
             return;
         }
-        long input = readLong(usage, "input_tokens") + readLong(usage, "prompt_tokens");
-        long output = readLong(usage, "output_tokens") + readLong(usage, "completion_tokens");
-        long total = readLong(usage, "total_tokens");
-        if (total <= 0 && (input > 0 || output > 0)) {
-            total = input + output;
+        // Prefer snake_case (canonical after normalize); camelCase remains fallback.
+        JsonObject u = GrokContextUsageBuilder.normalizeUsageToSnakeCase(usage);
+        if (u == null) {
+            u = usage;
+        }
+        long input = firstLong(u, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens");
+        long output = firstLong(u, "output_tokens", "outputTokens", "completion_tokens", "completionTokens");
+        long thought = firstLong(u, "thought_tokens", "thoughtTokens");
+        long total = firstLong(u, "total_tokens", "totalTokens");
+        if (total <= 0 && (input > 0 || output > 0 || thought > 0)) {
+            total = input + output + thought;
         }
         if (input <= 0 && output <= 0 && total <= 0) {
             return;
@@ -196,5 +202,19 @@ public final class GrokUsageLedger {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    /** First positive long among keys (ACP camelCase + OpenAI snake_case). */
+    private static long firstLong(JsonObject o, String... keys) {
+        if (o == null || keys == null) {
+            return 0;
+        }
+        for (String key : keys) {
+            long n = readLong(o, key);
+            if (n > 0) {
+                return n;
+            }
+        }
+        return 0;
     }
 }
