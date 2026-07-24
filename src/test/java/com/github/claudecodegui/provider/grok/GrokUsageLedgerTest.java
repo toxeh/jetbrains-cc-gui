@@ -42,4 +42,22 @@ public class GrokUsageLedgerTest {
         ledger.record("s", "m", "/c", new JsonObject());
         assertTrue(ledger.aggregateBySession().isEmpty());
     }
+
+    @Test
+    public void recordsAcpCamelCaseUsage() throws Exception {
+        Path ledgerFile = Files.createTempDirectory("ledger-camel").resolve("usage.jsonl");
+        GrokUsageLedger ledger = new GrokUsageLedger(ledgerFile);
+
+        JsonObject usage = new JsonObject();
+        usage.addProperty("inputTokens", 40);
+        usage.addProperty("outputTokens", 10);
+        usage.addProperty("totalTokens", 50);
+        ledger.record("s-camel", "grok-4.5", "/p", usage);
+
+        Map<String, GrokUsageLedger.SessionTotals> map = ledger.aggregateBySession();
+        assertTrue(map.containsKey("s-camel"));
+        assertEquals(40, map.get("s-camel").inputTokens);
+        assertEquals(10, map.get("s-camel").outputTokens);
+        assertEquals(50, map.get("s-camel").totalTokens);
+    }
 }

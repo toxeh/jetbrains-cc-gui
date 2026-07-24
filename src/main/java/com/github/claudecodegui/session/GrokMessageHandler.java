@@ -381,27 +381,18 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
             ensureAssistantRaw();
+            // Prefer snake_case for stored message.usage (OpenAI shape); camelCase ACP is fallback input.
+            JsonObject canonical = com.github.claudecodegui.provider.grok.GrokContextUsageBuilder
+                    .normalizeUsageToSnakeCase(usage);
+            JsonObject storedUsage = canonical != null ? canonical : usage;
             JsonObject message = currentAssistantMessage.raw.has("message")
                     && currentAssistantMessage.raw.get("message").isJsonObject()
                     ? currentAssistantMessage.raw.getAsJsonObject("message")
                     : new JsonObject();
-            message.add("usage", usage);
+            message.add("usage", storedUsage);
             currentAssistantMessage.raw.add("message", message);
 
-            int used = 0;
-            if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
-                used = usage.get("total_tokens").getAsInt();
-            } else {
-                if (usage.has("input_tokens") && !usage.get("input_tokens").isJsonNull()) {
-                    used += usage.get("input_tokens").getAsInt();
-                }
-                if (usage.has("output_tokens") && !usage.get("output_tokens").isJsonNull()) {
-                    used += usage.get("output_tokens").getAsInt();
-                }
-                if (usage.has("prompt_tokens") && !usage.get("prompt_tokens").isJsonNull()) {
-                    used += usage.get("prompt_tokens").getAsInt();
-                }
-            }
+            int used = com.github.claudecodegui.provider.grok.GrokContextUsageBuilder.extractUsedTokens(storedUsage);
             if (used > 0) {
                 int maxTokens = com.github.claudecodegui.handler.provider.ModelProviderHandler
                         .getModelContextLimit(state.getModel());
@@ -415,7 +406,7 @@ public class GrokMessageHandler implements MessageCallback {
                             sid,
                             state.getModel(),
                             null,
-                            usage
+                            storedUsage
                     );
                 }
             } catch (Exception ledgerEx) {

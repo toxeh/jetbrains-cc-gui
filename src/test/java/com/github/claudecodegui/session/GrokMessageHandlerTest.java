@@ -21,10 +21,16 @@ public class GrokMessageHandlerTest {
 
     private static final class RecordingCallback implements ClaudeSession.SessionCallback {
         final List<List<Message>> messageSnapshots = new ArrayList<>();
+        final List<int[]> usageUpdates = new ArrayList<>();
 
         @Override
         public void onMessageUpdate(List<Message> messages) {
             messageSnapshots.add(new ArrayList<>(messages));
+        }
+
+        @Override
+        public void onUsageUpdate(int usedTokens, int maxTokens) {
+            usageUpdates.add(new int[]{usedTokens, maxTokens});
         }
 
         @Override public void onStateChange(boolean busy, boolean loading, String error) {}
@@ -41,8 +47,12 @@ public class GrokMessageHandlerTest {
     }
 
     private static GrokMessageHandler newHandler(SessionState state) {
+        return newHandler(state, new RecordingCallback());
+    }
+
+    private static GrokMessageHandler newHandler(SessionState state, RecordingCallback callback) {
         CallbackHandler callbacks = new CallbackHandler();
-        callbacks.setCallback(new RecordingCallback());
+        callbacks.setCallback(callback);
         return new GrokMessageHandler(state, callbacks);
     }
 
@@ -146,5 +156,43 @@ public class GrokMessageHandlerTest {
         // Accumulator is cleared on block_reset; subsequent deltas start a new text segment
         // on the same stream-owned bubble.
         assertTrue(messages.get(1).content.contains("after tools") || messages.get(1).content.equals(" after tools"));
+    }
+
+    @Test
+    public void acpCamelCaseUsageUpdatesContextRing() {
+        SessionState state = new SessionState();
+        state.setModel("grok-4.5");
+        state.addMessage(new Message(Message.Type.USER, "q"));
+
+        RecordingCallback callback = new RecordingCallback();
+        GrokMessageHandler handler = newHandler(state, callback);
+        handler.onMessage("stream_start", "");
+        handler.onMessage("usage", "{\"totalTokens\":12345,\"inputTokens\":10000,\"outputTokens\":2345}");
+
+        assertEquals("notifyUsageUpdate must fire for ACP camelCase usage", 1, callback.usageUpdates.size());
+        assertEquals(12_345, callback.usageUpdates.get(0)[0]);
+        assertTrue("maxTokens should be model context limit", callback.usageUpdates.get(0)[1] > 0);
+    }
+
+    @Test
+    public void snakeCaseUsageUpdatesContextRingAndStoresCanonical() {
+        SessionState state = new SessionState();
+        state.setModel("grok-4.5");
+        state.addMessage(new Message(Message.Type.USER, "q"));
+
+        RecordingCallback callback = new RecordingCallback();
+        GrokMessageHandler handler = newHandler(state, callback);
+        handler.onMessage("stream_start", "");
+        handler.onMessage("usage", "{\"total_tokens\":500,\"input_tokens\":400,\"output_tokens\":100}");
+
+        assertEquals(1, callback.usageUpdates.size());
+        assertEquals(500, callback.usageUpdates.get(0)[0]);
+
+        Message assistant = state.getMessages().get(1);
+        assertTrue(assistant.raw.getAsJsonObject("message").has("usage"));
+        assertEquals(
+                500,
+                assistant.raw.getAsJsonObject("message").getAsJsonObject("usage").get("total_tokens").getAsInt()
+        );
     }
 }

@@ -63,4 +63,48 @@ public class GrokContextUsageBuilderTest {
         assertEquals(0, GrokContextUsageBuilder.extractUsedTokens(null));
         assertEquals(0, GrokContextUsageBuilder.extractUsedTokens(new JsonObject()));
     }
+
+    @Test
+    public void extractUsedTokensAcceptsAcpCamelCase() {
+        JsonObject usage = new JsonObject();
+        usage.addProperty("totalTokens", 12_345);
+        usage.addProperty("inputTokens", 1);
+        assertEquals(12_345, GrokContextUsageBuilder.extractUsedTokens(usage));
+    }
+
+    @Test
+    public void extractUsedTokensSumsAcpPartsWithoutTotal() {
+        JsonObject usage = new JsonObject();
+        usage.addProperty("inputTokens", 100);
+        usage.addProperty("outputTokens", 20);
+        usage.addProperty("thoughtTokens", 5);
+        assertEquals(125, GrokContextUsageBuilder.extractUsedTokens(usage));
+    }
+
+    @Test
+    public void normalizeUsageToSnakeCaseMapsCamelCase() {
+        JsonObject usage = new JsonObject();
+        usage.addProperty("totalTokens", 50);
+        usage.addProperty("inputTokens", 40);
+        usage.addProperty("outputTokens", 10);
+        JsonObject out = GrokContextUsageBuilder.normalizeUsageToSnakeCase(usage);
+        assertNotNull(out);
+        assertEquals(50, out.get("total_tokens").getAsInt());
+        assertEquals(40, out.get("input_tokens").getAsInt());
+        assertEquals(10, out.get("output_tokens").getAsInt());
+        assertFalse(out.has("totalTokens"));
+    }
+
+    @Test
+    public void normalizeUsagePrefersSnakeCaseWhenBothPresent() {
+        JsonObject usage = new JsonObject();
+        usage.addProperty("total_tokens", 99);
+        usage.addProperty("totalTokens", 1);
+        usage.addProperty("input_tokens", 80);
+        usage.addProperty("inputTokens", 2);
+        JsonObject out = GrokContextUsageBuilder.normalizeUsageToSnakeCase(usage);
+        assertNotNull(out);
+        assertEquals(99, out.get("total_tokens").getAsInt());
+        assertEquals(80, out.get("input_tokens").getAsInt());
+    }
 }

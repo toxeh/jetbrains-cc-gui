@@ -32,6 +32,7 @@ import {
   buildGrokEnv,
   buildGrokContextUsagePayload,
   extractUsedTokens,
+  extractUsageFromAcpEnvelope,
 } from './grok-utils.js';
 import { requestPermissionFromJava } from '../../permission-ipc.js';
 import { AcpTerminalHost } from './acp-terminal-host.js';
@@ -50,17 +51,11 @@ function rememberUsageOnRuntime(runtime, usage) {
 }
 
 /**
- * Pull usage from session/update notifications when present.
+ * Pull usage from ACP notifications (session/update usage_update OR
+ * _x.ai/session_notification turn_completed — the path real Grok CLI uses).
  */
 function usageFromNotification(method, params) {
-  if (method !== 'session/update') return null;
-  const update = params?.update || params;
-  if (!update) return null;
-  const kind = update.sessionUpdate || update.type || '';
-  if (kind === 'usage_update' || kind === 'usage') {
-    return update.usage || update;
-  }
-  return null;
+  return extractUsageFromAcpEnvelope(method, params);
 }
 
 // =============================================================================
@@ -341,8 +336,9 @@ async function executeTurn(runtime, params, normalizer) {
     // restore
     runtime.client.onNotification = originalOnNotif;
 
-    if (result?.usage) {
-      rememberUsageOnRuntime(runtime, result.usage);
+    const resultUsage = extractUsageFromAcpEnvelope(result) || result?.usage;
+    if (resultUsage) {
+      rememberUsageOnRuntime(runtime, resultUsage);
     }
 
     emit('prompt_result', result);

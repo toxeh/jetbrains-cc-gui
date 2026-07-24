@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGrokContextUsagePayload, extractUsedTokens } from './grok-utils.js';
+import {
+  buildGrokContextUsagePayload,
+  extractUsedTokens,
+  extractUsageFromAcpEnvelope,
+  normalizeUsageToSnakeCase,
+} from './grok-utils.js';
 import {
   getContextUsagePersistent,
   getUsagePersistent,
@@ -11,8 +16,106 @@ const { resetRegistry, createTestRuntime, forceSetActiveTurn } = __testing;
 
 test('extractUsedTokens mirrors Java GrokContextUsageBuilder', () => {
   assert.equal(extractUsedTokens({ total_tokens: 42, input_tokens: 1 }), 42);
-  assert.equal(extractUsedTokens({ input_tokens: 10, output_tokens: 5, completion_tokens: 1 }), 16);
+  // output_tokens and completion_tokens are aliases — count once (not 10+5+1)
+  assert.equal(extractUsedTokens({ input_tokens: 10, output_tokens: 5, completion_tokens: 1 }), 15);
   assert.equal(extractUsedTokens({}), 0);
+  // Grok ACP usage_update uses camelCase (fallback → normalized snake_case)
+  assert.equal(extractUsedTokens({ totalTokens: 99, inputTokens: 1 }), 99);
+  assert.equal(extractUsedTokens({ inputTokens: 10, outputTokens: 5, thoughtTokens: 2 }), 17);
+});
+
+test('normalizeUsageToSnakeCase maps camelCase and prefers snake_case', () => {
+  const fromCamel = normalizeUsageToSnakeCase({
+    totalTokens: 50,
+    inputTokens: 40,
+    outputTokens: 10,
+  });
+  assert.deepEqual(fromCamel, {
+    input_tokens: 40,
+    output_tokens: 10,
+    total_tokens: 50,
+  });
+
+  const preferSnake = normalizeUsageToSnakeCase({
+    total_tokens: 99,
+    totalTokens: 1,
+    input_tokens: 80,
+    inputTokens: 2,
+  });
+  assert.equal(preferSnake.total_tokens, 99);
+  assert.equal(preferSnake.input_tokens, 80);
+
+  assert.equal(normalizeUsageToSnakeCase(null), null);
+  assert.equal(normalizeUsageToSnakeCase({}), null);
+});
+
+test('extractUsageFromAcpEnvelope reads Grok CLI turn_completed and prompt _meta', () => {
+  // Live shape from grok agent stdio 0.2.x against antig
+  const notifUsage = extractUsageFromAcpEnvelope('_x.ai/session_notification', {
+    sessionId: 's1',
+    update: {
+      sessionUpdate: 'turn_completed',
+      usage: {
+        inputTokens: 17557,
+        outputTokens: 14,
+        totalTokens: 17571,
+        cachedReadTokens: 128,
+        reasoningTokens: 13,
+      },
+    },
+  });
+  assert.equal(extractUsedTokens(notifUsage), 17571);
+  assert.equal(normalizeUsageToSnakeCase(notifUsage).total_tokens, 17571);
+  assert.equal(normalizeUsageToSnakeCase(notifUsage).input_tokens, 17557);
+
+  const promptUsage = extractUsageFromAcpEnvelope({
+    stopReason: 'end_turn',
+    _meta: {
+      totalTokens: 17571,
+      inputTokens: 17557,
+      outputTokens: 14,
+      usage: {
+        inputTokens: 17557,
+        outputTokens: 14,
+        totalTokens: 17571,
+      },
+    },
+  });
+  assert.equal(extractUsedTokens(promptUsage), 17571);
+
+  // Classic usage_update still works
+  const classic = extractUsageFromAcpEnvelope('session/update', {
+    update: { sessionUpdate: 'usage_update', usage: { total_tokens: 42 } },
+  });
+  assert.equal(extractUsedTokens(classic), 42);
+});
+
+test('GrokEventNormalizer emits [USAGE] from turn_completed and prompt _meta', async () => {
+  const { GrokEventNormalizer } = await import('./grok-event-normalizer.js');
+  const lines = [];
+  const n = new GrokEventNormalizer({
+    log: (s) => lines.push(String(s)),
+    error: (s) => lines.push(String(s)),
+  });
+  n.begin();
+  n.handleAcpEvent('notification', {
+    method: '_x.ai/session_notification',
+    params: {
+      update: {
+        sessionUpdate: 'turn_completed',
+        usage: { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 },
+      },
+    },
+  });
+  n.handleAcpEvent('prompt_result', {
+    stopReason: 'end_turn',
+    _meta: { usage: { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 } },
+  });
+  const usageLines = lines.filter((l) => l.startsWith('[USAGE]'));
+  assert.ok(usageLines.length >= 1, 'expected [USAGE] tag, got: ' + lines.join('\n'));
+  const payload = JSON.parse(usageLines[0].slice('[USAGE] '.length));
+  assert.equal(payload.total_tokens, 1234);
+  assert.equal(payload.input_tokens, 1000);
 });
 
 test('buildGrokContextUsagePayload synthesizes conversation + free space', () => {

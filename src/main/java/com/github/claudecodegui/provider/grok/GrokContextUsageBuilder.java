@@ -86,28 +86,126 @@ public final class GrokContextUsageBuilder {
     }
 
     /**
+     * Normalize usage to OpenAI snake_case ({@code total_tokens}, {@code input_tokens}, …).
+     * Primary path for [USAGE] after the bridge; camelCase ACP is mapped here as fallback.
+     *
+     * @return new object with snake_case keys, or null if no token fields found
+     */
+    public static JsonObject normalizeUsageToSnakeCase(JsonObject usage) {
+        if (usage == null) {
+            return null;
+        }
+        // Nested { usage: {...} }
+        if (usage.has("usage") && usage.get("usage").isJsonObject()
+                && firstPositiveInt(usage, "total_tokens", "totalTokens", "input_tokens", "inputTokens") <= 0) {
+            JsonObject nested = normalizeUsageToSnakeCase(usage.getAsJsonObject("usage"));
+            if (nested != null) {
+                return nested;
+            }
+        }
+
+        int total = firstPositiveInt(usage, "total_tokens", "totalTokens");
+        int input = firstPositiveInt(usage, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens");
+        int output = firstPositiveInt(usage, "output_tokens", "outputTokens", "completion_tokens", "completionTokens");
+        int thought = firstPositiveInt(
+                usage,
+                "thought_tokens",
+                "thoughtTokens",
+                "reasoning_tokens",
+                "reasoningTokens"
+        );
+        int cachedWrite = firstPositiveInt(usage, "cached_write_tokens", "cachedWriteTokens");
+        int cachedRead = firstPositiveInt(
+                usage,
+                "cached_read_tokens",
+                "cachedReadTokens",
+                "cached_tokens",
+                "cachedTokens"
+        );
+
+        if (total <= 0 && input <= 0 && output <= 0 && thought <= 0 && cachedWrite <= 0 && cachedRead <= 0) {
+            return null;
+        }
+
+        JsonObject out = new JsonObject();
+        if (input > 0) {
+            out.addProperty("input_tokens", input);
+        }
+        if (output > 0) {
+            out.addProperty("output_tokens", output);
+        }
+        if (thought > 0) {
+            out.addProperty("thought_tokens", thought);
+        }
+        if (cachedWrite > 0) {
+            out.addProperty("cached_write_tokens", cachedWrite);
+        }
+        if (cachedRead > 0) {
+            out.addProperty("cached_read_tokens", cachedRead);
+        }
+        int resolvedTotal = total > 0
+                ? total
+                : input + output + thought + cachedWrite + cachedRead;
+        out.addProperty("total_tokens", resolvedTotal);
+        return out;
+    }
+
+    /**
      * Extract used-token total from a Grok/ACP usage JSON object.
+     * Prefers snake_case after {@link #normalizeUsageToSnakeCase}; dual-reads camelCase as fallback.
      */
     public static int extractUsedTokens(JsonObject usage) {
         if (usage == null) {
             return 0;
         }
-        if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
-            return Math.max(0, usage.get("total_tokens").getAsInt());
+        JsonObject normalized = normalizeUsageToSnakeCase(usage);
+        if (normalized != null) {
+            int total = firstPositiveInt(normalized, "total_tokens");
+            if (total > 0) {
+                return total;
+            }
+            int used = 0;
+            used += firstPositiveInt(normalized, "input_tokens");
+            used += firstPositiveInt(normalized, "output_tokens");
+            used += firstPositiveInt(normalized, "thought_tokens");
+            used += firstPositiveInt(normalized, "cached_write_tokens");
+            used += firstPositiveInt(normalized, "cached_read_tokens");
+            if (used > 0) {
+                return used;
+            }
+        }
+        // Last-resort dual-read without normalize
+        int total = firstPositiveInt(usage, "total_tokens", "totalTokens");
+        if (total > 0) {
+            return total;
         }
         int used = 0;
-        if (usage.has("input_tokens") && !usage.get("input_tokens").isJsonNull()) {
-            used += usage.get("input_tokens").getAsInt();
-        }
-        if (usage.has("output_tokens") && !usage.get("output_tokens").isJsonNull()) {
-            used += usage.get("output_tokens").getAsInt();
-        }
-        if (usage.has("prompt_tokens") && !usage.get("prompt_tokens").isJsonNull()) {
-            used += usage.get("prompt_tokens").getAsInt();
-        }
-        if (usage.has("completion_tokens") && !usage.get("completion_tokens").isJsonNull()) {
-            used += usage.get("completion_tokens").getAsInt();
-        }
+        used += firstPositiveInt(usage, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens");
+        used += firstPositiveInt(usage, "output_tokens", "outputTokens", "completion_tokens", "completionTokens");
+        used += firstPositiveInt(usage, "thought_tokens", "thoughtTokens");
+        used += firstPositiveInt(usage, "cached_write_tokens", "cachedWriteTokens");
+        used += firstPositiveInt(usage, "cached_read_tokens", "cachedReadTokens");
         return Math.max(0, used);
+    }
+
+    /** First finite non-null number &gt; 0 among keys (or 0). Snake_case keys should be listed first. */
+    static int firstPositiveInt(JsonObject obj, String... keys) {
+        if (obj == null || keys == null) {
+            return 0;
+        }
+        for (String key : keys) {
+            if (key == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+                continue;
+            }
+            try {
+                int n = obj.get(key).getAsInt();
+                if (n > 0) {
+                    return n;
+                }
+            } catch (Exception ignored) {
+                // non-numeric
+            }
+        }
+        return 0;
     }
 }

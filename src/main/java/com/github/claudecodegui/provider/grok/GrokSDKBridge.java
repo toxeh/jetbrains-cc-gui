@@ -271,6 +271,12 @@ public class GrokSDKBridge extends BaseSDKBridge {
             String usageJson = line.substring("[USAGE]".length()).trim();
             try {
                 JsonObject usage = gson.fromJson(usageJson, JsonObject.class);
+                // Canonical snake_case for Java consumers; camelCase ACP is fallback input.
+                JsonObject canonical = GrokContextUsageBuilder.normalizeUsageToSnakeCase(usage);
+                if (canonical != null) {
+                    usageJson = gson.toJson(canonical);
+                    usage = canonical;
+                }
                 int used = GrokContextUsageBuilder.extractUsedTokens(usage);
                 if (used > 0) {
                     lastUsedTokens.set(used);

@@ -4,7 +4,12 @@
  * Emits lines on stdout that GrokSDKBridge / ClaudeStreamAdapter-style parsers understand:
  *   [MESSAGE_START] [STREAM_START] [CONTENT_DELTA] [MESSAGE] [TOOL_RESULT]
  *   [THINKING_DELTA] [USAGE] [SESSION_ID] [STREAM_END] [MESSAGE_END] [SEND_ERROR]
+ *
+ * [USAGE] payloads are always snake_case (total_tokens/input_tokens/…) so Java
+ * consumers can treat OpenAI shape as primary; camelCase ACP is normalized here.
  */
+
+import { extractUsageFromAcpEnvelope, normalizeUsageToSnakeCase } from './grok-utils.js';
 
 export class GrokEventNormalizer {
   constructor({ log = console.log, error = console.error } = {}) {
@@ -98,7 +103,22 @@ export class GrokEventNormalizer {
     this.log(JSON.stringify(payload));
   }
 
+  #emitUsage(raw) {
+    if (!raw) return;
+    const usage = normalizeUsageToSnakeCase(raw) || raw;
+    // Avoid empty {} spam
+    if (!usage || (typeof usage === 'object' && !Object.keys(usage).length)) return;
+    this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
+  }
+
   #handleNotification(method, params) {
+    // Grok CLI 0.2.x: usage arrives on _x.ai/session_notification (turn_completed),
+    // not on classic sessionUpdate=usage_update.
+    const fromEnvelope = extractUsageFromAcpEnvelope(method, params);
+    if (fromEnvelope) {
+      this.#emitUsage(fromEnvelope);
+    }
+
     if (method !== 'session/update') {
       return;
     }
@@ -132,9 +152,9 @@ export class GrokEventNormalizer {
         break;
       }
       case 'usage_update':
-      case 'usage': {
-        const usage = update.usage || update;
-        this.#emit(`[USAGE] ${JSON.stringify(usage)}`);
+      case 'usage':
+      case 'turn_completed': {
+        // usage already emitted via extractUsageFromAcpEnvelope above when present
         break;
       }
       case 'user_message_chunk':
@@ -222,9 +242,11 @@ export class GrokEventNormalizer {
   }
 
   #handlePromptResult(result) {
-    // session/prompt returns completion metadata; usage may be here
-    if (result?.usage) {
-      this.#emit(`[USAGE] ${JSON.stringify(result.usage)}`);
+    // session/prompt result: usage is usually under result._meta.usage (Grok CLI 0.2.x),
+    // sometimes result.usage, sometimes flat _meta.totalTokens.
+    const raw = extractUsageFromAcpEnvelope(result);
+    if (raw) {
+      this.#emitUsage(raw);
     }
     if (result?.stopReason || result?.stop_reason) {
       // optional
