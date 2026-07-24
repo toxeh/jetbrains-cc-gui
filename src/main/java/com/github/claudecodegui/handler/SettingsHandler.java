@@ -103,7 +103,8 @@ public class SettingsHandler extends BaseMessageHandler {
         "get_grok_auth_config",
         "set_grok_auth_config",
         "get_grok_usage",
-        "get_grok_plan_usage"
+        "get_grok_plan_usage",
+        "get_claude_plan_usage"
     };
 
     public SettingsHandler(HandlerContext context) {
@@ -361,6 +362,9 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "get_grok_plan_usage":
                 projectConfigHandler.handleGetGrokPlanUsage();
+                return true;
+            case "get_claude_plan_usage":
+                projectConfigHandler.handleGetClaudePlanUsage();
                 return true;
 
             default:

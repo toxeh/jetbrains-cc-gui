@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getFileIcon } from '../../utils/fileIcons';
 import { useGrokPlanUsage } from '../../hooks/useGrokPlanUsage';
+import { useClaudePlanUsage } from '../../hooks/useClaudePlanUsage';
 import { GrokPlanUsageIndicator } from './GrokPlanUsageIndicator';
 import { TokenIndicator } from './TokenIndicator';
 import type { SelectedAgent } from './types';
@@ -66,7 +67,9 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isGrok = currentProvider === 'grok';
+  const isClaude = currentProvider === 'claude';
   const grokPlanUsage = useGrokPlanUsage(currentProvider);
+  const claudePlanUsage = useClaudePlanUsage(currentProvider);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [showEnablePopover, setShowEnablePopover] = useState(false);
 
@@ -274,6 +277,14 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
           <GrokPlanUsageIndicator
             snapshot={grokPlanUsage.snapshot}
             status={grokPlanUsage.status}
+          />
+        )}
+
+        {/* Claude plan % usage + reset (5h / 7d windows) */}
+        {isClaude && (
+          <GrokPlanUsageIndicator
+            snapshot={claudePlanUsage.snapshot}
+            status={claudePlanUsage.status}
           />
         )}
 

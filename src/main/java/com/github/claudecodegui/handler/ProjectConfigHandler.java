@@ -962,6 +962,59 @@ public class ProjectConfigHandler {
         return unavailable;
     }
 
+    /**
+     * ContextBar plan-usage snapshot for Claude: prefer local-agent {@code GET /capacity}
+     * derived from {@code ANTHROPIC_BASE_URL}. Pushes {@code window.updateClaudePlanUsage}.
+     */
+    public void handleGetClaudePlanUsage() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            JsonObject payload = resolveClaudePlanUsagePayload();
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    context.callJavaScript("window.updateClaudePlanUsage",
+                            context.escapeJs(gson.toJson(payload)));
+                } catch (Exception e) {
+                    LOG.debug("[ProjectConfigHandler] updateClaudePlanUsage failed: " + e.getMessage());
+                }
+            });
+        });
+    }
+
+    /** Package-visible for tests: Claude plan-usage payload from local-agent /capacity. */
+    JsonObject resolveClaudePlanUsagePayload() {
+        // Derive capacity URL from ANTHROPIC_BASE_URL (e.g. http://127.0.0.1:18789/claude/v1
+        // → http://127.0.0.1:18789/capacity).
+        String base = safeGrokString(() -> {
+            JsonObject claudeSettings = settingsService.readClaudeSettings();
+            if (claudeSettings != null && claudeSettings.has("env")) {
+                JsonObject env = claudeSettings.getAsJsonObject("env");
+                if (env.has("ANTHROPIC_BASE_URL")) {
+                    return env.get("ANTHROPIC_BASE_URL").getAsString();
+                }
+            }
+            return "";
+        });
+
+        String capacityUrl = capacityUrlFromBase(base);
+        if (capacityUrl != null) {
+            JsonObject fromCapacity = fetchCapacityJson(capacityUrl);
+            if (fromCapacity != null && isPresentCapacity(fromCapacity)) {
+                fromCapacity.addProperty("ok", true);
+                if (!fromCapacity.has("source")) {
+                    fromCapacity.addProperty("source", "local-agent");
+                }
+                return fromCapacity;
+            }
+        }
+
+        JsonObject unavailable = new JsonObject();
+        unavailable.addProperty("ok", true);
+        unavailable.addProperty("present", false);
+        unavailable.addProperty("message", "Usage unavailable");
+        unavailable.addProperty("source", "plugin");
+        return unavailable;
+    }
+
     private static String safeGrokString(ThrowingStringSupplier s) {
         try {
             return s.get();
