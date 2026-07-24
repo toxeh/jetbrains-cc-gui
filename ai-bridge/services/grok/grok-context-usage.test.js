@@ -111,11 +111,17 @@ test('GrokEventNormalizer emits [USAGE] from turn_completed and prompt _meta', a
     stopReason: 'end_turn',
     _meta: { usage: { totalTokens: 1234, inputTokens: 1000, outputTokens: 234 } },
   });
+  n.finishSuccess('sid-1', 'pong');
   const usageLines = lines.filter((l) => l.startsWith('[USAGE]'));
   assert.ok(usageLines.length >= 1, 'expected [USAGE] tag, got: ' + lines.join('\n'));
   const payload = JSON.parse(usageLines[0].slice('[USAGE] '.length));
   assert.equal(payload.total_tokens, 1234);
   assert.equal(payload.input_tokens, 1000);
+  // Final MESSAGE must carry usage so Java does not wipe the ring snapshot
+  const msgLine = lines.find((l) => l.startsWith('[MESSAGE] '));
+  assert.ok(msgLine, 'expected final [MESSAGE]');
+  const msg = JSON.parse(msgLine.slice('[MESSAGE] '.length));
+  assert.equal(msg.message.usage.total_tokens, 1234);
 });
 
 test('buildGrokContextUsagePayload synthesizes conversation + free space', () => {

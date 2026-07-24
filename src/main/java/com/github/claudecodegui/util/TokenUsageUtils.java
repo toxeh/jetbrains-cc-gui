@@ -28,13 +28,28 @@ public final class TokenUsageUtils {
      * Extract used token count from a usage JSON object, respecting provider differences.
      * - Claude: input + cache_creation + cache_read + output (total tokens, matches CLI status bar)
      * - Codex: input + output (input already includes cached tokens)
+     * - Grok: prefer total_tokens / totalTokens (ACP context size); fall back to OpenAI-style parts
      */
     public static int extractUsedTokens(JsonObject usage, String provider) {
         if (usage == null) { return 0; }
+        if ("grok".equals(provider)) {
+            return com.github.claudecodegui.provider.grok.GrokContextUsageBuilder.extractUsedTokens(usage);
+        }
         int input = usage.has("input_tokens") ? usage.get("input_tokens").getAsInt() : 0;
         int output = usage.has("output_tokens") ? usage.get("output_tokens").getAsInt() : 0;
         if ("codex".equals(provider)) {
             return input + output;
+        }
+        // Prefer explicit total when present (OpenAI-compatible gateways)
+        if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
+            try {
+                int total = usage.get("total_tokens").getAsInt();
+                if (total > 0) {
+                    return total;
+                }
+            } catch (Exception ignored) {
+                // fall through
+            }
         }
         int cacheCreation = usage.has("cache_creation_input_tokens") ? usage.get("cache_creation_input_tokens").getAsInt() : 0;
         int cacheRead = usage.has("cache_read_input_tokens") ? usage.get("cache_read_input_tokens").getAsInt() : 0;
