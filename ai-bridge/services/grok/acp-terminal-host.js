@@ -117,6 +117,14 @@ export function unwrapShellWrapperCommand(command, args = []) {
     return inner;
   }
 
+  // args empty -> command is already the full -c script (spaces/pipes/quotes).
+  // Do NOT single-quote the whole string: bash then looks up a binary named
+  // like echo-with-args and yields exit 127.
+  if (argList.length === 0) {
+    return cmd;
+  }
+
+  // argv form: executable + args -> join with per-arg shell escaping for -c.
   const parts = [cmd, ...argList];
   return parts.map(escapeForShell).join(' ');
 }
