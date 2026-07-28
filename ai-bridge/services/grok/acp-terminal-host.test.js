@@ -79,6 +79,21 @@ test('unwrapShellWrapperCommand strips full wrapper in command field', () => {
   assert.equal(inner, 'echo hi');
 });
 
+test('unwrapShellWrapperCommand keeps bare shell script when args empty', () => {
+  assert.equal(unwrapShellWrapperCommand('echo shell-ok', []), 'echo shell-ok');
+  assert.equal(
+    unwrapShellWrapperCommand('echo hello && echo world', []),
+    'echo hello && echo world'
+  );
+});
+
+test('unwrapShellWrapperCommand escapes argv-form executable + args', () => {
+  assert.equal(
+    unwrapShellWrapperCommand('printf', ['%s', 'a|b']),
+    "printf '%s' 'a|b'"
+  );
+});
+
 test('loginShellSpawnArgs matches daemon.js flag shapes', () => {
   assert.deepEqual(loginShellSpawnArgs('/bin/bash', 'echo hi'), ['-lc', 'echo hi']);
   assert.deepEqual(loginShellSpawnArgs('/bin/zsh', 'echo hi'), ['-l', '-c', 'echo hi']);
@@ -102,14 +117,38 @@ test('create with Grok-style /bin/bash -lc args', async () => {
 });
 
 test('shell string command with empty args', async () => {
-  const host = new AcpTerminalHost({ authorizeCreate: async () => true });
+  const host = new AcpTerminalHost({
+    authorizeCreate: async () => true,
+    env: { ...process.env, SHELL: '/bin/bash' },
+  });
   const { terminalId } = await host.create({
     sessionId: 's',
     command: 'echo shell-ok',
     args: [],
   });
-  await host.waitForExit({ terminalId });
+  const waited = await host.waitForExit({ terminalId });
+  assert.equal(waited.exitCode, 0);
   const out = await host.output({ terminalId });
   assert.match(out.output, /shell-ok/);
+  assert.doesNotMatch(out.output, /command not found/);
+  await host.release({ terminalId });
+});
+
+test('shell string with metacharacters runs as script not as binary name', async () => {
+  const host = new AcpTerminalHost({
+    authorizeCreate: async () => true,
+    env: { ...process.env, SHELL: '/bin/bash' },
+  });
+  const { terminalId } = await host.create({
+    sessionId: 's',
+    command: 'echo hello && echo world',
+    args: [],
+  });
+  const waited = await host.waitForExit({ terminalId });
+  assert.equal(waited.exitCode, 0);
+  const out = await host.output({ terminalId });
+  assert.match(out.output, /hello/);
+  assert.match(out.output, /world/);
+  assert.doesNotMatch(out.output, /command not found/);
   await host.release({ terminalId });
 });
