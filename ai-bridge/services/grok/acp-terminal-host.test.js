@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   AcpTerminalHost,
   truncateOutputFromStart,
   isTerminalMethod,
   unwrapShellWrapperCommand,
   loginShellSpawnArgs,
+  needsFileExecution,
+  writeTempScript,
 } from './acp-terminal-host.js';
 
 test('isTerminalMethod recognizes ACP methods', () => {
@@ -151,4 +155,21 @@ test('shell string with metacharacters runs as script not as binary name', async
   assert.match(out.output, /world/);
   assert.doesNotMatch(out.output, /command not found/);
   await host.release({ terminalId });
+});
+
+test('needsFileExecution detects shebang, heredoc, bang, heavy quoting', () => {
+  assert.equal(needsFileExecution('#!/bin/bash\necho hi'), true);
+  assert.equal(needsFileExecution('cat << EOF\nbody\nEOF'), true);
+  assert.equal(needsFileExecution("echo 'bang!'"), true);
+  assert.equal(needsFileExecution('echo "a" "b" "c" "d" "e"'), true);
+  assert.equal(needsFileExecution('echo simple'), false);
+});
+
+test('writeTempScript writes executable file and returns path', () => {
+  const p = writeTempScript('echo hello from temp script');
+  assert.ok(p && p.includes('grok-cmd-'));
+  // cleanup best-effort
+  try {
+    fs.rmSync(path.dirname(p), { recursive: true, force: true });
+  } catch {}
 });

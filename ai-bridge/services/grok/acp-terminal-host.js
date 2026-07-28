@@ -8,6 +8,8 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_OUTPUT_BYTE_LIMIT = 1024 * 1024; // 1 MiB soft default if agent omits limit
@@ -152,6 +154,35 @@ export function loginShellSpawnArgs(loginShell, commandLine) {
   return ['-l', '-c', commandLine];
 }
 
+/**
+ * Detect payloads that are unsafe or unreliable via sh -c:
+ *   - shebang (#!/...)
+ *   - heredoc (<< or <<'...')
+ *   - history expansion bang (!)
+ *   - nested single/double quotes that the outer wrapper mangles
+ */
+export function needsFileExecution(commandLine) {
+  const s = String(commandLine || '').trim();
+
+  // Always use temp script for anything non-trivial
+  if (/^#!/.test(s)) return true;                    // shebang
+  if (/\b<<['"]?/.test(s)) return true;              // heredoc
+  if (/[&|;`$(){}<>!]/.test(s)) return true;         // shell metacharacters
+  if (s.includes('&&') || s.includes('||')) return true;
+  if (s.includes('!')) return true;                  // history expansion
+  if (s.includes("'") || s.includes('"')) return true; // any quote risks mangling by outer wrapper
+
+  return false;
+}
+
+/** Write a temp script (0700) and return its absolute path. */
+export function writeTempScript(commandLine) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-cmd-'));
+  const scriptPath = path.join(dir, 'cmd.sh');
+  fs.writeFileSync(scriptPath, String(commandLine), { mode: 0o700 });
+  return scriptPath;
+}
+
 export class AcpTerminalHost {
   /**
    * @param {object} opts
@@ -254,21 +285,71 @@ export class AcpTerminalHost {
     // Always run through the user's login shell (profiles / normal env).
     // Array form only — never pass a full "/bin/bash -lc '…'" string as argv[0]/path.
     // Flag shape matches daemon.js: bash uses -lc, fish -c, others -l -c.
-    const loginShell = rawEnv.SHELL || process.env.SHELL || '/bin/zsh';
-    const commandLine = unwrapShellWrapperCommand(command, args);
+    // Always respect the user's login shell ($SHELL).
+    // If not set, prefer zsh on macOS only if the binary exists,
+    // otherwise fall back to bash or POSIX sh.
+    function resolveDefaultShell() {
+      if (process.platform === 'win32') return 'cmd.exe';
+      if (process.platform === 'darwin') {
+        if (fs.existsSync('/bin/zsh')) return '/bin/zsh';
+        if (fs.existsSync('/bin/bash')) return '/bin/bash';
+        return '/bin/sh';
+      }
+      // Linux / other Unix
+      if (fs.existsSync('/bin/bash')) return '/bin/bash';
+      return '/bin/sh';
+    }
+
+    const loginShell = rawEnv.SHELL || process.env.SHELL || resolveDefaultShell();
+    let commandLine = unwrapShellWrapperCommand(command, args);
     if (!commandLine.trim()) {
       throw Object.assign(new Error('command is empty after unwrapping shell wrapper'), {
         code: -32602,
       });
     }
 
-    const spawnArgs = loginShellSpawnArgs(loginShell, commandLine);
-    const child = spawn(loginShell, spawnArgs, {
-      cwd,
-      env: cleanEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-    });
+    let scriptPath = null;
+    if (needsFileExecution(commandLine)) {
+      // Complex payload (shebang / heredoc / ! / heavy quoting) — write to temp script.
+      // This bypasses the outer wrapper mangling that corrupts heredoc, bang, nested quotes.
+      scriptPath = writeTempScript(commandLine);
+      commandLine = scriptPath; // pass the path; loginShell will exec it
+    }
+
+    // Execution strategy (robust against noexec):
+    // - Normal commands: loginShell -lc/-l -c "commandLine"
+    // - Complex payloads (heredoc/!/shebang): write to temp script, then
+    //   ALWAYS invoke via the user's login shell: loginShell -c "/tmp/.../cmd.sh"
+    //   This works even when /tmp has noexec.
+    let child;
+    if (scriptPath) {
+      // Execute the temp script directly via the login shell as a file, not via -c.
+      // This bypasses the outer ACP wrapper entirely and avoids treating the path as code.
+      // Strategy: loginShell -l scriptPath  (or equivalent per shell)
+      const shellBase = path.basename(String(loginShell || ''));
+      let scriptArgs;
+      if (shellBase === 'fish') {
+        scriptArgs = [scriptPath];
+      } else if (shellBase === 'bash' || shellBase === 'zsh' || shellBase === 'sh') {
+        scriptArgs = ['-l', scriptPath];
+      } else {
+        scriptArgs = [scriptPath];
+      }
+      child = spawn(loginShell, scriptArgs, {
+        cwd,
+        env: cleanEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      });
+    } else {
+      const args = loginShellSpawnArgs(loginShell, commandLine);
+      child = spawn(loginShell, args, {
+        cwd,
+        env: cleanEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      });
+    }
 
     const state = {
       terminalId,
@@ -286,6 +367,7 @@ export class AcpTerminalHost {
       released: false,
       child,
       exitPromise: null,
+      scriptPath, // may be null; used for cleanup on close
     };
 
     state.exitPromise = new Promise((resolve) => {
@@ -305,7 +387,17 @@ export class AcpTerminalHost {
         this.#append(state, `[spawn error] ${err.message || String(err)}\n`);
         finish(1, null);
       });
-      child.on('close', (code, signal) => finish(code, signal));
+      child.on('close', (code, signal) => {
+        // Best-effort cleanup of any temp script we created for complex payloads.
+        if (state.scriptPath) {
+          try {
+            fs.rmSync(path.dirname(state.scriptPath), { recursive: true, force: true });
+          } catch {
+            // ignore
+          }
+        }
+        finish(code, signal);
+      });
     });
 
     const onData = (buf) => {
@@ -404,6 +496,14 @@ export class AcpTerminalHost {
         new Promise((r) => setTimeout(r, 1000)),
       ]);
     }
+    // Best-effort cleanup of any temp script
+    if (state.scriptPath) {
+      try {
+        fs.rmSync(path.dirname(state.scriptPath), { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
     this.onEvent('kill', { terminalId: state.terminalId });
     return {};
   }
@@ -428,6 +528,14 @@ export class AcpTerminalHost {
       }
     }
     state.released = true;
+    // Best-effort cleanup of any temp script
+    if (state && state.scriptPath) {
+      try {
+        fs.rmSync(path.dirname(state.scriptPath), { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
     this.terminals.delete(id);
     this.onEvent('release', { terminalId: id });
     return {};
