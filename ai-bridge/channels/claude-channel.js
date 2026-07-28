@@ -107,12 +107,13 @@ export async function handleClaudeCommand(command, args, stdinData) {
     }
 
     case 'getContextUsage': {
-      // getContextUsage requires a persistent runtime (daemon mode).
-      // In per-process mode, there is no persistent runtime, so return an error.
-      console.log(JSON.stringify({
-        success: false,
-        error: 'getContextUsage requires daemon mode. No persistent runtime available in per-process mode.'
-      }));
+      // One-shot path: synthesize from Java-supplied used/max when present.
+      const payload = buildClaudeContextUsagePayload({
+        usedTokens: stdinData?.usedTokens ?? 0,
+        maxTokens: stdinData?.maxTokens ?? 200_000,
+        model: stdinData?.model || '',
+      });
+      console.log(JSON.stringify(payload));
       break;
     }
 
@@ -123,4 +124,60 @@ export async function handleClaudeCommand(command, args, stdinData) {
 
 export function getClaudeCommandList() {
   return ['send', 'sendWithAttachments', 'getSession', 'getLatestUserMessage', 'rewindFiles', 'getMcpServerStatus', 'getMcpServerTools', 'resetRuntime', 'getContextUsage'];
+}
+
+/**
+ * Build a ContextUsageData-compatible payload for the /context dialog.
+ * Mirrors {@code GrokContextUsageBuilder} / {@code buildGrokContextUsagePayload} but with
+ * {@code source: "claude-synthesized"}.
+ *
+ * @param {{ usedTokens?: number, maxTokens?: number, model?: string }} options
+ */
+export function buildClaudeContextUsagePayload({
+  usedTokens = 0,
+  maxTokens = 200_000,
+  model = '',
+} = {}) {
+  const rawMaxTokens = Number(maxTokens); // capture before clamping
+  let used = Math.max(0, Number(usedTokens) || 0);
+  const max = Math.max(1, Number(maxTokens) > 0 ? Number(maxTokens) : 200_000);
+  if (used > max) used = max;
+  const free = Math.max(0, max - used);
+  const percentage = Math.round((1000 * used) / max) / 10;
+
+  return {
+    success: true,
+    totalTokens: used,
+    maxTokens: max,
+    rawMaxTokens,
+    percentage,
+    model: model || '',
+    isAutoCompactEnabled: false,
+    source: 'claude-synthesized',
+    categories: [
+      { name: 'Conversation', tokens: used, color: 'claude' },
+      { name: 'Free space', tokens: free, color: 'inactive' },
+    ],
+    gridRows: [[
+      {
+        color: 'claude',
+        isFilled: used > 0,
+        categoryName: 'Conversation',
+        tokens: used,
+        percentage,
+        squareFullness: used > 0 ? used / max : 0,
+      },
+      {
+        color: 'inactive',
+        isFilled: false,
+        categoryName: 'Free space',
+        tokens: free,
+        percentage: Math.round((1000 * free) / max) / 10,
+        squareFullness: free > 0 ? Math.min(1, free / max) : 0,
+      },
+    ]],
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
+  };
 }
