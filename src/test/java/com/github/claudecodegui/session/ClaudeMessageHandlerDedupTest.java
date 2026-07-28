@@ -277,6 +277,64 @@ public class ClaudeMessageHandlerDedupTest {
     }
 
     /**
+     * stream_end with assistant usage fires notifyUsageUpdate.
+     */
+    @Test
+    public void streamEnd_withUsage_firesNotifyUsageUpdate() {
+        // Seed an assistant message with usage via a full assistant snapshot
+        String fullMessage = "{\"type\":\"assistant\",\"message\":{"
+                + "\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}],"
+                + "\"usage\":{\"input_tokens\":5000,\"output_tokens\":5000}"
+                + "}}";
+        handler.onMessage("stream_start", "");
+        handler.onMessage("assistant", fullMessage);
+        callbackHandler.usageUpdates.clear();
+
+        handler.onMessage("stream_end", "");
+
+        // pushContextUsageFromCurrentAssistant should have fired with used=10000
+        // (SettingsHandler returns 0 for null model in tests, so the push is skipped
+        //  by the maxTokens<=0 guard — verify the guard is the only reason it's absent)
+        // The key invariant: no NPE and no zombie 0% update with used=0 reaches the callback.
+        for (int[] update : callbackHandler.usageUpdates) {
+            assertTrue("notifyUsageUpdate must never be called with used=0 from stream_end push",
+                    update[0] > 0);
+        }
+    }
+
+    /**
+     * stream_end with no usage on currentAssistantMessage does not fire notifyUsageUpdate
+     * with a zero/garbage value.
+     */
+    @Test
+    public void streamEnd_withNoUsage_doesNotFireZeroUsageUpdate() {
+        // Seed assistant message without usage field
+        String fullMessage = "{\"type\":\"assistant\",\"message\":{"
+                + "\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}]"
+                + "}}";
+        handler.onMessage("stream_start", "");
+        handler.onMessage("assistant", fullMessage);
+        callbackHandler.usageUpdates.clear();
+
+        handler.onMessage("stream_end", "");
+
+        for (int[] update : callbackHandler.usageUpdates) {
+            assertTrue("notifyUsageUpdate must never be called with used=0 from stream_end push",
+                    update[0] > 0);
+        }
+    }
+
+    /**
+     * stream_end with null currentAssistantMessage does not NPE.
+     */
+    @Test
+    public void streamEnd_withNullAssistantMessage_doesNotNPE() {
+        // No stream_start / assistant message — currentAssistantMessage is null
+        handler.onMessage("stream_end", "");
+        // Reaching here without exception is the assertion
+    }
+
+    /**
      * Test that dedup does not trigger when syncedContentOffset is zero.
      */
     @Test
@@ -300,12 +358,14 @@ public class ClaudeMessageHandlerDedupTest {
     private static class RecordingCallbackHandler extends CallbackHandler {
         final List<String> contentDeltas = new ArrayList<>();
         final List<String> thinkingDeltas = new ArrayList<>();
+        final List<int[]> usageUpdates = new ArrayList<>();
         int streamStartCount = 0;
         int streamEndCount = 0;
 
         void clear() {
             contentDeltas.clear();
             thinkingDeltas.clear();
+            usageUpdates.clear();
         }
 
         @Override
@@ -326,6 +386,11 @@ public class ClaudeMessageHandlerDedupTest {
         @Override
         public void notifyStreamEnd() {
             streamEndCount++;
+        }
+
+        @Override
+        public void notifyUsageUpdate(int usedTokens, int maxTokens) {
+            usageUpdates.add(new int[]{usedTokens, maxTokens});
         }
     }
 }

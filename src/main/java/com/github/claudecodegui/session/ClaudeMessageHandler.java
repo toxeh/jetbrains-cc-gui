@@ -751,6 +751,14 @@ public class ClaudeMessageHandler implements MessageCallback {
 
         // After streaming ends, send a final message update to ensure the message list is in sync
         callbackHandler.notifyMessageUpdate(state.getMessages());
+
+        // Guard the context ring against a reset-to-0% after stream end.
+        // handleAssistantMessage / handleUsage may have already pushed usage mid-turn,
+        // but the frontend can receive a stale 0% reset between those calls and
+        // notifyStreamEnd.  A final authoritative push here (same pattern as Grok)
+        // ensures the ring shows the correct value when the turn completes.
+        pushContextUsageFromCurrentAssistant();
+
         callbackHandler.notifyStreamEnd();
         state.setBusy(false);
         state.setLoading(false);
@@ -1028,5 +1036,44 @@ public class ClaudeMessageHandler implements MessageCallback {
 
         target.addProperty("thinking", existing + delta);
         return true;
+    }
+
+    /**
+     * Push the context-ring token usage from the current assistant message at stream end.
+     * This guards the ring against a reset-to-0% that can occur between the last
+     * {@link #handleAssistantMessage}/{@link #handleUsage} push and {@code notifyStreamEnd}.
+     * Mirrors {@code GrokMessageHandler.pushContextUsageFromCurrentAssistant()}.
+     */
+    private void pushContextUsageFromCurrentAssistant() {
+        if (currentAssistantMessage == null || currentAssistantMessage.raw == null) {
+            return;
+        }
+        try {
+            JsonObject usage = null;
+            if (currentAssistantMessage.raw.has("message")
+                    && currentAssistantMessage.raw.get("message").isJsonObject()) {
+                JsonObject message = currentAssistantMessage.raw.getAsJsonObject("message");
+                if (message.has("usage") && message.get("usage").isJsonObject()) {
+                    usage = message.getAsJsonObject("usage");
+                }
+            }
+            if (usage == null) {
+                return;
+            }
+            int used = com.github.claudecodegui.provider.claude.ClaudeContextUsageBuilder.extractUsedTokens(usage);
+            if (used <= 0) {
+                return;
+            }
+            int maxTokens = SettingsHandler.getModelContextLimit(state.getModel());
+            if (maxTokens <= 0) {
+                LOG.warn("pushContextUsageFromCurrentAssistant: unknown context limit for model "
+                        + state.getModel() + ", skipping push");
+                return;
+            }
+            LOG.debug("Claude stream_end context ring push: used=" + used + " max=" + maxTokens);
+            callbackHandler.notifyUsageUpdate(used, maxTokens);
+        } catch (Exception e) {
+            LOG.warn("pushContextUsageFromCurrentAssistant failed", e);
+        }
     }
 }
