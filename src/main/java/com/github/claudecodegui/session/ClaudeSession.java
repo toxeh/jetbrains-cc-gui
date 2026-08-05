@@ -4,6 +4,7 @@ import com.github.claudecodegui.permission.PermissionManager;
 import com.github.claudecodegui.permission.PermissionRequest;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -54,6 +55,7 @@ public class ClaudeSession {
     // SDK bridges
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
 
     // Permission manager
     private final PermissionManager permissionManager = new PermissionManager();
@@ -151,9 +153,15 @@ public class ClaudeSession {
     }
 
     public ClaudeSession(Project project, ClaudeSDKBridge claudeSDKBridge, CodexSDKBridge codexSDKBridge) {
+        this(project, claudeSDKBridge, codexSDKBridge, new GeminiSDKBridge());
+    }
+
+    public ClaudeSession(Project project, ClaudeSDKBridge claudeSDKBridge, CodexSDKBridge codexSDKBridge,
+                         GeminiSDKBridge geminiSDKBridge) {
         this.project = project;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
+        this.geminiSDKBridge = geminiSDKBridge != null ? geminiSDKBridge : new GeminiSDKBridge();
 
         // Initialize managers
         this.state = new com.github.claudecodegui.session.SessionState();
@@ -162,7 +170,7 @@ public class ClaudeSession {
         this.contextCollector = new com.github.claudecodegui.session.EditorContextCollector(project);
         this.callbackFacade = new SessionCallbackFacade(project);
         this.contextService = new SessionContextService(project, MAX_FILE_SIZE_BYTES);
-        this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge);
+        this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge, this.geminiSDKBridge);
         this.sendService = new SessionSendService(
                 project,
                 state,
@@ -172,6 +180,7 @@ public class ClaudeSession {
                 gson,
                 claudeSDKBridge,
                 codexSDKBridge,
+                this.geminiSDKBridge,
                 contextService
         );
         this.messageOrchestrator = new SessionMessageOrchestrator(

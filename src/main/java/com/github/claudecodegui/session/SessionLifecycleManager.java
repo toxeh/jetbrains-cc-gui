@@ -41,6 +41,10 @@ public class SessionLifecycleManager {
 
         CodexSDKBridge getCodexSDKBridge();
 
+        default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() {
+            return null;
+        }
+
         ClaudeSession getSession();
 
         void setSession(ClaudeSession session);
@@ -242,8 +246,7 @@ public class SessionLifecycleManager {
                         + oldSession.getRuntimeSessionEpoch());
             }
 
-            ClaudeSession newSession = new ClaudeSession(
-                    host.getProject(), host.getClaudeSDKBridge(), host.getCodexSDKBridge());
+            ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
             newSession.setModel(previousModel);
@@ -428,7 +431,12 @@ public class SessionLifecycleManager {
     }
 
     private ClaudeSession createDefaultSession() {
-        return new ClaudeSession(host.getProject(), host.getClaudeSDKBridge(), host.getCodexSDKBridge());
+        return new ClaudeSession(
+                host.getProject(),
+                host.getClaudeSDKBridge(),
+                host.getCodexSDKBridge(),
+                host.getGeminiSDKBridge()
+        );
     }
 
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {

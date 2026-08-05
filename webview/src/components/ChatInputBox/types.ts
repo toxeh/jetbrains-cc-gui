@@ -391,6 +391,55 @@ export const CODEX_MODELS: ModelInfo[] = [
 ];
 
 /**
+ * Gemini / Antigravity CLI model list (from `agy models` catalog).
+ * Effort suffixes (-high/-medium/-low) are separate model ids in agy.
+ */
+export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash-medium';
+
+export const GEMINI_MODELS: ModelInfo[] = [
+  {
+    id: 'gemini-3.6-flash-high',
+    label: 'Gemini 3.6 Flash High',
+    description: 'Newest Flash · high effort',
+  },
+  {
+    id: 'gemini-3.6-flash-medium',
+    label: 'Gemini 3.6 Flash Medium',
+    description: 'Newest Flash · balanced',
+  },
+  {
+    id: 'gemini-3.6-flash-low',
+    label: 'Gemini 3.6 Flash Low',
+    description: 'Newest Flash · fast / cheap',
+  },
+  {
+    id: 'gemini-3.5-flash-high',
+    label: 'Gemini 3.5 Flash High',
+    description: 'Flash 3.5 · high effort',
+  },
+  {
+    id: 'gemini-3.5-flash-medium',
+    label: 'Gemini 3.5 Flash Medium',
+    description: 'Flash 3.5 · default balanced',
+  },
+  {
+    id: 'gemini-3.5-flash-low',
+    label: 'Gemini 3.5 Flash Low',
+    description: 'Flash 3.5 · fast / cheap',
+  },
+  {
+    id: 'gemini-3.1-pro-high',
+    label: 'Gemini 3.1 Pro High',
+    description: 'Pro 3.1 · high effort',
+  },
+  {
+    id: 'gemini-3.1-pro-low',
+    label: 'Gemini 3.1 Pro Low',
+    description: 'Pro 3.1 · faster',
+  },
+];
+
+/**
  * Available models (backward compatibility)
  */
 export const AVAILABLE_MODELS = CLAUDE_MODELS;
@@ -411,7 +460,7 @@ export interface ProviderInfo {
 export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
-  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: false },
+  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: true },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: false },
 ];
 

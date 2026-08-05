@@ -10,6 +10,7 @@ import type { PermissionMode } from '../components/ChatInputBox/types';
 import { isSpecialProviderId } from '../types/provider';
 import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
+import { useGeminiProvider } from './providers/useGeminiProvider';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
 import { useModelStatePersistence } from './providers/useModelStatePersistence';
@@ -49,6 +50,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   // ── Provider-specific sub-hooks ──
   const claude = useClaudeProvider();
   const codex = useCodexProvider();
+  const gemini = useGeminiProvider();
   const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -64,14 +66,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     reasoningEffort, setReasoningEffort,
     codexFastMode, setCodexFastMode,
   } = codex;
+  const {
+    selectedGeminiModel, setSelectedGeminiModel,
+    geminiPermissionMode, setGeminiPermissionMode,
+  } = gemini;
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
     setCurrentProvider,
     setSelectedClaudeModel,
     setSelectedCodexModel,
+    setSelectedGeminiModel,
     setClaudePermissionMode,
     setCodexPermissionMode,
+    setGeminiPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -79,15 +87,21 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
+    selectedGeminiModel,
     claudePermissionMode,
     codexPermissionMode,
+    geminiPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
   });
 
   // ── Computed values ──
-  const selectedModel = currentProvider === 'codex' ? selectedCodexModel : selectedClaudeModel;
+  const selectedModel = currentProvider === 'codex'
+    ? selectedCodexModel
+    : currentProvider === 'gemini'
+      ? selectedGeminiModel
+      : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
@@ -113,10 +127,16 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       sendBridgeEvent('set_mode', codexMode);
       return;
     }
+    if (currentProvider === 'gemini') {
+      setPermissionMode(mode);
+      setGeminiPermissionMode(mode);
+      sendBridgeEvent('set_mode', mode);
+      return;
+    }
     setPermissionMode(mode);
     setClaudePermissionMode(mode);
     sendBridgeEvent('set_mode', mode);
-  }, [currentProvider, setCodexPermissionMode, setClaudePermissionMode]);
+  }, [currentProvider, setCodexPermissionMode, setClaudePermissionMode, setGeminiPermissionMode]);
 
   const handleModelSelect = useCallback((modelId: string) => {
     if (currentProvider === 'claude') {
@@ -127,28 +147,39 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'codex') {
       setSelectedCodexModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'gemini') {
+      setSelectedGeminiModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
-  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel]);
+  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel, setSelectedGeminiModel]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
     setCurrentProvider(providerId);
     sendBridgeEvent('set_provider', providerId);
 
-    const modeToSet: PermissionMode = providerId === 'codex'
-      ? (codexPermissionMode === 'plan' ? 'default' : codexPermissionMode)
-      : claudePermissionMode;
+    let modeToSet: PermissionMode = claudePermissionMode;
+    if (providerId === 'codex') {
+      modeToSet = codexPermissionMode === 'plan' ? 'default' : codexPermissionMode;
+    } else if (providerId === 'gemini') {
+      modeToSet = geminiPermissionMode;
+    }
     setPermissionMode(modeToSet);
     sendBridgeEvent('set_mode', modeToSet);
 
-    const newModel = providerId === 'codex'
-      ? selectedCodexModel
-      : apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
+    let newModel = apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
+    if (providerId === 'codex') {
+      newModel = selectedCodexModel;
+    } else if (providerId === 'gemini') {
+      newModel = selectedGeminiModel;
+    }
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
     codexPermissionMode,
+    geminiPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
+    selectedGeminiModel,
     longContextEnabled,
   ]);
 
@@ -201,6 +232,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   return {
     ...claude,
     ...codex,
+    ...gemini,
     ...usage,
     ...settings,
     sdkStatus,

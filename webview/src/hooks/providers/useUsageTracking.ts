@@ -10,6 +10,7 @@ const PROVIDER_TO_SDK: Record<string, string> = {
   bedrock: 'claude-sdk',
   codex: 'codex-sdk',
   openai: 'codex-sdk',
+  gemini: 'gemini-cli',
 };
 
 type SdkStatus = Record<string, {

@@ -94,9 +94,25 @@ public class ContextHandler extends BaseMessageHandler {
         final String finalModel = model;
         final String finalRequestId = requestId;
 
+        String provider = "claude";
         try {
-            this.context.getClaudeSDKBridge()
-                    .getContextUsage(finalSessionId, finalCwd, finalModel)
+            if (this.context.getSession() != null) {
+                String p = this.context.getSession().getProvider();
+                if (p != null && !p.isEmpty()) {
+                    provider = p;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        try {
+            java.util.concurrent.CompletableFuture<com.google.gson.JsonObject> bridgeCall;
+            if ("gemini".equalsIgnoreCase(provider) && this.context.getGeminiSDKBridge() != null) {
+                bridgeCall = this.context.getGeminiSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            } else {
+                bridgeCall = this.context.getClaudeSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            }
+            bridgeCall
                     .thenAccept(result -> {
                         ApplicationManager.getApplication().invokeLater(() -> {
                             try {

@@ -254,6 +254,12 @@ tasks.named('instrumentCode') {
     enabled = false
 }
 
+// instrumentTestCode pulls intellijPlatformJavaCompiler from JetBrains repos;
+// disable like instrumentCode so unit tests run offline / without that artifact.
+tasks.matching { it.name == 'instrumentTestCode' }.configureEach {
+    enabled = false
+}
+
 tasks.named('jarSearchableOptions') {
     enabled = false
 }

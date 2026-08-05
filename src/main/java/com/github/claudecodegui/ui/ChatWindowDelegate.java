@@ -76,6 +76,7 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() { return null; }
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
         JPanel getMainPanel();
@@ -208,11 +209,15 @@ public class ChatWindowDelegate {
     public String setupPermissionService() {
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         Project project = host.getProject();
         String sessionId = claudeSDKBridge.getSessionId();
 
         if ((sessionId == null || sessionId.isEmpty()) && codexSDKBridge != null) {
             sessionId = codexSDKBridge.getSessionId();
+        }
+        if ((sessionId == null || sessionId.isEmpty()) && geminiSDKBridge != null) {
+            sessionId = geminiSDKBridge.getSessionId();
         }
 
         if (sessionId == null || sessionId.isEmpty()) {
@@ -223,6 +228,9 @@ public class ChatWindowDelegate {
         claudeSDKBridge.setSessionId(sessionId);
         if (codexSDKBridge != null) {
             codexSDKBridge.setSessionId(sessionId);
+        }
+        if (geminiSDKBridge != null) {
+            geminiSDKBridge.setSessionId(sessionId);
         }
         LOG.info("Unified bridge sessionId for PermissionService routing: " + sessionId);
 
@@ -242,6 +250,7 @@ public class ChatWindowDelegate {
         Project project = host.getProject();
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         CodemossSettingsService settingsService = host.getSettingsService();
 
         HandlerContext.JsCallback jsCallback = new HandlerContext.JsCallback() {
@@ -259,6 +268,7 @@ public class ChatWindowDelegate {
                 project,
                 claudeSDKBridge,
                 codexSDKBridge,
+                geminiSDKBridge,
                 settingsService,
                 jsCallback,
                 host::isActiveContent,

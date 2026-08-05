@@ -28,6 +28,7 @@ import path from 'node:path';
 import { createInterface } from 'readline';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
+import { handleGeminiCommand } from './channels/gemini-channel.js';
 import { loadClaudeSdk, isClaudeSdkAvailable } from './utils/sdk-loader.js';
 import {
   sendMessagePersistent,
@@ -470,6 +471,10 @@ async function processRequest(request) {
       await resetRuntimePersistent(stdinData);
     } else if (provider === 'claude' && command === 'getContextUsage') {
       await getContextUsagePersistent(stdinData);
+    } else if (provider === 'gemini' && command === 'send') {
+      await handleGeminiCommand('send', [], stdinData);
+    } else if (provider === 'gemini' && (command === 'getContextUsage' || command === 'getUsage' || command === 'listModels' || command === 'checkCli')) {
+      await handleGeminiCommand(command, [], stdinData);
     } else {
       // Dispatch to the existing handlers for non-send commands.
       switch (provider) {
@@ -478,6 +483,9 @@ async function processRequest(request) {
           break;
         case 'codex':
           await handleCodexCommand(command, [], stdinData);
+          break;
+        case 'gemini':
+          await handleGeminiCommand(command, [], stdinData);
           break;
         default:
           throw new Error(`Unknown provider: ${provider}`);
