@@ -405,19 +405,60 @@ export function normalizeUsageToSnakeCase(usage) {
   const input = num(usage.input_tokens ?? usage.inputTokens);
   const output = num(usage.output_tokens ?? usage.outputTokens);
   const thinking = num(usage.thinking_tokens ?? usage.thinkingTokens);
-  const cacheRead = num(usage.cache_read_tokens ?? usage.cacheReadTokens);
+  // agy uses cache_read_tokens; Claude/webview status bar expects cache_read_input_tokens
+  const cacheRead = num(
+    usage.cache_read_input_tokens
+    ?? usage.cacheReadInputTokens
+    ?? usage.cache_read_tokens
+    ?? usage.cacheReadTokens
+    ?? usage.cached_input_tokens
+    ?? usage.cachedInputTokens,
+  );
+  const cacheCreation = num(
+    usage.cache_creation_input_tokens
+    ?? usage.cacheCreationInputTokens
+    ?? usage.cache_write_tokens
+    ?? usage.cacheWriteTokens,
+  );
   const total = num(usage.total_tokens ?? usage.totalTokens)
     || (input + output + thinking);
-  if (input === 0 && output === 0 && thinking === 0 && total === 0 && cacheRead === 0) {
+  if (input === 0 && output === 0 && thinking === 0 && total === 0 && cacheRead === 0 && cacheCreation === 0) {
     return null;
   }
+  // Context occupancy for the status ring is input + cache (not total/output).
+  // Emit both agy and Claude field names so Java TokenUsageUtils can read either.
   return {
     input_tokens: input,
     output_tokens: output,
     thinking_tokens: thinking,
     cache_read_tokens: cacheRead,
+    cache_read_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheCreation,
     total_tokens: total,
   };
+}
+
+/**
+ * Context-window occupancy (status bar / context %).
+ * Prefer input (+ cache); never use total_tokens (includes output) as context fill.
+ */
+export function extractAgyContextTokens(usage) {
+  const u = usage && typeof usage === 'object' && !Array.isArray(usage)
+    ? usage
+    : null;
+  if (!u) return 0;
+  const normalized = normalizeUsageToSnakeCase(u) || u;
+  const input = num(normalized.input_tokens ?? normalized.inputTokens);
+  const cacheRead = num(
+    normalized.cache_read_input_tokens
+    ?? normalized.cache_read_tokens
+    ?? normalized.cacheReadTokens,
+  );
+  const cacheCreation = num(
+    normalized.cache_creation_input_tokens
+    ?? normalized.cacheCreationInputTokens,
+  );
+  return input + cacheRead + cacheCreation;
 }
 
 function num(v) {

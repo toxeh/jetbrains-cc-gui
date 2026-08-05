@@ -328,7 +328,7 @@ public class SessionSendService {
             callbackFacade.notifyStateChange(false, false, "Gemini bridge not available");
             return CompletableFuture.completedFuture(null);
         }
-        GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler());
+        GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler(), project);
         Boolean streaming = readStreamingEnabled();
         final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
         final String currentModel = state.getModel();

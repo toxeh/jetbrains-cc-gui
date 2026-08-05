@@ -4,6 +4,7 @@ import {
   buildAgyArgs,
   mapPermissionMode,
   normalizeUsageToSnakeCase,
+  extractAgyContextTokens,
   buildGeminiContextUsagePayload,
   buildErrorPayload,
   buildAgyEnv,
@@ -156,6 +157,8 @@ test('normalizeUsageToSnakeCase maps fields and camelCase', () => {
     output_tokens: 5,
     thinking_tokens: 2,
     cache_read_tokens: 3,
+    cache_read_input_tokens: 3,
+    cache_creation_input_tokens: 0,
     total_tokens: 17,
   });
 
@@ -174,6 +177,22 @@ test('normalizeUsageToSnakeCase returns null for empty usage', () => {
   assert.equal(normalizeUsageToSnakeCase(null), null);
   assert.equal(normalizeUsageToSnakeCase({}), null);
   assert.equal(normalizeUsageToSnakeCase({ input_tokens: 0, output_tokens: 0 }), null);
+});
+
+test('extractAgyContextTokens uses input+cache not total/output', () => {
+  assert.equal(extractAgyContextTokens({
+    input_tokens: 27793,
+    output_tokens: 18,
+    total_tokens: 27811,
+  }), 27793);
+  assert.equal(extractAgyContextTokens({
+    input_tokens: 100,
+    cache_read_tokens: 50,
+    cache_creation_input_tokens: 25,
+    output_tokens: 999,
+    total_tokens: 1174,
+  }), 175);
+  assert.equal(extractAgyContextTokens(null), 0);
 });
 
 test('buildGeminiContextUsagePayload percentage', () => {

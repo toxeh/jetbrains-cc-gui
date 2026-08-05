@@ -140,9 +140,31 @@ public class GeminiSDKBridgeTest {
         JsonObject usage = bridge.getContextUsage("sid", "/cwd", "gemini-3.5-flash-medium").get();
         assertTrue(usage.get("success").getAsBoolean());
         JsonObject data = usage.getAsJsonObject("data");
-        assertEquals(1234, data.get("usedTokens").getAsInt());
+        // Context occupancy is input (+ cache), not total_tokens
+        assertEquals(1000, data.get("usedTokens").getAsInt());
+        assertEquals(1_000_000, data.get("maxTokens").getAsInt());
         assertEquals("gemini-3.5-flash-medium", data.get("model").getAsString());
         assertEquals("gemini-bridge", data.get("source").getAsString());
+    }
+
+    @Test
+    public void usagePeakIgnoresSmallerCheckpointRows() throws Exception {
+        GeminiSDKBridge bridge = new GeminiSDKBridge();
+        RecordingCallback cb = new RecordingCallback();
+        SDKResult result = new SDKResult();
+        StringBuilder assistant = new StringBuilder();
+        AtomicBoolean hadErr = new AtomicBoolean(false);
+        AtomicReference<String> nodeErr = new AtomicReference<>();
+
+        feed(bridge, "[USAGE] {\"input_tokens\":27000,\"output_tokens\":10,\"total_tokens\":27010}",
+                cb, result, assistant, hadErr, nodeErr);
+        feed(bridge, "[USAGE] {\"input_tokens\":96,\"output_tokens\":3,\"total_tokens\":99}",
+                cb, result, assistant, hadErr, nodeErr);
+
+        JsonObject usage = bridge.getContextUsage("sid", "/cwd", "claude-sonnet-4-6").get();
+        JsonObject data = usage.getAsJsonObject("data");
+        assertEquals(27000, data.get("usedTokens").getAsInt());
+        assertEquals(200_000, data.get("maxTokens").getAsInt());
     }
 
     @Test

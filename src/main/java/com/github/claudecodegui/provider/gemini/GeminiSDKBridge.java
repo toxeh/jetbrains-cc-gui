@@ -152,7 +152,9 @@ public class GeminiSDKBridge extends BaseSDKBridge {
             try {
                 JsonObject usage = gson.fromJson(usageJson, JsonObject.class);
                 int used = extractUsedTokens(usage);
-                if (used > 0) {
+                // Keep peak context this process lifetime for /context synthesis;
+                // small checkpoint rows must not wipe a larger peak.
+                if (used > lastUsedTokens.get()) {
                     lastUsedTokens.set(used);
                 }
             } catch (Exception ignored) {
@@ -197,26 +199,12 @@ public class GeminiSDKBridge extends BaseSDKBridge {
         }
     }
 
+    /**
+     * Context occupancy for the status ring: input (+ cache), never total/output.
+     * Matches {@link com.github.claudecodegui.util.TokenUsageUtils#extractContextTokens}.
+     */
     private static int extractUsedTokens(JsonObject usage) {
-        if (usage == null) {
-            return 0;
-        }
-        if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
-            try {
-                return usage.get("total_tokens").getAsInt();
-            } catch (Exception ignored) {
-            }
-        }
-        int sum = 0;
-        for (String k : new String[]{"input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens"}) {
-            if (usage.has(k) && !usage.get(k).isJsonNull()) {
-                try {
-                    sum += usage.get(k).getAsInt();
-                } catch (Exception ignored) {
-                }
-            }
-        }
-        return sum;
+        return com.github.claudecodegui.util.TokenUsageUtils.extractContextTokens(usage, "gemini");
     }
 
     private String decodeJsonStringPayload(String rawPayload) {
@@ -482,7 +470,11 @@ public class GeminiSDKBridge extends BaseSDKBridge {
     public CompletableFuture<JsonObject> getContextUsage(String sessionId, String cwd, String model) {
         int used = lastUsedTokens.get();
         String m = model != null && !model.isEmpty() ? model : lastUsageModel;
-        int max = 200_000;
+        int max = com.github.claudecodegui.handler.provider.ModelProviderHandler
+                .getModelContextLimit("gemini", m != null ? m : "");
+        if (max <= 0) {
+            max = 200_000;
+        }
         JsonObject data = new JsonObject();
         data.addProperty("usedTokens", used);
         data.addProperty("maxTokens", max);
