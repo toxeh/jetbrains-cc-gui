@@ -43,7 +43,9 @@ export interface UseMessageSenderOptions {
   codexFastMode: CodexFastMode;
   selectedAgent: SelectedAgent | null;
   onReasoningChange?: (effort: ReasoningEffort) => void;
-  sdkStatusLoaded: boolean;
+  /** @deprecated prefer sdkStatusLoading */
+  sdkStatusLoaded?: boolean;
+  sdkStatusLoading?: boolean;
   currentSdkInstalled: boolean;
   sentAttachmentsRef: RefObject<Map<string, Array<{ fileName: string; mediaType: string }>>>;
   chatInputRef: RefObject<ChatInputBoxHandle | null>;
@@ -78,6 +80,7 @@ export function useMessageSender({
   selectedAgent,
   onReasoningChange,
   sdkStatusLoaded,
+  sdkStatusLoading,
   currentSdkInstalled,
   sentAttachmentsRef,
   chatInputRef,
@@ -97,6 +100,7 @@ export function useMessageSender({
   openContextUsageDialog,
   closeContextUsageDialog,
 }: UseMessageSenderOptions) {
+  const isSdkStatusPending = sdkStatusLoading ?? (sdkStatusLoaded === false);
   /**
    * Check if the input is a new session command
    */
@@ -347,7 +351,7 @@ export function useMessageSender({
     if (!text && !hasAttachments) return;
 
     // Check SDK status
-    if (!sdkStatusLoaded) {
+    if (isSdkStatusPending) {
       addToast(t('chat.sdkStatusLoading'), 'info');
       return;
     }
@@ -432,7 +436,7 @@ export function useMessageSender({
     // Send message to backend
     sendMessageToBackend(text, attachments, agentInfo, fileTagsInfo, permissionMode);
   }, [
-    sdkStatusLoaded,
+    isSdkStatusPending,
     currentSdkInstalled,
     currentProvider,
     permissionMode,

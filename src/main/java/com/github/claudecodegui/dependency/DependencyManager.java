@@ -200,6 +200,69 @@ public class DependencyManager {
     }
 
     /**
+     * Resolve Antigravity CLI ({@code agy}) binary path.
+     * Env: {@code AGY_PATH} or {@code GEMINI_CLI_PATH}, then well-known locations and PATH.
+     * Prefers {@code ~/.local/bin/agy} over other PATH hits when both exist as candidates.
+     *
+     * @return absolute path if found, otherwise null
+     */
+    public String resolveAgyBinary() {
+        for (String envKey : new String[] { "AGY_PATH", "GEMINI_CLI_PATH" }) {
+            String explicit = System.getenv(envKey);
+            if (explicit != null && !explicit.isBlank()) {
+                Path p = Paths.get(explicit.trim());
+                if (Files.isRegularFile(p) && Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+            }
+        }
+
+        String home = PlatformUtils.getHomeDirectory();
+        String[] candidates = new String[] {
+                Paths.get(home, ".local", "bin", "agy").toString(),
+                Paths.get(home, ".agy", "bin", "agy").toString(),
+                "/usr/local/bin/agy",
+                "/opt/homebrew/bin/agy"
+        };
+        for (String candidate : candidates) {
+            try {
+                Path p = Paths.get(candidate);
+                if (Files.isRegularFile(p) && Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+            } catch (Exception ignored) {
+                // continue
+            }
+        }
+
+        try {
+            boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+            ProcessBuilder pb = isWindows
+                    ? new ProcessBuilder("where", "agy")
+                    : new ProcessBuilder("which", "agy");
+            pb.redirectErrorStream(true);
+            Process process = pb.start();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line = reader.readLine();
+                boolean finished = process.waitFor(3, TimeUnit.SECONDS);
+                if (finished && process.exitValue() == 0 && line != null && !line.isBlank()) {
+                    Path p = Paths.get(line.trim());
+                    if (Files.isRegularFile(p)) {
+                        return p.toAbsolutePath().toString();
+                    }
+                }
+            } finally {
+                process.destroyForcibly();
+            }
+        } catch (Exception e) {
+            LOG.debug("[DependencyManager] agy PATH lookup failed: " + e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
      * Reads the version from package.json (internal use, does not depend on isInstalled).
      */
     private String getInstalledVersionFromPackage(String sdkId, String npmPackage) {

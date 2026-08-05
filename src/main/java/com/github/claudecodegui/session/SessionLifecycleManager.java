@@ -278,9 +278,8 @@ public class SessionLifecycleManager {
                 host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
             } else if ("grok".equals(currentProvider) && host.getGrokSDKBridge() != null) {
                 host.getGrokSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
-            } else if ("gemini".equals(currentProvider) && host.getGeminiSDKBridge() != null) {
-                host.getGeminiSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
             }
+            // Gemini/agy is one-shot stream-json — no persistent daemon to prewarm.
 
             newSession.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
@@ -472,9 +471,8 @@ public class SessionLifecycleManager {
             host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
         } else if ("grok".equals(provider) && host.getGrokSDKBridge() != null) {
             host.getGrokSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
-        } else if ("gemini".equals(provider) && host.getGeminiSDKBridge() != null) {
-            host.getGeminiSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
         }
+        // Gemini/agy is one-shot stream-json — no persistent daemon to prewarm.
         fetchSlashCommandsOnStartup();
 
         ApplicationManager.getApplication().invokeLater(() -> {

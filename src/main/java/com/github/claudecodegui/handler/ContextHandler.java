@@ -8,8 +8,6 @@ import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 
-import java.util.concurrent.CompletableFuture;
-
 /**
  * Context usage handler.
  * Handles the get_context_usage event from the frontend to display context window usage breakdown.

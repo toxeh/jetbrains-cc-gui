@@ -5,8 +5,6 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.action.SendShortcutSync;
-import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
-import com.github.claudecodegui.provider.codex.CodexHistoryReader;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.util.FontConfigService;
 import com.github.claudecodegui.util.ThemeConfigService;
@@ -772,13 +770,7 @@ public class ProjectConfigHandler {
                     }
                 }
                 String json;
-                if ("codex".equals(provider)) {
-                    CodexHistoryReader reader = new CodexHistoryReader();
-                    CodexHistoryReader.ProjectStatistics stats = reader.getProjectStatistics(projectPath, cutoffTime);
-                    LOG.info("[ProjectConfigHandler] Codex statistics - sessions: " + stats.totalSessions +
-                             ", cost: " + stats.estimatedCost + ", total tokens: " + stats.totalUsage.totalTokens);
-                    json = gson.toJson(stats);
-                } else if ("grok".equals(provider)) {
+                if ("grok".equals(provider)) {
                     // Local session activity (+ plugin ACP ledger tokens). Billing is optional enrichment.
                     com.github.claudecodegui.provider.grok.GrokUsageAggregator aggregator =
                             new com.github.claudecodegui.provider.grok.GrokUsageAggregator();
@@ -795,10 +787,10 @@ public class ProjectConfigHandler {
                     // Best-effort live billing attach (does not block / replace activity).
                     enrichGrokUsageWithBilling(projectPath);
                     return;
-                } else {
-                    ClaudeHistoryReader reader = new ClaudeHistoryReader();
-                    json = gson.toJson(reader.getProjectStatistics(projectPath, cutoffTime));
                 }
+                // Claude/Codex/Gemini usage UI is TokenTracker-backed; legacy getProjectStatistics
+                // aggregators were removed. Return an empty compatible shell for residual callers.
+                json = gson.toJson(emptyUsageStatisticsShell(projectPath, provider));
                 final String statsJson = json;
                 ApplicationManager.getApplication().invokeLater(() ->
                     context.callJavaScript("window.updateUsageStatistics", context.escapeJs(statsJson)));
@@ -807,6 +799,39 @@ public class ProjectConfigHandler {
                 showError("Failed to get statistics: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Empty Claude/Codex-shaped usage payload. Claude/Codex use TokenTracker;
+     * this keeps residual {@code updateUsageStatistics} callers from NPE/empty UI.
+     */
+    private static JsonObject emptyUsageStatisticsShell(String projectPath, String provider) {
+        JsonObject totalUsage = new JsonObject();
+        totalUsage.addProperty("inputTokens", 0);
+        totalUsage.addProperty("outputTokens", 0);
+        totalUsage.addProperty("cacheWriteTokens", 0);
+        totalUsage.addProperty("cacheReadTokens", 0);
+        totalUsage.addProperty("totalTokens", 0);
+
+        JsonObject stats = new JsonObject();
+        stats.addProperty("projectPath", projectPath != null ? projectPath : "all");
+        String name = "all";
+        if (projectPath != null && !projectPath.isEmpty() && !"all".equals(projectPath)) {
+            int slash = Math.max(projectPath.lastIndexOf('/'), projectPath.lastIndexOf('\\'));
+            name = slash >= 0 && slash < projectPath.length() - 1
+                    ? projectPath.substring(slash + 1) : projectPath;
+        }
+        stats.addProperty("projectName", name);
+        stats.addProperty("totalSessions", 0);
+        stats.add("totalUsage", totalUsage);
+        stats.addProperty("estimatedCost", 0.0);
+        stats.add("sessions", new com.google.gson.JsonArray());
+        stats.add("dailyUsage", new com.google.gson.JsonArray());
+        stats.add("byModel", new com.google.gson.JsonArray());
+        stats.addProperty("lastUpdated", System.currentTimeMillis());
+        stats.addProperty("provider", provider != null ? provider : "claude");
+        stats.addProperty("source", "tokentracker");
+        return stats;
     }
 
     // ---- Grok auth method --------------------------------------------------

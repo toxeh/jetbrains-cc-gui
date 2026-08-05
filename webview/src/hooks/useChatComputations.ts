@@ -7,6 +7,7 @@ import type {
 } from '../types';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
 import type { RewindableMessage } from '../components/RewindSelectDialog';
+import type { SubagentHistoryResponse } from '../types/subagent';
 import { formatTime } from '../utils/helpers';
 import { formatSessionTitlePreview } from '../utils/messageUtils';
 import { extractTodosFromToolUse, extractAccumulatedTasks } from '../utils/todoToolNormalization';
@@ -25,6 +26,7 @@ interface UseChatComputationsParams {
   t: TFunction;
   messages: ClaudeMessage[];
   mergedMessages: ClaudeMessage[];
+  subagentHistories?: Record<string, SubagentHistoryResponse>;
   customSessionTitle: string | null;
   streamingActive: boolean;
   currentProvider: string;
@@ -45,6 +47,7 @@ export function useChatComputations({
   t,
   messages,
   mergedMessages,
+  subagentHistories = {},
   customSessionTitle,
   streamingActive,
   currentProvider,
@@ -117,6 +120,7 @@ export function useChatComputations({
     getContentBlocks,
     findToolResult,
     getToolResultRaw,
+    subagentHistories,
   });
 
   const subagents = useMemo(
