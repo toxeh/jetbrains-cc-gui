@@ -21,6 +21,24 @@ UI provider=gemini
 
 `conversation_id` from agy `init` / `result` is stored as plugin `sessionId` and passed back as `--conversation` on later turns.
 
+### Session reset
+
+Clear `sessionId` (no `--conversation` on the next turn) when:
+
+- the user starts a new chat tab session (`createNewSession` already sets id to null)
+- Gemini **model** changes (including effort slug changes) — resume of a multi-model fat history is what produced ~2M context on a 128k model
+- **provider** switches (Claude/Codex/Gemini ids are not interchangeable)
+
+### cwd / workspaceDirs guard
+
+agy uses process cwd as `workspaceDirs`. Never spawn with:
+
+- JetBrains plugin / Application Support trees
+- embedded or standalone `ai-bridge`
+- `~/.gemini` / antigravity-cli home
+
+Java `PathUtils.guardWorkingDirectory` + Node `selectWorkingDirectory` / `isUnsafeWorkingDirectory` enforce this; `runAgyTurn` always resolves cwd through `selectWorkingDirectory`.
+
 ## Permissions
 
 Headless has no Ask UI. Default: soft-deny. Plugin modes map via `mapPermissionMode`:

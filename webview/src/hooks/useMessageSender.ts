@@ -28,11 +28,11 @@ function createContextUsageRequestId(): string {
 }
 
 function shouldSendReasoningEffort(provider: string, model: string): boolean {
-  // Gemini/agy: effort is baked into the model slug at set_model time
-  // (resolveGeminiAgyModelId). Do not also send reasoningEffort — bare catalog
-  // slugs like claude-sonnet-4-6 reject --effort.
+  // Gemini/agy: runner resolves family+effort → full slug and never passes
+  // --effort to agy. Still send reasoningEffort so a bare family id left in
+  // session state (e.g. gemini-3.6-flash) can be upgraded on spawn.
   if (provider === 'gemini') {
-    return false;
+    return true;
   }
   if (provider !== 'claude') {
     return true;

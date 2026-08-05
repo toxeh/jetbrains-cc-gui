@@ -264,6 +264,91 @@ export function composeAgyModelId(baseId, effort) {
 }
 
 /**
+ * Resolve what to pass to agy spawn: full catalog slug preferred.
+ *
+ * agy rejects bare family ids that require effort:
+ *   --model gemini-3.6-flash  → needs --effort or full slug …-medium
+ * and rejects --effort on bare single-slug models:
+ *   --model claude-sonnet-4-6 --effort medium  → invalid
+ *
+ * Strategy: always prefer a full model id with effort in the slug. Never rely
+ * on a separate --effort flag for spawn (caller should pass effort: '').
+ * Fast path — no `agy models` spawn (optional catalog can refine if provided).
+ *
+ * @param {string} model family id or full slug
+ * @param {string} [effort] preferred effort when model is a family base
+ * @param {Array<{id:string,label?:string,defaultModelId?:string,defaultEffort?:string,efforts?:Array}>} [catalogOrFamilies]
+ * @returns {{ model: string, effort: string }}
+ */
+export function resolveAgySpawnModel(model, effort = '', catalogOrFamilies = null) {
+  const raw = String(model || '').trim();
+  if (!raw) {
+    return { model: '', effort: '' };
+  }
+
+  const { baseId, effort: embedded } = splitAgyModelId(raw);
+  // Already a full effort slug (gemini-3.6-flash-medium, claude-opus-4-6-thinking)
+  if (embedded) {
+    return { model: raw, effort: '' };
+  }
+
+  const wantEffort = String(effort || '').trim().toLowerCase();
+
+  // Optional catalog/families for precise defaultModelId
+  if (Array.isArray(catalogOrFamilies) && catalogOrFamilies.length > 0) {
+    const looksLikeFamilies = catalogOrFamilies.some(
+      (e) => e && (Array.isArray(e.efforts) || e.defaultModelId),
+    );
+    const families = looksLikeFamilies
+      ? catalogOrFamilies
+      : groupAgyModelFamilies(catalogOrFamilies);
+    const fam = families.find((f) => f && (f.id === raw || f.id === baseId));
+    if (fam) {
+      const match =
+        (wantEffort && fam.efforts?.find((e) => e.id === wantEffort))
+        || fam.efforts?.find((e) => e.id === fam.defaultEffort)
+        || fam.efforts?.find((e) => e.id === 'medium')
+        || fam.efforts?.find((e) => e.id === 'high')
+        || fam.efforts?.[0];
+      if (match?.modelId) {
+        return { model: match.modelId, effort: '' };
+      }
+      if (fam.defaultModelId) {
+        return { model: fam.defaultModelId, effort: '' };
+      }
+    }
+    // Exact flat catalog id (e.g. claude-sonnet-4-6)
+    const exact = catalogOrFamilies.find((e) => e && e.id === raw);
+    if (exact?.id) {
+      return { model: exact.id, effort: '' };
+    }
+  }
+
+  // Families that encode effort in the catalog slug (not as a separate flag)
+  const effortInSlugFamily = /^gemini-/i.test(raw) || /^gpt-oss-/i.test(raw);
+  // Claude opus thinking variant only
+  const claudeThinkingFamily = /^claude-opus-/i.test(raw) && wantEffort === 'thinking';
+
+  if (wantEffort && (effortInSlugFamily || claudeThinkingFamily)) {
+    return { model: composeAgyModelId(raw, wantEffort), effort: '' };
+  }
+
+  // Gemini flash/pro bare family always needs a default effort tier
+  if (/^gemini-/i.test(raw)) {
+    return { model: `${raw}-medium`, effort: '' };
+  }
+
+  // gpt-oss bare family → medium slug
+  if (/^gpt-oss-/i.test(raw)) {
+    return { model: `${raw}-medium`, effort: '' };
+  }
+
+  // Bare single-slug models (claude-sonnet-4-6): pass as-is — never attach --effort
+  // or invent -medium (agy rejects both for these ids).
+  return { model: raw, effort: '' };
+}
+
+/**
  * Strip trailing " (High|Medium|Low|Thinking)" style effort from display labels.
  */
 export function stripEffortFromLabel(label) {

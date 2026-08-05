@@ -336,14 +336,25 @@ public class SessionSendService {
         if (effort == null) {
             effort = state.getReasoningEffort();
         }
-        LOG.info("[Lifecycle] sendToGemini model=" + currentModel);
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                state.getCwd(), projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = state.getCwd();
+        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            LOG.warn("[Lifecycle] sendToGemini cwd guard: " + state.getCwd() + " -> " + guardedCwd);
+            state.setCwd(guardedCwd);
+        }
+        LOG.info("[Lifecycle] sendToGemini model=" + currentModel
+                + ", sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", cwd=" + guardedCwd);
 
         return geminiSDKBridge.sendMessage(
                 channelId,
                 input,
                 state.getSessionId(),
                 runtimeSessionEpoch,
-                state.getCwd(),
+                guardedCwd,
                 attachments,
                 effectivePermissionMode,
                 currentModel,

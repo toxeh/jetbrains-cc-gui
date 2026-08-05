@@ -414,6 +414,7 @@ public class SessionHandler extends BaseMessageHandler {
      */
     private String determineWorkingDirectory() {
         String projectPath = context.getProject().getBasePath();
+        String candidate = null;
 
         // Prefer the user-configured working directory first, normalized so that
         // relative segments (e.g. "..") are collapsed. This must match the directory
@@ -424,8 +425,7 @@ public class SessionHandler extends BaseMessageHandler {
                         new com.github.claudecodegui.settings.CodemossSettingsService();
                 String resolvedPath = settingsService.getEffectiveWorkingDirectory(projectPath);
                 if (resolvedPath != null && !resolvedPath.isEmpty()) {
-                    LOG.info("[SessionHandler] Using working directory: " + resolvedPath);
-                    return resolvedPath;
+                    candidate = resolvedPath;
                 }
             } catch (Exception e) {
                 LOG.warn("[SessionHandler] Failed to resolve working directory: " + e.getMessage());
@@ -435,18 +435,31 @@ public class SessionHandler extends BaseMessageHandler {
         // When projectPath is invalid (null or missing), try the active file's
         // parent directory first — typical case: single-file temporary project
         // (projectPath in /tmp) while the actual file is under the user's home.
-        if (projectPath == null || !new File(projectPath).exists()) {
+        if (candidate == null && (projectPath == null || !new File(projectPath).exists())) {
             String activeFileDir = resolveWorkingDirectoryFromActiveFile(projectPath);
             if (activeFileDir != null && !activeFileDir.isEmpty()) {
-                return activeFileDir;
+                candidate = activeFileDir;
             }
-            String userHome = NodeDetector.resolveHomeForFileOps();
-            LOG.warn("[SessionHandler] Using user home directory as fallback: " + userHome);
-            return userHome;
         }
 
-        // Use project root as the default working directory.
-        return projectPath;
+        if (candidate == null) {
+            candidate = projectPath;
+        }
+
+        String guarded = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(candidate, projectPath);
+        if (guarded != null) {
+            if (candidate != null && !guarded.equals(candidate)) {
+                LOG.warn("[SessionHandler] Rejected unsafe cwd candidate=" + candidate
+                        + ", using guarded=" + guarded);
+            } else {
+                LOG.info("[SessionHandler] Using working directory: " + guarded);
+            }
+            return guarded;
+        }
+
+        String userHome = NodeDetector.resolveHomeForFileOps();
+        LOG.warn("[SessionHandler] Using user home directory as fallback: " + userHome);
+        return userHome;
     }
 
     private String extractReasoningEffort(JsonObject payload) {

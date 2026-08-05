@@ -257,17 +257,34 @@ public class ClaudeSession {
 
     /**
      * Set session ID and working directory (used for session restoration).
+     * Always notifies the UI (empty string when cleared) so tab state and
+     * webview do not keep a stale resume id after new-session / model switch.
      */
     public void setSessionInfo(String sessionId, String cwd) {
-        state.setSessionId(sessionId);
-        if (sessionId != null && !sessionId.trim().isEmpty()) {
-            callbackFacade.notifySessionIdReceived(sessionId);
-        }
+        String normalizedId = (sessionId != null && !sessionId.trim().isEmpty()) ? sessionId.trim() : null;
+        state.setSessionId(normalizedId);
+        // Notify even when null so frontend/tab persistence drop stale resume ids.
+        callbackFacade.notifySessionIdReceived(normalizedId != null ? normalizedId : "");
         if (cwd != null) {
             setCwd(cwd);
         } else {
             state.setCwd(null);
         }
+    }
+
+    /**
+     * Drop the provider conversation/thread id so the next send starts a fresh
+     * remote session (no {@code --conversation} / resume). Used when switching
+     * Gemini models or providers so fat multi-model agy histories are not resumed.
+     */
+    public void clearSessionId() {
+        String previous = state.getSessionId();
+        if (previous == null || previous.isEmpty()) {
+            return;
+        }
+        state.setSessionId(null);
+        callbackFacade.notifySessionIdReceived("");
+        LOG.info("Cleared provider session id (was " + previous + ")");
     }
 
     /**

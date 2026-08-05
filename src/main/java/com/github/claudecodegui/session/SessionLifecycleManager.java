@@ -291,28 +291,39 @@ public class SessionLifecycleManager {
      */
     public String determineWorkingDirectory() {
         String projectPath = host.getProject().getBasePath();
+        String candidate = null;
 
-        if (projectPath == null || !new File(projectPath).exists()) {
-            String userHome = NodeDetector.resolveHomeForFileOps();
-            LOG.warn("Using user home directory as fallback: " + userHome);
-            return userHome;
-        }
-
-        try {
-            CodemossSettingsService settingsService = new CodemossSettingsService();
-            // Normalized effective working directory (custom dir if valid, else the
-            // project path). Collapsing relative segments here keeps the launched cwd
-            // consistent with the directory history is read from.
-            String resolvedPath = settingsService.getEffectiveWorkingDirectory(projectPath);
-            if (resolvedPath != null && !resolvedPath.isEmpty()) {
-                LOG.info("Using working directory: " + resolvedPath);
-                return resolvedPath;
+        if (projectPath != null && new File(projectPath).exists()) {
+            try {
+                CodemossSettingsService settingsService = new CodemossSettingsService();
+                // Normalized effective working directory (custom dir if valid, else the
+                // project path). Collapsing relative segments here keeps the launched cwd
+                // consistent with the directory history is read from.
+                String resolvedPath = settingsService.getEffectiveWorkingDirectory(projectPath);
+                if (resolvedPath != null && !resolvedPath.isEmpty()) {
+                    candidate = resolvedPath;
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to resolve working directory: " + e.getMessage());
             }
-        } catch (Exception e) {
-            LOG.warn("Failed to resolve working directory: " + e.getMessage());
+            if (candidate == null) {
+                candidate = projectPath;
+            }
         }
 
-        return projectPath;
+        String guarded = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(candidate, projectPath);
+        if (guarded != null) {
+            if (candidate != null && !guarded.equals(candidate)) {
+                LOG.warn("Rejected unsafe cwd candidate=" + candidate + ", using guarded=" + guarded);
+            } else {
+                LOG.info("Using working directory: " + guarded);
+            }
+            return guarded;
+        }
+
+        String userHome = NodeDetector.resolveHomeForFileOps();
+        LOG.warn("Using user home directory as fallback: " + userHome);
+        return userHome;
     }
 
     /**

@@ -86,6 +86,24 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     }
   }, [currentProvider, fetchGeminiModels]);
 
+  // After catalog arrives, re-push full agy slug so session state is never left
+  // on a bare family id (gemini-3.6-flash) that agy rejects without --effort.
+  useEffect(() => {
+    if (currentProvider !== 'gemini' || !geminiCatalogLoaded) {
+      return;
+    }
+    const fullSlug = resolveGeminiAgyModelId(selectedGeminiModel, reasoningEffort);
+    if (fullSlug) {
+      sendBridgeEvent('set_model', fullSlug);
+    }
+  }, [
+    currentProvider,
+    geminiCatalogLoaded,
+    reasoningEffort,
+    resolveGeminiAgyModelId,
+    selectedGeminiModel,
+  ]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const prev = window.onTabActivated;
