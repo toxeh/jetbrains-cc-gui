@@ -27,6 +27,7 @@ import { readStdinData } from './utils/stdin-utils.js';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
 import { handleGrokCommand } from './channels/grok-channel.js';
+import { handleGeminiCommand } from './channels/gemini-channel.js';
 import { getSdkStatus, isClaudeSdkAvailable, isCodexSdkAvailable } from './utils/sdk-loader.js';
 import { injectStartupEnvVars, configureCliIdentity } from './config/api-config.js';
 
@@ -115,6 +116,17 @@ async function handleSystemCommand(command, args, stdinData) {
       }));
       break;
 
+    case 'checkAgyCli':
+    case 'checkGeminiCli': {
+      const { isAgyAvailable, resolveAgyBinary } = await import('./services/gemini/agy-utils.js');
+      console.log(JSON.stringify({
+        success: true,
+        available: isAgyAvailable(),
+        binary: resolveAgyBinary() || '',
+      }));
+      break;
+    }
+
     default:
       console.log(JSON.stringify({
         success: false,
@@ -128,6 +140,7 @@ const providerHandlers = {
   claude: handleClaudeCommand,
   codex: handleCodexCommand,
   grok: handleGrokCommand,
+  gemini: handleGeminiCommand,
   system: handleSystemCommand
 };
 
@@ -138,7 +151,7 @@ const providerHandlers = {
     // Validate provider
     console.error('[DIAG-EXEC] Validating provider...');
     if (!provider || !providerHandlers[provider]) {
-      console.error('Invalid provider. Use "claude", "codex", "grok", or "system"');
+      console.error('Invalid provider. Use "claude", "codex", "grok", "gemini", or "system"');
       console.log(JSON.stringify({
         success: false,
         error: 'Invalid provider: ' + provider

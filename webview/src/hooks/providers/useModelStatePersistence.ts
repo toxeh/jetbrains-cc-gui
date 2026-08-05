@@ -4,12 +4,17 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   GROK_MODELS,
+  GEMINI_MODELS,
+  DEFAULT_CLAUDE_MODEL_ID,
+  DEFAULT_GEMINI_MODEL_ID,
   isValidPermissionMode,
   normalizeClaudeModelId,
   apply1MContextSuffix,
   strip1MContextSuffix,
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
+
+const KNOWN_PROVIDERS = ['claude', 'codex', 'grok', 'gemini'] as const;
 
 const STORAGE_KEY = 'model-selection-state';
 const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -36,9 +41,11 @@ export interface UseModelStatePersistenceOptions {
   setSelectedClaudeModel: (value: string) => void;
   setSelectedCodexModel: (value: string) => void;
   setSelectedGrokModel: (value: string) => void;
+  setSelectedGeminiModel: (value: string) => void;
   setClaudePermissionMode: (value: PermissionMode) => void;
   setCodexPermissionMode: (value: PermissionMode) => void;
   setGrokPermissionMode: (value: PermissionMode) => void;
+  setGeminiPermissionMode: (value: PermissionMode) => void;
   setPermissionMode: (value: PermissionMode) => void;
   setLongContextEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
@@ -48,9 +55,11 @@ export interface UseModelStatePersistenceOptions {
   selectedClaudeModel: string;
   selectedCodexModel: string;
   selectedGrokModel: string;
+  selectedGeminiModel: string;
   claudePermissionMode: PermissionMode;
   codexPermissionMode: PermissionMode;
   grokPermissionMode: PermissionMode;
+  geminiPermissionMode: PermissionMode;
   longContextEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
@@ -72,9 +81,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     setSelectedClaudeModel,
     setSelectedCodexModel,
     setSelectedGrokModel,
+    setSelectedGeminiModel,
     setClaudePermissionMode,
     setCodexPermissionMode,
     setGrokPermissionMode,
+    setGeminiPermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -83,9 +94,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     selectedClaudeModel,
     selectedCodexModel,
     selectedGrokModel,
+    selectedGeminiModel,
     claudePermissionMode,
     codexPermissionMode,
     grokPermissionMode,
+    geminiPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -109,16 +122,18 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       const initialTabModel = typeof window.__INITIAL_TAB_MODEL__ === 'string'
         ? window.__INITIAL_TAB_MODEL__.trim()
         : '';
-      const hasBackendProvider = initialTabProvider === 'claude' || initialTabProvider === 'codex' || initialTabProvider === 'grok';
+      const hasBackendProvider = (KNOWN_PROVIDERS as readonly string[]).includes(initialTabProvider);
       const hasBackendModel = initialTabModel.length > 0;
 
       let restoredProvider = 'claude';
-      let restoredClaudeModel = CLAUDE_MODELS[0].id;
+      let restoredClaudeModel = DEFAULT_CLAUDE_MODEL_ID;
       let restoredCodexModel = CODEX_MODELS[0].id;
       let restoredGrokModel = GROK_MODELS[0].id;
+      let restoredGeminiModel = DEFAULT_GEMINI_MODEL_ID;
       let restoredClaudePermissionMode: PermissionMode = 'default';
       let restoredCodexPermissionMode: PermissionMode = 'default';
       let restoredGrokPermissionMode: PermissionMode = 'default';
+      let restoredGeminiPermissionMode: PermissionMode = 'default';
       let restoredLongContextEnabled = true;
       let restoredCodexFastMode: CodexFastMode = 'normal';
 
@@ -147,6 +162,13 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           setSelectedGrokModel(modelId);
         }
       };
+      const applyGeminiModel = (modelId: string) => {
+        if (typeof modelId !== 'string' || !modelId.trim()) return;
+        if (GEMINI_MODELS.find(m => m.id === modelId)) {
+          restoredGeminiModel = modelId;
+          setSelectedGeminiModel(modelId);
+        }
+      };
 
       if (saved) {
         const state = JSON.parse(saved);
@@ -155,7 +177,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         // hydration so non-provider preferences (permission mode, reasoning
         // effort, codex fast mode, …) are restored from localStorage.
         const providerCandidate = hasBackendProvider ? initialTabProvider : state.provider;
-        if (['claude', 'codex', 'grok'].includes(providerCandidate)) {
+        if ((KNOWN_PROVIDERS as readonly string[]).includes(providerCandidate)) {
           restoredProvider = providerCandidate;
           setCurrentProvider(providerCandidate);
         }
@@ -171,6 +193,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
 
         if (isValidPermissionMode(state.grokPermissionMode)) {
           restoredGrokPermissionMode = state.grokPermissionMode;
+        }
+        if (isValidPermissionMode(state.geminiPermissionMode)) {
+          restoredGeminiPermissionMode = state.geminiPermissionMode;
         }
 
         if (typeof state.longContextEnabled === 'boolean') {
@@ -200,6 +225,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           ? initialTabModel
           : state.grokModel;
         applyGrokModel(grokModelCandidate);
+
+        const geminiModelCandidate = hasBackendModel && restoredProvider === 'gemini'
+          ? initialTabModel
+          : state.geminiModel;
+        applyGeminiModel(geminiModelCandidate);
       } else if (hasBackendProvider) {
         // No localStorage yet (fresh user) but backend supplied a provider:
         // honor it so the tab starts with the right provider.
@@ -209,17 +239,22 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           if (initialTabProvider === 'claude') applyClaudeModel(initialTabModel);
           else if (initialTabProvider === 'codex') applyCodexModel(initialTabModel);
           else if (initialTabProvider === 'grok') applyGrokModel(initialTabModel);
+          else if (initialTabProvider === 'gemini') applyGeminiModel(initialTabModel);
         }
       }
 
-      const initialPermissionMode: PermissionMode = restoredProvider === 'codex'
-        ? restoredCodexPermissionMode
-        : restoredProvider === 'grok'
-          ? restoredGrokPermissionMode
-          : restoredClaudePermissionMode;
+      let initialPermissionMode: PermissionMode = restoredClaudePermissionMode;
+      if (restoredProvider === 'codex') {
+        initialPermissionMode = restoredCodexPermissionMode;
+      } else if (restoredProvider === 'grok') {
+        initialPermissionMode = restoredGrokPermissionMode;
+      } else if (restoredProvider === 'gemini') {
+        initialPermissionMode = restoredGeminiPermissionMode;
+      }
       setClaudePermissionMode(restoredClaudePermissionMode);
       setCodexPermissionMode(restoredCodexPermissionMode);
       setGrokPermissionMode(restoredGrokPermissionMode);
+      setGeminiPermissionMode(restoredGeminiPermissionMode);
       setPermissionMode(initialPermissionMode);
 
       let syncRetryCount = 0;
@@ -228,12 +263,14 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       const syncToBackend = () => {
         if (window.sendToJava) {
           sendBridgeEvent('set_provider', restoredProvider);
-          const modelToSync =
-            restoredProvider === 'codex'
-              ? restoredCodexModel
-              : restoredProvider === 'grok'
-                ? restoredGrokModel
-                : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
+          let modelToSync = apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
+          if (restoredProvider === 'codex') {
+            modelToSync = restoredCodexModel;
+          } else if (restoredProvider === 'grok') {
+            modelToSync = restoredGrokModel;
+          } else if (restoredProvider === 'gemini') {
+            modelToSync = restoredGeminiModel;
+          }
           sendBridgeEvent('set_model', modelToSync);
           // Do NOT push the permission mode to Java on boot. Java is the source
           // of truth for the mode (persisted app-level in PropertiesComponent,
@@ -266,9 +303,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         claudeModel: selectedClaudeModel,
         codexModel: selectedCodexModel,
         grokModel: selectedGrokModel,
+        geminiModel: selectedGeminiModel,
         claudePermissionMode,
         codexPermissionMode,
         grokPermissionMode,
+        geminiPermissionMode,
         longContextEnabled,
         reasoningEffort,
         codexFastMode,
@@ -281,9 +320,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     selectedClaudeModel,
     selectedCodexModel,
     selectedGrokModel,
+    selectedGeminiModel,
     claudePermissionMode,
     codexPermissionMode,
     grokPermissionMode,
+    geminiPermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,

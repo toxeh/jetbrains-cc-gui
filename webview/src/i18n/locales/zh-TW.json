@@ -88,6 +88,8 @@
     "disabled": "已停用",
     "sdkNotInstalled": "{{provider}} SDK 尚未安裝，請先安裝 SDK 才能開始對話",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "無法檢查 SDK 狀態。",
+    "retrySdkStatus": "重試",
     "openSourceBanner": "本專案保證100%開源和免費（謹防盜版項目）",
     "openSourceBannerStar": "點個 Star",
     "openSourceBannerStarToast": "已複製倉庫地址到剪貼簿，複製到瀏覽器即可訪問 ⭐",
@@ -285,6 +287,12 @@
         "reset": "恢復預設",
         "hint": "自訂聊天區域的背景顏色，留空則跟隨主題預設顏色"
       },
+      "chatBarColor": {
+        "label": "標題列與狀態列顏色",
+        "custom": "自訂",
+        "reset": "恢復預設",
+        "hint": "統一設定會話標題列與工作狀態列的主題顏色，留空則跟隨目前介面主題"
+      },
       "userMsgColor": {
         "label": "使用者訊息顏色",
         "custom": "自訂",
@@ -324,6 +332,13 @@
         "cacheReadShort": "快取讀取",
         "invalidValue": "價格必須是非負數字",
         "defaultPricing": "使用預設價格"
+      },
+      "contextWindow": {
+        "label": "最大上下文（K tokens）",
+        "placeholder": "例如 500",
+        "hint": "選填。請輸入整數 K 值（500 = 500,000 tokens），僅用於外掛顯示上下文用量。",
+        "invalidValue": "最大上下文必須是正整數（單位 K）",
+        "summary": "上下文：{{value}} tokens"
       },
       "configuredSectionTitle": "已設定的 Claude 模型",
       "configuredSectionDesc": "這些模型來自目前 Claude 供應商或 settings.json，已經會顯示在模型選擇器中。這裡只能修改價格。",

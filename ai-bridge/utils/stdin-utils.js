@@ -13,6 +13,7 @@ export async function readStdinData(provider = 'claude') {
   let envKey = 'CLAUDE_USE_STDIN';
   if (provider === 'codex') envKey = 'CODEX_USE_STDIN';
   else if (provider === 'grok') envKey = 'GROK_USE_STDIN';
+  else if (provider === 'gemini') envKey = 'GEMINI_USE_STDIN';
   if (process.env[envKey] !== 'true') {
     return null;
   }

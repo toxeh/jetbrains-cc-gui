@@ -11,6 +11,7 @@ import { isSpecialProviderId } from '../types/provider';
 import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
 import { useGrokProvider } from './providers/useGrokProvider';
+import { useGeminiProvider } from './providers/useGeminiProvider';
 import { useUsageTracking } from './providers/useUsageTracking';
 import { useProviderSettings } from './providers/useProviderSettings';
 import { useModelStatePersistence } from './providers/useModelStatePersistence';
@@ -50,7 +51,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   // ── Provider-specific sub-hooks ──
   const claude = useClaudeProvider();
   const codex = useCodexProvider();
-  const { isSdkInstalled, sdkStatus, ...usage } = useUsageTracking();
+  const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
   const {
@@ -71,6 +72,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedGrokModel, setSelectedGrokModel,
     grokPermissionMode, setGrokPermissionMode,
   } = grok;
+
+  const gemini = useGeminiProvider();
+  const {
+    selectedGeminiModel, setSelectedGeminiModel,
+    geminiPermissionMode, setGeminiPermissionMode,
+  } = gemini;
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
@@ -103,10 +110,18 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       ? selectedCodexModel
       : currentProvider === 'grok'
         ? selectedGrokModel
-        : selectedClaudeModel;
+        : currentProvider === 'gemini'
+          ? selectedGeminiModel
+          : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
+  );
+  const currentSdkStatusError = useMemo(
+    () => usage.sdkStatusError !== null && !isSdkStatusKnown(currentProvider)
+      ? usage.sdkStatusError
+      : null,
+    [currentProvider, isSdkStatusKnown, usage.sdkStatusError],
   );
   // Whether the installed Claude SDK meets the minimum version required for the
   // selected model's tier (Fable needs >= 0.3.182). `undefined` means the backend
@@ -129,10 +144,16 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       sendBridgeEvent('set_mode', mode);
       return;
     }
+    if (currentProvider === 'gemini') {
+      setPermissionMode(mode);
+      setGeminiPermissionMode(mode);
+      sendBridgeEvent('set_mode', mode);
+      return;
+    }
     setPermissionMode(mode);
     setClaudePermissionMode(mode);
     sendBridgeEvent('set_mode', mode);
-  }, [currentProvider, setCodexPermissionMode, setClaudePermissionMode, setGrokPermissionMode]);
+  }, [currentProvider, setCodexPermissionMode, setClaudePermissionMode, setGrokPermissionMode, setGeminiPermissionMode]);
 
   const handleModelSelect = useCallback((modelId: string) => {
     if (currentProvider === 'claude') {
@@ -146,38 +167,45 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'grok') {
       setSelectedGrokModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'gemini') {
+      setSelectedGeminiModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
-  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel, setSelectedGrokModel]);
+  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel, setSelectedGrokModel, setSelectedGeminiModel]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
     setCurrentProvider(providerId);
     sendBridgeEvent('set_provider', providerId);
 
-    let modeToSet: PermissionMode;
+    let modeToSet: PermissionMode = claudePermissionMode;
     if (providerId === 'codex') {
       modeToSet = codexPermissionMode === 'plan' ? 'default' : codexPermissionMode;
     } else if (providerId === 'grok') {
       modeToSet = grokPermissionMode;
-    } else {
-      modeToSet = claudePermissionMode;
+    } else if (providerId === 'gemini') {
+      modeToSet = geminiPermissionMode;
     }
     setPermissionMode(modeToSet);
     sendBridgeEvent('set_mode', modeToSet);
 
-    const newModel =
-      providerId === 'codex'
-        ? selectedCodexModel
-        : providerId === 'grok'
-          ? selectedGrokModel
-          : apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
+    let newModel = apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
+    if (providerId === 'codex') {
+      newModel = selectedCodexModel;
+    } else if (providerId === 'grok') {
+      newModel = selectedGrokModel;
+    } else if (providerId === 'gemini') {
+      newModel = selectedGeminiModel;
+    }
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
     codexPermissionMode,
     grokPermissionMode,
+    geminiPermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
     selectedGrokModel,
+    selectedGeminiModel,
     longContextEnabled,
   ]);
 
@@ -232,9 +260,11 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...claude,
     ...codex,
     ...grok,
+    ...gemini,
     ...usage,
     ...settings,
     sdkStatus,
+    sdkStatusError: currentSdkStatusError,
     currentProvider, setCurrentProvider,
     permissionMode, setPermissionMode,
     selectedModel,

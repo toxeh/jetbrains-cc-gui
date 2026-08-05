@@ -108,8 +108,12 @@ public class DependencyManager {
             return false;
         }
 
+        // External CLI providers (not npm packages under ~/.codemoss/dependencies)
+        if (sdk == SdkDefinition.GEMINI_CLI) {
+            return resolveAgyBinary() != null;
+        }
         // Grok uses a local CLI binary, not ~/.codemoss/dependencies npm packages.
-        if (sdk.isCliBinary()) {
+        if (sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary()) {
             return resolveGrokCliPath() != null;
         }
 
@@ -239,7 +243,11 @@ public class DependencyManager {
             return null;
         }
 
-        if (sdk.isCliBinary()) {
+        if (sdk == SdkDefinition.GEMINI_CLI) {
+            String bin = resolveAgyBinary();
+            return bin != null ? bin : "agy";
+        }
+        if (sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary()) {
             return getGrokCliVersion(resolveGrokCliPath());
         }
 
@@ -422,7 +430,18 @@ public class DependencyManager {
             return InstallResult.failure(sdkId, "Unknown SDK: " + sdkId, "");
         }
 
-        if (sdk.isCliBinary()) {
+        if (sdk == SdkDefinition.GEMINI_CLI) {
+            String bin = resolveAgyBinary();
+            if (bin != null) {
+                return InstallResult.success(sdkId, bin, "Antigravity CLI already available at: " + bin);
+            }
+            return InstallResult.failure(
+                    sdkId,
+                    "Gemini CLI (agy) is not managed as an npm SDK. Install Antigravity CLI and sign in via agy.",
+                    ""
+            );
+        }
+        if (sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary()) {
             String path = resolveGrokCliPath();
             if (path != null) {
                 return InstallResult.success(sdkId, getGrokCliVersion(path), "Grok CLI already available at: " + path);
@@ -635,8 +654,8 @@ public class DependencyManager {
     public boolean uninstallSdk(String sdkId) {
         try {
             SdkDefinition sdk = SdkDefinition.fromId(sdkId);
-            if (sdk != null && sdk.isCliBinary()) {
-                LOG.info("[DependencyManager] Grok CLI is external; skip uninstall of managed dependencies dir");
+            if (sdk != null && (sdk == SdkDefinition.GEMINI_CLI || sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary())) {
+                LOG.info("[DependencyManager] External CLI is not managed as npm SDK; skip uninstall: " + sdkId);
                 return true;
             }
 
@@ -684,26 +703,40 @@ public class DependencyManager {
             // Add the status field for frontend consumption
             status.addProperty("status", installed ? "installed" : "not_installed");
 
-            if (sdk.isCliBinary()) {
+            if (sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary()) {
                 String cliPath = resolveGrokCliPath();
                 if (cliPath != null) {
                     status.addProperty("installPath", cliPath);
                 }
             }
+            if (sdk == SdkDefinition.GEMINI_CLI) {
+                String bin = resolveAgyBinary();
+                if (bin != null) {
+                    status.addProperty("installPath", bin);
+                    status.addProperty("binary", bin);
+                }
+            }
 
             if (installed) {
-                String version = getInstalledVersion(sdk.getId());
-                status.addProperty("installedVersion", version);
-                status.addProperty("version", version); // Also add the version field
+                if (sdk == SdkDefinition.GEMINI_CLI) {
+                    String bin = resolveAgyBinary();
+                    status.addProperty("installedVersion", bin != null ? bin : "agy");
+                    status.addProperty("version", "cli");
+                    status.addProperty("binary", bin != null ? bin : "");
+                } else {
+                    String version = getInstalledVersion(sdk.getId());
+                    status.addProperty("installedVersion", version);
+                    status.addProperty("version", version); // Also add the version field
 
-                // Surface whether the installed version meets the SDK's minimum required
-                // version (e.g. Claude SDK >= 0.3.182 for the Fable tier). The frontend uses
-                // this to warn users before they hit a "model fable" 401 on old CLIs that
-                // don't recognize the alias.
-                String minRequired = sdk.getMinRequiredVersion();
-                if (minRequired != null && version != null && !version.isEmpty()) {
-                    status.addProperty("minimumVersion", minRequired);
-                    status.addProperty("meetsMinimumVersion", compareVersions(version, minRequired) >= 0);
+                    // Surface whether the installed version meets the SDK's minimum required
+                    // version (e.g. Claude SDK >= 0.3.182 for the Fable tier). The frontend uses
+                    // this to warn users before they hit a "model fable" 401 on old CLIs that
+                    // don't recognize the alias.
+                    String minRequired = sdk.getMinRequiredVersion();
+                    if (minRequired != null && version != null && !version.isEmpty()) {
+                        status.addProperty("minimumVersion", minRequired);
+                        status.addProperty("meetsMinimumVersion", compareVersions(version, minRequired) >= 0);
+                    }
                 }
             }
 

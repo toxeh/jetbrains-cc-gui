@@ -7,6 +7,7 @@ import com.github.claudecodegui.handler.AgentHandler;
 import com.github.claudecodegui.handler.ClipboardHandler;
 import com.github.claudecodegui.handler.ContextHandler;
 import com.github.claudecodegui.handler.CodexMcpServerHandler;
+import com.github.claudecodegui.handler.CodexPetHandler;
 import com.github.claudecodegui.handler.DependencyHandler;
 import com.github.claudecodegui.handler.DiffHandler;
 import com.github.claudecodegui.handler.core.HandlerContext;
@@ -34,6 +35,7 @@ import com.github.claudecodegui.handler.file.UndoFileHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
@@ -77,6 +79,7 @@ public class ChatWindowDelegate {
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
         default GrokSDKBridge getGrokSDKBridge() { return null; }
+        default GeminiSDKBridge getGeminiSDKBridge() { return null; }
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
         JPanel getMainPanel();
@@ -87,6 +90,8 @@ public class ChatWindowDelegate {
         String getOriginalTabName();
         void setOriginalTabName(String name);
         String getSessionId();
+        boolean isActiveContent();
+        void activateContent();
         HandlerContext getHandlerContext();
         void setHandlerContext(HandlerContext ctx);
         void setMessageDispatcher(MessageDispatcher d);
@@ -102,6 +107,12 @@ public class ChatWindowDelegate {
         void setSlashCommandsFetched(boolean fetched);
         void setFetchedSlashCommandsCount(int count);
         void persistTabSessionState();
+
+        /**
+         * Soft-reload the currently active session's transcript without interrupting
+         * any in-flight turn.
+         */
+        void reloadActiveSessionMessages();
     }
 
     private final DelegateHost host;
@@ -198,6 +209,7 @@ public class ChatWindowDelegate {
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
         GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
+        GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         Project project = host.getProject();
         String sessionId = claudeSDKBridge.getSessionId();
 
@@ -206,6 +218,9 @@ public class ChatWindowDelegate {
         }
         if ((sessionId == null || sessionId.isEmpty()) && grokSDKBridge != null) {
             sessionId = grokSDKBridge.getSessionId();
+        }
+        if ((sessionId == null || sessionId.isEmpty()) && geminiSDKBridge != null) {
+            sessionId = geminiSDKBridge.getSessionId();
         }
 
         if (sessionId == null || sessionId.isEmpty()) {
@@ -219,6 +234,9 @@ public class ChatWindowDelegate {
         }
         if (grokSDKBridge != null) {
             grokSDKBridge.setSessionId(sessionId);
+        }
+        if (geminiSDKBridge != null) {
+            geminiSDKBridge.setSessionId(sessionId);
         }
         LOG.info("Unified bridge sessionId for PermissionService routing: " + sessionId);
 
@@ -239,6 +257,7 @@ public class ChatWindowDelegate {
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
         GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
+        GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         CodemossSettingsService settingsService = host.getSettingsService();
 
         HandlerContext.JsCallback jsCallback = new HandlerContext.JsCallback() {
@@ -252,7 +271,24 @@ public class ChatWindowDelegate {
             }
         };
 
-        HandlerContext handlerContext = new HandlerContext(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, settingsService, jsCallback);
+        HandlerContext handlerContext = new HandlerContext(
+                project,
+                claudeSDKBridge,
+                codexSDKBridge,
+                grokSDKBridge,
+                geminiSDKBridge,
+                settingsService,
+                jsCallback,
+                host::isActiveContent,
+                () -> {
+                    String originalTabName = host.getOriginalTabName();
+                    if (originalTabName != null && !originalTabName.isBlank()) {
+                        return originalTabName;
+                    }
+                    Content content = host.getParentContent();
+                    return content == null ? null : content.getDisplayName();
+                });
+        handlerContext.setContentActivator(host::activateContent);
         handlerContext.setSession(host.getSession());
         host.setHandlerContext(handlerContext);
 
@@ -315,8 +351,20 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(permissionHandler);
 
         HistoryHandler historyHandler = new HistoryHandler(handlerContext);
-        historyHandler.setSessionLoadCallback((sessionId, projectPath, provider) ->
-            host.getSessionLifecycleManager().loadHistorySession(sessionId, projectPath, provider));
+        historyHandler.setSessionLoadCallback((sessionId, projectPath, provider) -> {
+            ClaudeSession current = host.getSession();
+            boolean sameSession = current != null
+                    && sessionId != null
+                    && sessionId.equals(current.getSessionId())
+                    && (provider == null || provider.trim().isEmpty()
+                                || provider.equals(current.getProvider()));
+            if (sameSession) {
+                LOG.info("[HistoryHandler] Same-session resume, soft-reloading transcript: " + sessionId);
+                host.reloadActiveSessionMessages();
+            } else {
+                host.getSessionLifecycleManager().loadHistorySession(sessionId, projectPath, provider);
+            }
+        });
         host.setHistoryHandler(historyHandler);
         messageDispatcher.registerHandler(historyHandler);
 
@@ -332,7 +380,7 @@ public class ChatWindowDelegate {
             String mode = session != null ? session.getPermissionMode() : "default";
             com.github.claudecodegui.notifications.ClaudeNotifier.setMode(project, mode);
 
-            String model = session != null ? session.getModel() : "claude-sonnet-4-6";
+            String model = session != null ? session.getModel() : "claude-sonnet-4-7";
             com.github.claudecodegui.notifications.ClaudeNotifier.setModel(project, model);
 
             try {
@@ -473,6 +521,7 @@ public class ChatWindowDelegate {
     public void handleFrontendReady() {
         LOG.info("Received frontend_ready signal, frontend is now ready to receive data");
         host.setFrontendReady(true);
+        host.getWebviewWatchdog().markFrontendReady();
 
         host.callJavaScript(
             "window.updateLinkifyCapabilities",

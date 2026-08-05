@@ -5,6 +5,7 @@
  * - claude-sdk: Claude SDK (@anthropic-ai/claude-agent-sdk and its dependencies)
  * - codex-sdk: Codex SDK (@openai/codex-sdk)
  * - grok-cli: local Grok CLI binary (ACP), not an npm package under dependencies/
+ * - gemini-cli: Antigravity CLI (agy), external binary not under dependencies/
  *
  * Supported operations:
  * - Install/uninstall SDKs
@@ -15,7 +16,7 @@
 /**
  * SDK ID type
  */
-export type SdkId = 'claude-sdk' | 'codex-sdk' | 'grok-cli';
+export type SdkId = 'claude-sdk' | 'codex-sdk' | 'grok-cli' | 'gemini-cli';
 
 /**
  * SDK installation status

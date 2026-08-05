@@ -8,6 +8,7 @@ import com.github.claudecodegui.handler.PermissionHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.common.DaemonBridge;
 import com.github.claudecodegui.provider.common.MessageCallback;
@@ -58,6 +59,7 @@ public class ClaudeChatWindow {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final GrokSDKBridge grokSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final Project project;
     private final CodemossSettingsService settingsService;
     private final HtmlLoader htmlLoader;
@@ -149,6 +151,7 @@ public class ClaudeChatWindow {
         this.claudeSDKBridge = new ClaudeSDKBridge();
         this.codexSDKBridge = new CodexSDKBridge();
         this.grokSDKBridge = new GrokSDKBridge();
+        this.geminiSDKBridge = new GeminiSDKBridge();
         this.settingsService = new CodemossSettingsService();
         this.htmlLoader = new HtmlLoader(getClass());
         this.mainPanel = new JPanel(new BorderLayout());
@@ -192,7 +195,7 @@ public class ClaudeChatWindow {
                 () -> frontendReady
         );
 
-        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge);
+        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, geminiSDKBridge);
 
         this.chatWindowDelegate = new ChatWindowDelegate(createDelegateHost());
         chatWindowDelegate.loadPermissionModeFromSettings();
@@ -221,6 +224,11 @@ public class ClaudeChatWindow {
             @Override
             public GrokSDKBridge getGrokSDKBridge() {
                 return grokSDKBridge;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override
@@ -772,7 +780,7 @@ public class ClaudeChatWindow {
         });
     }
 
-    void handleJavaScriptMessage(String message) {
+    void handleJavaScriptMessage(int pageGeneration, String message) {
         if (message == null) {
             return;
         }
@@ -782,7 +790,8 @@ public class ClaudeChatWindow {
         // gate monitor is held only across dispatch - dispose runs its heavy teardown (browser
         // disposal, process cleanup) outside it, so the JCEF thread never waits on the EDT. That
         // keeps the old dispatch/dispose lifecycle exclusion without the EDT<->JCEF deadlock.
-        this.dispatchGate.runInDispatch(() -> this.handleJavaScriptMessageLocked(message));
+        this.dispatchGate.runInDispatch(
+                pageGeneration, () -> this.handleJavaScriptMessageLocked(message));
     }
 
     /**
@@ -1487,8 +1496,13 @@ public class ClaudeChatWindow {
             }
 
             @Override
-            public void handleJavaScriptMessage(String msg) {
-                ClaudeChatWindow.this.handleJavaScriptMessage(msg);
+            public void activatePageGeneration(int pageGeneration) {
+                dispatchGate.activatePageGeneration(pageGeneration);
+            }
+
+            @Override
+            public void handleJavaScriptMessage(int pageGeneration, String msg) {
+                ClaudeChatWindow.this.handleJavaScriptMessage(pageGeneration, msg);
             }
 
             @Override
@@ -1561,6 +1575,11 @@ public class ClaudeChatWindow {
             @Override
             public GrokSDKBridge getGrokSDKBridge() {
                 return grokSDKBridge;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override

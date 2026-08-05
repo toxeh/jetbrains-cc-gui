@@ -6,6 +6,7 @@ import com.github.claudecodegui.settings.CodexSettingsManager;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -32,6 +33,7 @@ public class SessionSendService {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final GrokSDKBridge grokSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final SessionContextService contextService;
 
     public SessionSendService(
@@ -46,6 +48,23 @@ public class SessionSendService {
             GrokSDKBridge grokSDKBridge,
             SessionContextService contextService
     ) {
+        this(project, state, callbackFacade, messageParser, messageMerger, gson,
+                claudeSDKBridge, codexSDKBridge, grokSDKBridge, null, contextService);
+    }
+
+    public SessionSendService(
+            Project project,
+            SessionState state,
+            SessionCallbackFacade callbackFacade,
+            MessageParser messageParser,
+            MessageMerger messageMerger,
+            Gson gson,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            GrokSDKBridge grokSDKBridge,
+            GeminiSDKBridge geminiSDKBridge,
+            SessionContextService contextService
+    ) {
         this.project = project;
         this.state = state;
         this.callbackFacade = callbackFacade;
@@ -55,6 +74,7 @@ public class SessionSendService {
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
         this.grokSDKBridge = grokSDKBridge;
+        this.geminiSDKBridge = geminiSDKBridge;
         this.contextService = contextService;
     }
 
@@ -141,6 +161,19 @@ public class SessionSendService {
 
         if ("grok".equals(currentProvider)) {
             return sendToGrok(
+                    channelId,
+                    input,
+                    attachments,
+                    openedFilesJson,
+                    agentPrompt,
+                    fileTagPaths,
+                    effectivePermissionMode,
+                    normalizedRequestedEffort
+            );
+        }
+
+        if ("gemini".equals(currentProvider)) {
+            return sendToGemini(
                     channelId,
                     input,
                     attachments,
@@ -335,6 +368,50 @@ public class SessionSendService {
                 streaming,
                 false,
                 requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
+                handler
+        ).thenApply(result -> null);
+    }
+
+
+    private CompletableFuture<Void> sendToGemini(
+            String channelId,
+            String input,
+            List<ClaudeSession.Attachment> attachments,
+            JsonObject openedFilesJson,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String effectivePermissionMode,
+            String requestedReasoningEffort
+    ) {
+        if (geminiSDKBridge == null) {
+            LOG.error("[Lifecycle] sendToGemini called but GeminiSDKBridge is null");
+            callbackFacade.notifyStateChange(false, false, "Gemini bridge not available");
+            return CompletableFuture.completedFuture(null);
+        }
+        GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler());
+        Boolean streaming = readStreamingEnabled();
+        final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
+        final String currentModel = state.getModel();
+        String effort = requestedReasoningEffort;
+        if (effort == null) {
+            effort = state.getReasoningEffort();
+        }
+        LOG.info("[Lifecycle] sendToGemini model=" + currentModel);
+
+        return geminiSDKBridge.sendMessage(
+                channelId,
+                input,
+                state.getSessionId(),
+                runtimeSessionEpoch,
+                state.getCwd(),
+                attachments,
+                effectivePermissionMode,
+                currentModel,
+                openedFilesJson,
+                agentPrompt,
+                streaming,
+                false,
+                effort,
                 handler
         ).thenApply(result -> null);
     }

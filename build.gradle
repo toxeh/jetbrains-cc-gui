@@ -114,6 +114,11 @@ dependencies {
             bundledPlugin('org.jetbrains.plugins.terminal')
         }
 
+        // Git4Idea is bundled in all JetBrains IDEs that support Git
+        // (IC/PC/PY/RD). Required so we can run a real `git diff` via
+        // git4idea.commands.* for the Commit AI feature.
+        bundledPlugin('Git4Idea')
+
         instrumentationTools()
 
         // IDEs to verify the plugin against (used by `verifyPlugin` task).
@@ -245,6 +250,12 @@ tasks.named('buildSearchableOptions') {
 }
 
 tasks.named('instrumentCode') {
+    enabled = false
+}
+
+// instrumentTestCode pulls intellijPlatformJavaCompiler from JetBrains repos;
+// disable like instrumentCode so unit tests run offline / without that artifact.
+tasks.matching { it.name == 'instrumentTestCode' }.configureEach {
     enabled = false
 }
 

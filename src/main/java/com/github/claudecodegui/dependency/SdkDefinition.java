@@ -14,10 +14,16 @@ public enum SdkDefinition {
         "claude-sdk",
         "Claude Code SDK",
         "@anthropic-ai/claude-agent-sdk",
-        "^0.2.58",
+        // The Fable tier (ANTHROPIC_DEFAULT_FABLE_MODEL env + the 'fable' model alias)
+        // was introduced in SDK 0.3.182. Older 0.2.x CLIs don't recognize the alias and
+        // pass it through as a literal model name, so third-party relays without a model
+        // literally called "fable" reject requests with a 401 ("model fable" / "No
+        // available channel"). Pin the floor at 0.3.182 to guarantee Fable support.
+        "^0.3.182",
         Arrays.asList("@anthropic-ai/sdk", "@anthropic-ai/bedrock-sdk"),
-        Arrays.asList("0.2.88", "0.2.81", "0.2.58"),
-        "Claude AI 提供商所需，包含 Agent SDK 和 Bedrock 支持。"
+        Arrays.asList("0.3.220", "0.3.201", "0.3.182"),
+        "Claude AI 提供商所需，包含 Agent SDK 和 Bedrock 支持。",
+        "0.3.182" // minRequiredVersion — Fable tier (ANTHROPIC_DEFAULT_FABLE_MODEL) needs SDK >= 0.3.182
     ),
 
     CODEX_SDK(
@@ -27,7 +33,23 @@ public enum SdkDefinition {
         "latest",
         Collections.emptyList(),
         Arrays.asList("0.117.0", "0.116.0", "0.115.0"),
-        "Codex AI 提供商所需。"
+        "Codex AI 提供商所需。",
+        null // minRequiredVersion — no enforced minimum
+    ),
+
+    /**
+     * Gemini uses Antigravity CLI ({@code agy}) headless stream-json — not an npm SDK.
+     * Install externally; path via AGY_PATH / GEMINI_CLI_PATH or PATH.
+     */
+    GEMINI_CLI(
+        "gemini-cli",
+        "Antigravity CLI (Gemini)",
+        "agy-cli-binary",
+        "latest",
+        Collections.emptyList(),
+        Collections.emptyList(),
+        "Gemini provider requires Antigravity CLI (agy). Install from https://antigravity.google/docs/cli/install and sign in once via agy.",
+        null
     ),
 
     /**
@@ -42,7 +64,8 @@ public enum SdkDefinition {
         "latest",
         Collections.emptyList(),
         Collections.emptyList(),
-        "Grok (xAI) provider requires the local Grok CLI (e.g. @vibe-kit/grok-cli). Prefer OAuth via `grok login`."
+        "Grok (xAI) provider requires the local Grok CLI (e.g. @vibe-kit/grok-cli). Prefer OAuth via `grok login`.",
+        null
     );
 
     private final String id;
@@ -52,9 +75,11 @@ public enum SdkDefinition {
     private final List<String> dependencies;
     private final List<String> fallbackVersions;
     private final String description;
+    private final String minRequiredVersion;
 
     SdkDefinition(String id, String displayName, String npmPackage, String version,
-                  List<String> dependencies, List<String> fallbackVersions, String description) {
+                  List<String> dependencies, List<String> fallbackVersions, String description,
+                  String minRequiredVersion) {
         this.id = id;
         this.displayName = displayName;
         this.npmPackage = npmPackage;
@@ -62,6 +87,7 @@ public enum SdkDefinition {
         this.dependencies = dependencies;
         this.fallbackVersions = fallbackVersions;
         this.description = description;
+        this.minRequiredVersion = minRequiredVersion;
     }
 
     public String getId() {
@@ -93,6 +119,15 @@ public enum SdkDefinition {
     }
 
     /**
+     * Minimum installed version required for full feature support.
+     * The Claude SDK needs 0.3.182 or later for the Fable tier; Codex has no minimum.
+     * Null means no minimum is enforced.
+     */
+    public String getMinRequiredVersion() {
+        return minRequiredVersion;
+    }
+
+    /**
      * Returns the full npm package specifier including the version.
      * For example: @anthropic-ai/claude-agent-sdk@^0.1.76
      */
@@ -117,7 +152,7 @@ public enum SdkDefinition {
      * Whether this entry is a local CLI binary rather than an npm SDK package.
      */
     public boolean isCliBinary() {
-        return this == GROK_CLI;
+        return this == GROK_CLI || this == GEMINI_CLI;
     }
 
     /**
@@ -140,6 +175,8 @@ public enum SdkDefinition {
             return CLAUDE_SDK;
         } else if ("codex".equalsIgnoreCase(provider)) {
             return CODEX_SDK;
+        } else if ("gemini".equalsIgnoreCase(provider)) {
+            return GEMINI_CLI;
         } else if ("grok".equalsIgnoreCase(provider)) {
             return GROK_CLI;
         }

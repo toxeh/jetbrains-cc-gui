@@ -295,13 +295,27 @@ export function strip1MContextSuffix(modelId: string | undefined | null): string
   return modelId.replace(/\[1m\]$/i, '');
 }
 
+/**
+ * Fallback Claude model when nothing valid is saved. Must stay in sync with the
+ * entry marked "Use the default model" in CLAUDE_MODELS — never derive this from
+ * CLAUDE_MODELS[0], which is the newest tier and the most likely to be missing
+ * from a user's API relay.
+ */
+export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-7';
+
+/**
+ * Retired model IDs → their current-generation replacement. Lookup happens after
+ * the [1m] suffix is stripped, so keys must be base IDs. Without an entry here a
+ * saved retired model fails validation and silently resets to the fallback.
+ */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
-  'claude-opus-4-6[1m]': 'claude-opus-4-6',
+  'claude-sonnet-4-6': 'claude-sonnet-4-7',
+  'claude-opus-4-6': 'claude-opus-4-8',
 };
 
 export function normalizeClaudeModelId(modelId: string | undefined | null): string {
   if (!modelId) {
-    return 'claude-sonnet-4-6';
+    return DEFAULT_CLAUDE_MODEL_ID;
   }
   // First strip any [1m] suffix
   const stripped = strip1MContextSuffix(modelId);
@@ -314,9 +328,19 @@ export function normalizeClaudeModelId(modelId: string | undefined | null): stri
  */
 export const CLAUDE_MODELS: ModelInfo[] = [
   {
+    id: 'claude-fable-5',
+    label: 'Fable 5',
+    description: 'Fable 5 · Most powerful · Mythos-class',
+  },
+  {
+    id: 'claude-opus-5',
+    label: 'Opus 5',
+    description: 'Opus 5 · Latest Opus upgrade',
+  },
+  {
     id: 'claude-opus-4-8',
     label: 'Opus 4.8',
-    description: 'Opus 4.8 · Latest and most capable',
+    description: 'Opus 4.8 · Previous Opus generation',
   },
   {
     id: 'claude-sonnet-5',
@@ -324,14 +348,9 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     description: 'Sonnet 5 · Upgraded Sonnet model',
   },
   {
-    id: 'claude-fable-5',
-    label: 'Fable 5',
-    description: 'Fable 5 · Most powerful · Mythos-class',
-  },
-  {
-    id: 'claude-sonnet-4-6',
-    label: 'Sonnet 4.6',
-    description: 'Sonnet 4.6 · Use the default model',
+    id: 'claude-sonnet-4-7',
+    label: 'Sonnet 4.7',
+    description: 'Sonnet 4.7 · Use the default model',
   },
   {
     id: 'claude-haiku-4-5',
@@ -345,6 +364,21 @@ export const CLAUDE_MODELS: ModelInfo[] = [
  */
 export const CODEX_MODELS: ModelInfo[] = [
   {
+    id: 'gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    description: 'Frontier model for complex professional work.',
+  },
+  {
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    description: 'GPT-5.6 model that balances intelligence and cost.',
+  },
+  {
+    id: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    description: 'GPT-5.6 model optimized for cost-sensitive workloads.',
+  },
+  {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
     description: 'Latest frontier model with stronger capabilities.',
@@ -354,42 +388,57 @@ export const CODEX_MODELS: ModelInfo[] = [
     label: 'GPT-5.4',
     description: 'Latest frontier model with enhanced capabilities.',
   },
+];
+
+/**
+ * Gemini / Antigravity CLI model list (from `agy models` catalog).
+ * Effort suffixes (-high/-medium/-low) are separate model ids in agy.
+ */
+export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash-medium';
+
+export const GEMINI_MODELS: ModelInfo[] = [
   {
-    id: 'gpt-5.2-codex',
-    label: 'GPT-5.2-Codex',
-    description: 'Frontier agentic coding model.',
+    id: 'gemini-3.6-flash-high',
+    label: 'Gemini 3.6 Flash High',
+    description: 'Newest Flash · high effort',
   },
   {
-    id: 'gpt-5.1-codex-max',
-    label: 'GPT-5.1-Codex-Max',
-    description: 'Codex-optimized flagship for deep and fast reasoning.',
+    id: 'gemini-3.6-flash-medium',
+    label: 'Gemini 3.6 Flash Medium',
+    description: 'Newest Flash · balanced',
   },
   {
-    id: 'gpt-5.4-mini',
-    label: 'GPT-5.4-Mini',
-    description: 'Smaller frontier agentic coding model.',
+    id: 'gemini-3.6-flash-low',
+    label: 'Gemini 3.6 Flash Low',
+    description: 'Newest Flash · fast / cheap',
   },
   {
-    id: 'gpt-5.3-codex',
-    label: 'GPT-5.3-Codex',
-    description: 'Latest frontier agentic coding model with enhanced capabilities.',
+    id: 'gemini-3.5-flash-high',
+    label: 'Gemini 3.5 Flash High',
+    description: 'Flash 3.5 · high effort',
   },
   {
-    id: 'gpt-5.3-codex-spark',
-    label: 'GPT-5.3-Codex-Spark',
-    description: 'Ultra-fast coding model.',
+    id: 'gemini-3.5-flash-medium',
+    label: 'Gemini 3.5 Flash Medium',
+    description: 'Flash 3.5 · default balanced',
   },
   {
-    id: 'gpt-5.2',
-    label: 'GPT-5.2',
-    description: 'Optimized for professional work and long-running agents.',
+    id: 'gemini-3.5-flash-low',
+    label: 'Gemini 3.5 Flash Low',
+    description: 'Flash 3.5 · fast / cheap',
   },
   {
-    id: 'gpt-5.1-codex-mini',
-    label: 'GPT-5.1-Codex-Mini',
-    description: 'Optimized for Codex. Cheaper, faster, but less capable.',
+    id: 'gemini-3.1-pro-high',
+    label: 'Gemini 3.1 Pro High',
+    description: 'Pro 3.1 · high effort',
+  },
+  {
+    id: 'gemini-3.1-pro-low',
+    label: 'Gemini 3.1 Pro Low',
+    description: 'Pro 3.1 · faster',
   },
 ];
+
 
 /**
  * Grok (xAI) model list
@@ -431,7 +480,7 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
   { id: 'grok', label: 'Grok', icon: 'codicon-terminal', enabled: true },
-  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: false },
+  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: true },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: false },
 ];
 
@@ -441,10 +490,12 @@ export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
  */
 export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
   'claude-sonnet-5',
+  'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
 
@@ -453,6 +504,7 @@ export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
  */
 export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
 ]);
 
@@ -461,30 +513,27 @@ export const XHIGH_EFFORT_CLAUDE_MODELS = new Set([
  */
 export const MAX_EFFORT_CLAUDE_MODELS = new Set([
   'claude-fable-5',
+  'claude-opus-5',
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
   'claude-sonnet-5',
+  'claude-sonnet-4-7',
   'claude-sonnet-4-6',
 ]);
 
+export function codexModelSupportsMaxEffort(modelId: string): boolean {
+  return modelId.trim().toLowerCase().includes('gpt-5.6');
+}
+
 /**
  * Grok models that support reasoning effort (Low/Medium/High/XHigh).
- *
- * Determined from CLI model metadata (supports_reasoning_effort) and docs:
- * "Only works when the active model supports reasoning effort."
- * Levels for supported Grok models: low, medium, high, xhigh (max is alias for xhigh).
- *
- * Currently empty because grok-composer-2.5-fast, grok-build (and grok-4.5 when
- * it resolves to composer) report supports_reasoning_effort: false.
- * Add IDs here (both UI ids like 'grok-4.5'/'grok-build' and runtime ids like
- * 'grok-composer-2.5-fast') only for models that truly support it.
+ * Currently empty; UI can still offer effort for Grok when cache says so.
  */
 export const EFFORT_SUPPORTED_GROK_MODELS = new Set<string>([]);
 
 /**
- * Returns true if the given provider+model supports the reasoning effort selector
- * (i.e. Low/Medium/High/XHigh should be shown and sent for that combination).
+ * Returns true if the given provider+model supports the reasoning effort selector.
  */
 export function modelSupportsReasoningEffort(provider: string | undefined, model: string | undefined): boolean {
   if (!provider) return false;
@@ -492,11 +541,12 @@ export function modelSupportsReasoningEffort(provider: string | undefined, model
     return !!model && EFFORT_SUPPORTED_CLAUDE_MODELS.has(model);
   }
   if (provider === 'grok') {
-    // Display of the selector is controlled dynamically via models_cache in ReasoningSelect.
-    // We allow sending the effort payload for Grok when UI offers it.
     return true;
   }
   if (provider === 'codex') {
+    return true;
+  }
+  if (provider === 'gemini') {
     return true;
   }
   return false;
@@ -506,8 +556,7 @@ export function modelSupportsReasoningEffort(provider: string | undefined, model
  * Reasoning Effort (thinking depth)
  * Controls the depth of reasoning for AI models
  * Claude API values: low, medium, high, xhigh, max
- * Codex API values: low, medium, high, xhigh
- * Grok (when supported): low, medium, high, xhigh
+ * Codex API values: low, medium, high, xhigh; GPT-5.6 also supports max
  */
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -709,6 +758,10 @@ export interface ChatInputBoxProps {
   sdkInstalled?: boolean;
   /** SDK status loading state */
   sdkStatusLoading?: boolean;
+  /** SDK status query failed; chat remains available until the user retries */
+  sdkStatusError?: boolean;
+  /** Retry SDK status query callback */
+  onRetrySdkStatus?: () => void;
   /** Go to install SDK callback */
   onInstallSdk?: () => void;
   /** Show toast message */

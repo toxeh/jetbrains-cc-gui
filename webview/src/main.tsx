@@ -5,6 +5,7 @@ import { MessagesProvider } from './contexts/MessagesContext';
 import { SessionProvider } from './contexts/SessionContext';
 import { UIStateProvider } from './contexts/UIStateContext';
 import { DialogProvider } from './contexts/DialogContext';
+import { TaskEventProvider } from './contexts/SubagentContext';
 import './codicon.css';
 import './styles/app.less';
 import './i18n/config';
@@ -15,6 +16,8 @@ import { applyLinkifyCapabilitiesPayload } from './utils/linkifyCapabilities';
 import { installRuntimeProviderDispatchers } from './utils/runtimeProviderCapabilities';
 import { sendBridgeEvent } from './utils/bridge';
 import { debugLog } from './utils/debug';
+import { forceWebviewRepaint } from './utils/forceWebviewRepaint';
+import { requestDependencyStatusUntilSettled, waitForBridge } from './utils/bridgeStartup';
 import type { UiFontConfig, CodeFontConfig } from './types/uiFontConfig';
 
 // Silence noisy console output in production (including third-party libs).
@@ -580,6 +583,7 @@ if (typeof window !== 'undefined' && !window.setSessionId) {
 
 // Pre-register updateDependencyStatus to handle backend status responses that arrive before React initializes
 if (typeof window !== 'undefined' && !window.updateDependencyStatus) {
+  window.__dependencyStatusState = 'pending';
   debugLog('[Main] Pre-registering updateDependencyStatus placeholder');
   window.updateDependencyStatus = (json: string) => {
     debugLog('[Main] Storing pending dependency status, length=' + (json ? json.length : 0));
@@ -687,6 +691,9 @@ if (typeof window !== 'undefined') {
   window.updateLinkifyCapabilities = (json: string) => {
     applyLinkifyCapabilitiesPayload(json);
   };
+  window.onTabActivated = () => {
+    forceWebviewRepaint('tab-activated');
+  };
 }
 
 // Render the React application
@@ -695,9 +702,11 @@ ReactDOM.createRoot(document.getElementById('app') as HTMLElement).render(
     <UIStateProvider>
       <SessionProvider>
         <MessagesProvider>
-          <DialogProvider>
-            <App />
-          </DialogProvider>
+          <TaskEventProvider>
+            <DialogProvider>
+              <App />
+            </DialogProvider>
+          </TaskEventProvider>
         </MessagesProvider>
       </SessionProvider>
     </UIStateProvider>
@@ -709,23 +718,6 @@ ReactDOM.createRoot(document.getElementById('app') as HTMLElement).render(
  */
 setupScaleRecovery();
 
-function waitForBridge(callback: () => void, maxAttempts = 50, interval = 100) {
-  let attempts = 0;
-
-  const check = () => {
-    attempts++;
-    if (window.sendToJava) {
-      debugLog('[Main] Bridge available after ' + attempts + ' attempts');
-      callback();
-    } else if (attempts < maxAttempts) {
-      setTimeout(check, interval);
-    } else {
-      console.error('[Main] Bridge not available after ' + maxAttempts + ' attempts');
-    }
-  };
-
-  check();
-}
 
 // Once the bridge is available, initialize slash commands
 waitForBridge(() => {
@@ -742,7 +734,7 @@ waitForBridge(() => {
 
   // Ensure SDK dependency status is fetched on initial load (not only after opening Settings).
   debugLog('[Main] Requesting dependency status');
-  sendBridgeEvent('get_dependency_status');
+  requestDependencyStatusUntilSettled();
 
   sendBridgeEvent('get_linkify_capabilities');
 });

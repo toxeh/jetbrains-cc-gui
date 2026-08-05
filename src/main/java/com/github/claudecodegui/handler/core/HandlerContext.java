@@ -3,6 +3,7 @@ package com.github.claudecodegui.handler.core;
 import com.github.claudecodegui.session.ClaudeSession;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.intellij.openapi.application.ApplicationManager;
@@ -25,6 +26,7 @@ public class HandlerContext {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final GrokSDKBridge grokSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final CodemossSettingsService settingsService;
     private final JsCallback jsCallback;
     private final BooleanSupplier activeContentSupplier;
@@ -54,7 +56,7 @@ public class HandlerContext {
             CodemossSettingsService settingsService,
             JsCallback jsCallback
     ) {
-        this(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, settingsService, jsCallback, () -> true, () -> null);
+        this(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, null, settingsService, jsCallback, () -> true, () -> null);
     }
 
     public HandlerContext(
@@ -67,10 +69,26 @@ public class HandlerContext {
             BooleanSupplier activeContentSupplier,
             Supplier<String> contentTitleSupplier
     ) {
+        this(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, null, settingsService, jsCallback,
+                activeContentSupplier, contentTitleSupplier);
+    }
+
+    public HandlerContext(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            GrokSDKBridge grokSDKBridge,
+            GeminiSDKBridge geminiSDKBridge,
+            CodemossSettingsService settingsService,
+            JsCallback jsCallback,
+            BooleanSupplier activeContentSupplier,
+            Supplier<String> contentTitleSupplier
+    ) {
         this.project = project;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
         this.grokSDKBridge = grokSDKBridge;
+        this.geminiSDKBridge = geminiSDKBridge;
         this.settingsService = settingsService;
         this.jsCallback = jsCallback;
         this.activeContentSupplier = activeContentSupplier == null ? () -> true : activeContentSupplier;
@@ -92,6 +110,10 @@ public class HandlerContext {
 
     public GrokSDKBridge getGrokSDKBridge() {
         return grokSDKBridge;
+    }
+
+    public GeminiSDKBridge getGeminiSDKBridge() {
+        return geminiSDKBridge;
     }
 
     public CodemossSettingsService getSettingsService() {

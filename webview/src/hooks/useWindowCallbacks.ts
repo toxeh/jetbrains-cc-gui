@@ -41,8 +41,10 @@ export interface UseWindowCallbacksOptions {
   setPermissionMode: React.Dispatch<React.SetStateAction<PermissionMode>>;
   setClaudePermissionMode: React.Dispatch<React.SetStateAction<PermissionMode>>;
   setCodexPermissionMode: React.Dispatch<React.SetStateAction<PermissionMode>>;
+  setGeminiPermissionMode?: React.Dispatch<React.SetStateAction<PermissionMode>>;
   setSelectedClaudeModel: React.Dispatch<React.SetStateAction<string>>;
   setSelectedCodexModel: React.Dispatch<React.SetStateAction<string>>;
+  setSelectedGeminiModel?: React.Dispatch<React.SetStateAction<string>>;
   setProviderConfigVersion: React.Dispatch<React.SetStateAction<number>>;
   setActiveProviderConfig: React.Dispatch<React.SetStateAction<ProviderConfig | null>>;
   setClaudeSettingsAlwaysThinkingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
@@ -52,6 +54,7 @@ export interface UseWindowCallbacksOptions {
   setPermissionDialogTimeoutSeconds: React.Dispatch<React.SetStateAction<number>>;
   setSdkStatus: React.Dispatch<React.SetStateAction<Record<string, { installed?: boolean; status?: string }>>>;
   setSdkStatusLoaded: React.Dispatch<React.SetStateAction<boolean>>;
+  setSdkStatusError: React.Dispatch<React.SetStateAction<string | null>>;
   setIsRewinding: (loading: boolean) => void;
   setRewindDialogOpen: (open: boolean) => void;
   setCurrentRewindRequest: (request: RewindRequest | null) => void;

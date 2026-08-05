@@ -114,9 +114,14 @@ public class ContextHandler extends BaseMessageHandler {
         } catch (Exception ignored) {}
 
         try {
-            CompletableFuture<JsonObject> bridgeCall = "grok".equalsIgnoreCase(provider)
-                    ? this.context.getGrokSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel)
-                    : this.context.getClaudeSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            java.util.concurrent.CompletableFuture<com.google.gson.JsonObject> bridgeCall;
+            if ("gemini".equalsIgnoreCase(provider) && this.context.getGeminiSDKBridge() != null) {
+                bridgeCall = this.context.getGeminiSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            } else if ("grok".equalsIgnoreCase(provider) && this.context.getGrokSDKBridge() != null) {
+                bridgeCall = this.context.getGrokSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            } else {
+                bridgeCall = this.context.getClaudeSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
+            }
             bridgeCall.thenAccept(result -> {
                         ApplicationManager.getApplication().invokeLater(() -> {
                             try {

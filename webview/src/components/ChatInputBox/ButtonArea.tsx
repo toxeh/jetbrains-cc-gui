@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
-import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
+import { CLAUDE_MODELS, CODEX_MODELS, GEMINI_MODELS, GROK_MODELS } from './types';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
@@ -171,6 +171,9 @@ export const ButtonArea = ({
     if (currentProvider === 'grok') {
       // Grok: use built-in list (custom models can be added later)
       return GROK_MODELS;
+    }
+    if (currentProvider === 'gemini') {
+      return GEMINI_MODELS;
     }
     if (typeof window === 'undefined' || !window.localStorage) {
       return CLAUDE_MODELS;

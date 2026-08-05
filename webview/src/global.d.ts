@@ -7,6 +7,9 @@ interface Window {
    */
   sendToJava?: (message: string) => void;
 
+  /** Re-rasterize the JCEF surface after its IntelliJ content tab is activated. */
+  onTabActivated?: () => void;
+
   /**
    * Get clipboard file path from Java
    */
@@ -21,6 +24,12 @@ interface Window {
    * Update messages from backend
    */
   updateMessages?: (json: string, sequence?: string | number) => void;
+  /** Replace a long conversation tail without resending its unchanged prefix. */
+  updateMessageTail?: (
+    json: string,
+    baseIndex: string | number,
+    sequence?: string | number,
+  ) => void;
 
   /**
    * Patch a single message UUID without re-sending the full message list.
@@ -94,6 +103,11 @@ interface Window {
    * Subagent sidechain history callback.
    */
   onSubagentHistoryLoaded?: (json: string) => void;
+
+  /**
+   * task_* SDK system event callback (async subagent lifecycle).
+   */
+  onTaskEvent?: (eventJson: string) => void;
 
   /**
    * SDK-to-CLI session conversion result callback.
@@ -897,6 +911,8 @@ interface Window {
    * Pending dependency status payload before React initialization
    */
   __pendingDependencyStatus?: string;
+  __dependencyStatusState?: 'pending' | 'ready' | 'error';
+  __ccgOnBridgeReady?: () => void;
 
   /**
    * Pending streaming enabled status before React initialization

@@ -88,6 +88,8 @@
     "disabled": "Deshabilitado",
     "sdkNotInstalled": "{{provider}} SDK no está instalado. Instala el SDK para comenzar a chatear.",
     "sdkStatusLoading": "Checking SDK status...",
+    "sdkStatusUnavailable": "No se pudo comprobar el estado del SDK.",
+    "retrySdkStatus": "Reintentar",
     "openSourceBanner": "Este proyecto garantiza ser 100% de código abierto y gratuito (cuidado con los proyectos pirateados)",
     "openSourceBannerStar": "Star",
     "openSourceBannerStarToast": "Enlace copiado al portapapeles — pégalo en el navegador para acceder ⭐",
@@ -285,6 +287,12 @@
         "reset": "Restablecer",
         "hint": "Personalizar el color de fondo del área de chat. Dejar vacío para seguir el tema predeterminado."
       },
+      "chatBarColor": {
+        "label": "Color del encabezado y la barra de estado",
+        "custom": "Personalizado",
+        "reset": "Restablecer",
+        "hint": "Usa un color de tema para el encabezado de sesión y la barra de estado de tareas. Déjalo vacío para seguir el tema actual."
+      },
       "userMsgColor": {
         "label": "Color de mensajes del usuario",
         "custom": "Personalizado",
@@ -324,6 +332,13 @@
         "cacheReadShort": "Lectura de caché",
         "invalidValue": "El precio debe ser un número no negativo",
         "defaultPricing": "Usando el precio predeterminado"
+      },
+      "contextWindow": {
+        "label": "Contexto máximo (K tokens)",
+        "placeholder": "p. ej. 500",
+        "hint": "Opcional. Introduce un número entero de miles de tokens (500 = 500.000 tokens). Solo se usa para mostrar el uso de contexto del plugin.",
+        "invalidValue": "El contexto máximo debe ser un entero positivo en unidades K",
+        "summary": "Contexto: {{value}} tokens"
       },
       "configuredSectionTitle": "Modelos de Claude configurados",
       "configuredSectionDesc": "Los modelos del proveedor de Claude activo o settings.json ya aparecen en el selector. Aquí solo se puede modificar el precio.",

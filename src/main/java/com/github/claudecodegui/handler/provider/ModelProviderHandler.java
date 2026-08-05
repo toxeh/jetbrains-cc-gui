@@ -5,6 +5,7 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.session.SessionSendService;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
+import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.github.claudecodegui.util.EditorFileUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -75,6 +76,21 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000);
         MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
         MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
+
+        // Gemini / Antigravity models (common catalog defaults)
+        MODEL_CONTEXT_LIMITS.put("gemini", 200_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-2.5-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-2.5-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-medium", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-medium", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-low", 1_000_000);
     }
 
     private final HandlerContext context;
@@ -110,8 +126,10 @@ public class ModelProviderHandler {
 
             com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
 
-            String resolvedModelForUsage = resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = getModelContextLimit(resolvedModelForUsage);
+            String provider = context.getCurrentProvider();
+            boolean isClaude = provider == null || "claude".equalsIgnoreCase(provider);
+            String resolvedModelForUsage = isClaude ? resolveConfiguredClaudeModelFromSettings(model) : model;
+            int newMaxTokens = getModelContextLimit(provider, resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);
@@ -168,9 +186,9 @@ public class ModelProviderHandler {
 
             // Ensure the context usage indicator (upper-left token ring + "X / Yk Context")
             // immediately knows the correct max for the newly active provider's model.
-            // This makes Grok (and others) show the limit even before the first message.
+            // This makes Grok/Gemini (and others) show the limit even before the first message.
             String modelForLimit = context.getCurrentModel();
-            int maxTokens = getModelContextLimit(modelForLimit);
+            int maxTokens = getModelContextLimit(provider, modelForLimit);
             usagePushService.pushUsageUpdateAfterModelChange(maxTokens);
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set provider: " + e.getMessage(), e);
@@ -334,7 +352,7 @@ public class ModelProviderHandler {
         return baseModel;
     }
 
-    static String resolveConfiguredClaudeModel(String baseModel, JsonObject env) {
+    public static String resolveConfiguredClaudeModel(String baseModel, JsonObject env) {
         if (baseModel == null || baseModel.isEmpty() || env == null) {
             return baseModel;
         }
@@ -405,4 +423,11 @@ public class ModelProviderHandler {
 
         return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
     }
+
+    public static int getModelContextLimit(String provider, String model) {
+        return CustomModelContextWindowProvider.getInstance()
+                .getContextWindow(provider, model)
+                .orElseGet(() -> getModelContextLimit(model));
+    }
+
 }
