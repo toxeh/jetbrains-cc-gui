@@ -28,6 +28,12 @@ function createContextUsageRequestId(): string {
 }
 
 function shouldSendReasoningEffort(provider: string, model: string): boolean {
+  // Gemini/agy: effort is baked into the model slug at set_model time
+  // (resolveGeminiAgyModelId). Do not also send reasoningEffort — bare catalog
+  // slugs like claude-sonnet-4-6 reject --effort.
+  if (provider === 'gemini') {
+    return false;
+  }
   if (provider !== 'claude') {
     return true;
   }
