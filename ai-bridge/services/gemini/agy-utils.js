@@ -18,12 +18,18 @@ export function getAgyHome() {
 
 /**
  * Resolve agy binary.
- * Prefer AGY_PATH / GEMINI_CLI_PATH, then ~/.local/bin/agy (user-facing CLI),
- * then ~/.gemini/antigravity-cli, PATH. Prefer `agy` over `agy.real` —
- * `agy.real` is an internal install artifact and is not the preferred entrypoint.
+ * ONLY the user-facing `agy` binary is allowed — never `agy.real`
+ * (internal install artifact; forbidden).
+ * Prefer AGY_PATH / GEMINI_CLI_PATH (if they point at `agy`), then
+ * ~/.local/bin/agy, ~/.gemini/antigravity-cli/bin/agy, PATH.
  */
+function isForbiddenAgyName(path) {
+  const norm = String(path || '').replace(/\\/g, '/');
+  return /(^|\/)agy\.real$/i.test(norm);
+}
+
 function isExecutableBinary(path) {
-  if (!path || !existsSync(path)) return false;
+  if (!path || isForbiddenAgyName(path) || !existsSync(path)) return false;
   try {
     accessSync(path, fsConstants.X_OK);
     return true;
@@ -33,11 +39,15 @@ function isExecutableBinary(path) {
 }
 
 export function resolveAgyBinary() {
-  // Explicit override: honor it strictly (no silent fallback) so misconfigured
-  // AGY_PATH / GEMINI_CLI_PATH fails loudly instead of picking another binary.
+  // Explicit override:
+  // - agy.real is FORBIDDEN: ignore and fall through to discover `agy`
+  // - any other path: honor strictly (null if missing) so misconfig fails loudly
   const explicit = (process.env.AGY_PATH || process.env.GEMINI_CLI_PATH || process.env.AGY_CLI_PATH || '').trim();
   if (explicit) {
-    return isExecutableBinary(explicit) ? explicit : null;
+    if (!isForbiddenAgyName(explicit)) {
+      return isExecutableBinary(explicit) ? explicit : null;
+    }
+    // fall through — never invoke agy.real
   }
 
   const candidates = [];
@@ -49,20 +59,17 @@ export function resolveAgyBinary() {
     join(home, 'bin', 'agy'),
     '/usr/local/bin/agy',
     '/opt/homebrew/bin/agy',
-    // Fallback only if the user-facing `agy` shim is missing
-    join(home, '.local', 'bin', 'agy.real'),
-    join(agyHome, 'bin', 'agy.real'),
   );
 
   const pathEnv = process.env.PATH || '';
   for (const dir of pathEnv.split(delimiter)) {
     if (!dir) continue;
-    candidates.push(join(dir, 'agy'), join(dir, 'agy.real'));
+    candidates.push(join(dir, 'agy'));
   }
 
   const seen = new Set();
   for (const c of candidates) {
-    if (!c || seen.has(c)) continue;
+    if (!c || seen.has(c) || isForbiddenAgyName(c)) continue;
     seen.add(c);
     if (isExecutableBinary(c)) return c;
   }

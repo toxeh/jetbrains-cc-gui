@@ -9,7 +9,11 @@
 
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
 import type { PermissionMode } from '../../../components/ChatInputBox/types';
-import { isValidPermissionMode, normalizeClaudeModelId } from '../../../components/ChatInputBox/types';
+import {
+  isValidPermissionMode,
+  normalizeClaudeModelId,
+  toGeminiFamilyId,
+} from '../../../components/ChatInputBox/types';
 import { drainPendingSettings, startInitialSettingsRequest } from '../settingsBootstrap';
 import { clampPermissionDialogTimeoutSeconds } from '../../../utils/permissionDialogTimeout';
 
@@ -88,6 +92,12 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
   window.onModeChanged = (mode) => updateMode(mode as PermissionMode);
   window.onModeReceived = (mode) => updateMode(mode as PermissionMode);
 
+  const applyGeminiModelFromBackend = (modelId: string) => {
+    // Backend stores full agy slugs (...-high / ...-thinking). UI selection is family base only.
+    const family = toGeminiFamilyId(modelId) || modelId;
+    setSelectedGeminiModel?.(family);
+  };
+
   window.onModelChanged = (modelId) => {
     const provider = currentProviderRef.current;
     if (provider === 'claude') {
@@ -95,7 +105,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
     } else if (provider === 'gemini') {
-      setSelectedGeminiModel?.(modelId);
+      applyGeminiModelFromBackend(modelId);
     }
   };
 
@@ -105,7 +115,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
     } else if (provider === 'gemini') {
-      setSelectedGeminiModel?.(modelId);
+      applyGeminiModelFromBackend(modelId);
     }
   };
 

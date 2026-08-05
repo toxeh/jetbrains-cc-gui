@@ -35,6 +35,28 @@ test('resolveAgyBinary honors explicit AGY_PATH without fallback', () => {
   }
 });
 
+test('resolveAgyBinary never returns agy.real even if AGY_PATH points at it', () => {
+  const prev = process.env.AGY_PATH;
+  const prevG = process.env.GEMINI_CLI_PATH;
+  const prevA = process.env.AGY_CLI_PATH;
+  process.env.AGY_PATH = '/Users/nobody/.local/bin/agy.real';
+  process.env.GEMINI_CLI_PATH = '';
+  process.env.AGY_CLI_PATH = '';
+  try {
+    const resolved = resolveAgyBinary();
+    if (resolved) {
+      assert.ok(!/agy\.real$/i.test(resolved), `must not resolve agy.real, got ${resolved}`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    if (prevG === undefined) delete process.env.GEMINI_CLI_PATH;
+    else process.env.GEMINI_CLI_PATH = prevG;
+    if (prevA === undefined) delete process.env.AGY_CLI_PATH;
+    else process.env.AGY_CLI_PATH = prevA;
+  }
+});
+
 test('mapPermissionMode default does not skip permissions', () => {
   const m = mapPermissionMode('default');
   assert.equal(m.skipPermissions, false);

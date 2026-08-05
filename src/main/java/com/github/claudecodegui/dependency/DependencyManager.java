@@ -615,14 +615,19 @@ public class DependencyManager {
     /**
      * Resolve Antigravity CLI ({@code agy}) binary for Gemini provider status.
      * Mirrors ai-bridge/services/gemini/agy-utils.js resolveAgyBinary().
+     * ONLY {@code agy} is allowed — never {@code agy.real}.
      */
     private String resolveAgyBinary() {
-        // Explicit override: honor strictly (no silent fallback), same as agy-utils.js.
+        // Explicit override: accept only if executable and not agy.real.
         String[] envKeys = {"AGY_PATH", "GEMINI_CLI_PATH", "AGY_CLI_PATH"};
         for (String key : envKeys) {
             String v = System.getenv(key);
             if (v != null && !v.trim().isEmpty()) {
-                Path p = Paths.get(v.trim());
+                String path = v.trim();
+                if (isForbiddenAgyBinaryName(path)) {
+                    break; // fall through to discover real `agy`
+                }
+                Path p = Paths.get(path);
                 if (Files.isExecutable(p)) {
                     return p.toAbsolutePath().toString();
                 }
@@ -630,18 +635,19 @@ public class DependencyManager {
             }
         }
         String home = PlatformUtils.getHomeDirectory();
-        // Prefer user-facing `agy` over internal `agy.real` install artifact.
+        // User-facing `agy` only — never agy.real.
         String[] candidates = {
                 home + "/.local/bin/agy",
                 home + "/.gemini/antigravity-cli/bin/agy",
                 home + "/bin/agy",
                 "/usr/local/bin/agy",
                 "/opt/homebrew/bin/agy",
-                home + "/.local/bin/agy.real",
-                home + "/.gemini/antigravity-cli/bin/agy.real",
         };
         for (String c : candidates) {
             try {
+                if (isForbiddenAgyBinaryName(c)) {
+                    continue;
+                }
                 Path p = Paths.get(c);
                 if (Files.isExecutable(p)) {
                     return p.toAbsolutePath().toString();
@@ -649,25 +655,37 @@ public class DependencyManager {
             } catch (Exception ignored) {
             }
         }
-        // PATH lookup — `agy` before `agy.real`
+        // PATH lookup — only `agy`
         String pathEnv = System.getenv("PATH");
         if (pathEnv != null) {
             for (String dir : pathEnv.split(Pattern.quote(File.pathSeparator))) {
                 if (dir == null || dir.isEmpty()) {
                     continue;
                 }
-                for (String name : new String[]{"agy", "agy.real"}) {
-                    try {
-                        Path p = Paths.get(dir, name);
-                        if (Files.isExecutable(p)) {
-                            return p.toAbsolutePath().toString();
-                        }
-                    } catch (Exception ignored) {
+                try {
+                    Path p = Paths.get(dir, "agy");
+                    if (isForbiddenAgyBinaryName(p.toString())) {
+                        continue;
                     }
+                    if (Files.isExecutable(p)) {
+                        return p.toAbsolutePath().toString();
+                    }
+                } catch (Exception ignored) {
                 }
             }
         }
         return null;
+    }
+
+    /** {@code agy.real} is an internal install artifact and must never be invoked. */
+    private static boolean isForbiddenAgyBinaryName(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        String norm = path.replace('\\', '/');
+        int slash = norm.lastIndexOf('/');
+        String base = slash >= 0 ? norm.substring(slash + 1) : norm;
+        return "agy.real".equalsIgnoreCase(base);
     }
 
     /**
