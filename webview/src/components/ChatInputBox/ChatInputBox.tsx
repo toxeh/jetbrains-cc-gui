@@ -83,6 +83,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onReasoningChange,
       codexFastMode = 'normal',
       onCodexFastModeChange,
+      geminiFamilies,
+      geminiModels,
       activeFile,
       selectedLines,
       onClearContext,
@@ -713,6 +715,8 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
           currentProvider={currentProvider}
           reasoningEffort={reasoningEffort}
           codexFastMode={codexFastMode}
+          geminiFamilies={geminiFamilies}
+          geminiModels={geminiModels}
           onSubmit={handleSubmit}
           onStop={onStop}
           onModeSelect={handleModeSelect}

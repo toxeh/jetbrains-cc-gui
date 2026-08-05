@@ -391,53 +391,98 @@ export const CODEX_MODELS: ModelInfo[] = [
 ];
 
 /**
- * Gemini / Antigravity CLI model list (from `agy models` catalog).
- * Effort suffixes (-high/-medium/-low) are separate model ids in agy.
+ * Gemini / Antigravity CLI model families (base ids).
+ * Live catalog is loaded via `agy models` → get_gemini_models.
+ * Effort (high/medium/low/thinking) is a subordinate ReasoningSelect list;
+ * full agy slugs are composed at send time (e.g. gemini-3.5-flash-medium).
  */
-export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash-medium';
+export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash';
 
+/** Fallback when agy is offline / listModels has not returned yet. */
 export const GEMINI_MODELS: ModelInfo[] = [
   {
-    id: 'gemini-3.6-flash-high',
-    label: 'Gemini 3.6 Flash High',
-    description: 'Newest Flash · high effort',
+    id: 'gemini-3.6-flash',
+    label: 'Gemini 3.6 Flash',
+    description: 'Newest Flash',
   },
   {
-    id: 'gemini-3.6-flash-medium',
-    label: 'Gemini 3.6 Flash Medium',
-    description: 'Newest Flash · balanced',
+    id: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    description: 'Flash 3.5 · default',
   },
   {
-    id: 'gemini-3.6-flash-low',
-    label: 'Gemini 3.6 Flash Low',
-    description: 'Newest Flash · fast / cheap',
+    id: 'gemini-3.1-pro',
+    label: 'Gemini 3.1 Pro',
+    description: 'Pro 3.1',
   },
   {
-    id: 'gemini-3.5-flash-high',
-    label: 'Gemini 3.5 Flash High',
-    description: 'Flash 3.5 · high effort',
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    description: 'Sonnet via Antigravity',
   },
   {
-    id: 'gemini-3.5-flash-medium',
-    label: 'Gemini 3.5 Flash Medium',
-    description: 'Flash 3.5 · default balanced',
+    id: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    description: 'Opus via Antigravity',
   },
   {
-    id: 'gemini-3.5-flash-low',
-    label: 'Gemini 3.5 Flash Low',
-    description: 'Flash 3.5 · fast / cheap',
-  },
-  {
-    id: 'gemini-3.1-pro-high',
-    label: 'Gemini 3.1 Pro High',
-    description: 'Pro 3.1 · high effort',
-  },
-  {
-    id: 'gemini-3.1-pro-low',
-    label: 'Gemini 3.1 Pro Low',
-    description: 'Pro 3.1 · faster',
+    id: 'gpt-oss-120b',
+    label: 'GPT-OSS 120B',
+    description: 'Open-weight GPT via Antigravity',
   },
 ];
+
+/** Effort option under a Gemini/agy model family. */
+export interface GeminiEffortOption {
+  id: string;
+  label: string;
+  /** Full agy model slug to send as --model */
+  modelId: string;
+}
+
+/** Family row from live `agy models` grouping. */
+export interface GeminiModelFamily {
+  id: string;
+  label: string;
+  description?: string;
+  efforts: GeminiEffortOption[];
+  defaultEffort: string;
+  defaultModelId: string;
+}
+
+export type GeminiAgyEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'thinking' | '';
+
+const AGY_EFFORT_SUFFIXES = ['thinking', 'xhigh', 'medium', 'high', 'low'] as const;
+
+/** Split full agy slug into family base + effort suffix. */
+export function splitGeminiAgyModelId(modelId: string): { baseId: string; effort: string } {
+  const id = (modelId || '').trim();
+  if (!id) return { baseId: '', effort: '' };
+  for (const effort of AGY_EFFORT_SUFFIXES) {
+    const suffix = `-${effort}`;
+    if (id.endsWith(suffix) && id.length > suffix.length) {
+      return { baseId: id.slice(0, -suffix.length), effort };
+    }
+  }
+  return { baseId: id, effort: '' };
+}
+
+/** Compose full agy slug from family + effort (effort may be empty). */
+export function composeGeminiAgyModelId(baseId: string, effort: string): string {
+  const base = (baseId || '').trim();
+  if (!base) return '';
+  const { baseId: stripped } = splitGeminiAgyModelId(base);
+  const family = stripped || base;
+  const e = (effort || '').trim().toLowerCase();
+  if (!e) return family;
+  return `${family}-${e}`;
+}
+
+/** Normalize a stored/full slug or family id to the family base used in ModelSelect. */
+export function toGeminiFamilyId(modelId: string): string {
+  const { baseId } = splitGeminiAgyModelId(modelId);
+  return baseId || modelId;
+}
 
 /**
  * Available models (backward compatibility)
@@ -511,8 +556,9 @@ export function codexModelSupportsMaxEffort(modelId: string): boolean {
  * Controls the depth of reasoning for AI models
  * Claude API values: low, medium, high, xhigh, max
  * Codex API values: low, medium, high, xhigh; GPT-5.6 also supports max
+ * Gemini/agy: low, medium, high, thinking (suffix baked into model slug)
  */
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'thinking';
 
 /**
  * Codex execution speed mode.
@@ -675,6 +721,10 @@ export interface ChatInputBoxProps {
   codexFastMode?: CodexFastMode;
   /** Switch Codex speed mode callback */
   onCodexFastModeChange?: (mode: CodexFastMode) => void;
+  /** Live Gemini/agy families for subordinate effort list. */
+  geminiFamilies?: GeminiModelFamily[];
+  /** Live Gemini family rows for ModelSelect. */
+  geminiModels?: ModelInfo[];
   /** Toggle thinking mode */
   onToggleThinking?: (enabled: boolean) => void;
   /** Whether streaming is enabled */
@@ -758,6 +808,10 @@ export interface ButtonAreaProps {
   reasoningEffort?: ReasoningEffort;
   /** Codex speed mode */
   codexFastMode?: CodexFastMode;
+  /** Live Gemini/agy model families (effort subordinates). */
+  geminiFamilies?: GeminiModelFamily[];
+  /** Live Gemini family list for ModelSelect (fallback: GEMINI_MODELS). */
+  geminiModels?: ModelInfo[];
 
   // Event callbacks
   onSubmit?: () => void;

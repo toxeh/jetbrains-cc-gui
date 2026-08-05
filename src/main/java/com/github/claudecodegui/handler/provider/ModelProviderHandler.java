@@ -255,6 +255,55 @@ public class ModelProviderHandler {
         }
     }
 
+    /**
+     * Fetch live Gemini/agy model catalog and push to webview via
+     * {@code window.updateGeminiModels}.
+     */
+    public void handleGetGeminiModels(String content) {
+        try {
+            if (context.getGeminiSDKBridge() == null) {
+                LOG.warn("[ModelProviderHandler] get_gemini_models: GeminiSDKBridge unavailable");
+                pushGeminiModelsError("Gemini bridge unavailable");
+                return;
+            }
+            context.getGeminiSDKBridge().listModels()
+                    .thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            if (result == null) {
+                                pushGeminiModelsError("Empty listModels response");
+                                return;
+                            }
+                            String json = gson.toJson(result);
+                            context.callJavaScript("window.updateGeminiModels", context.escapeJs(json));
+                        } catch (Exception e) {
+                            LOG.error("[ModelProviderHandler] Failed to push gemini models: " + e.getMessage(), e);
+                            pushGeminiModelsError(e.getMessage());
+                        }
+                    }))
+                    .exceptionally(ex -> {
+                        LOG.error("[ModelProviderHandler] listModels failed: " + ex.getMessage(), ex);
+                        ApplicationManager.getApplication().invokeLater(() ->
+                                pushGeminiModelsError(ex.getMessage()));
+                        return null;
+                    });
+        } catch (Exception e) {
+            LOG.error("[ModelProviderHandler] get_gemini_models failed: " + e.getMessage(), e);
+            pushGeminiModelsError(e.getMessage());
+        }
+    }
+
+    private void pushGeminiModelsError(String message) {
+        try {
+            JsonObject err = new JsonObject();
+            err.addProperty("success", false);
+            err.add("models", new com.google.gson.JsonArray());
+            err.add("families", new com.google.gson.JsonArray());
+            err.addProperty("error", message != null ? message : "unknown");
+            context.callJavaScript("window.updateGeminiModels", context.escapeJs(gson.toJson(err)));
+        } catch (Exception ignored) {
+        }
+    }
+
     public void handleSetCodexFastMode(String content) {
         try {
             String mode = content;

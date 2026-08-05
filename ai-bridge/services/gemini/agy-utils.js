@@ -182,8 +182,188 @@ export function buildAgyEnv(baseEnv = process.env) {
   return env;
 }
 
+/** Effort suffixes baked into agy model slugs (longest first). */
+export const AGY_EFFORT_SUFFIXES = ['thinking', 'xhigh', 'medium', 'high', 'low'];
+
 /**
- * List models via `agy models` (one line per slug).
+ * Parse one `agy models` line: "id   Human Label (Effort)".
+ * @returns {{ id: string, label: string } | null}
+ */
+export function parseAgyModelLine(line) {
+  const raw = String(line || '').trim();
+  if (!raw || raw.startsWith('Usage') || raw.startsWith('CLI') || raw.startsWith('Flags')) {
+    return null;
+  }
+  const m = raw.match(/^(\S+)\s+(.*)$/);
+  if (m) {
+    const id = m[1].trim();
+    const label = m[2].trim() || id;
+    if (!id) return null;
+    return { id, label };
+  }
+  // id-only line
+  if (/^\S+$/.test(raw)) {
+    return { id: raw, label: raw };
+  }
+  return null;
+}
+
+/**
+ * Parse full `agy models` stdout into [{ id, label }, ...].
+ */
+export function parseAgyModelsOutput(text) {
+  const out = String(text || '');
+  const entries = [];
+  const seen = new Set();
+  for (const line of out.split(/\r?\n/)) {
+    const parsed = parseAgyModelLine(line);
+    if (!parsed || seen.has(parsed.id)) continue;
+    seen.add(parsed.id);
+    entries.push(parsed);
+  }
+  return entries;
+}
+
+/**
+ * Split an agy model slug into base family + effort suffix.
+ * e.g. gemini-3.6-flash-high → { baseId, effort: 'high' }
+ *      claude-opus-4-6-thinking → { baseId: 'claude-opus-4-6', effort: 'thinking' }
+ *      claude-sonnet-4-6 → { baseId: 'claude-sonnet-4-6', effort: '' }
+ */
+export function splitAgyModelId(modelId) {
+  const id = String(modelId || '').trim();
+  if (!id) return { baseId: '', effort: '' };
+  for (const effort of AGY_EFFORT_SUFFIXES) {
+    const suffix = `-${effort}`;
+    if (id.endsWith(suffix) && id.length > suffix.length) {
+      return { baseId: id.slice(0, -suffix.length), effort };
+    }
+  }
+  return { baseId: id, effort: '' };
+}
+
+/**
+ * Compose full agy model slug from family base + effort.
+ * If effort is empty, returns baseId. If baseId already ends with an effort, replaces it.
+ */
+export function composeAgyModelId(baseId, effort) {
+  const base = String(baseId || '').trim();
+  if (!base) return '';
+  const { baseId: stripped } = splitAgyModelId(base);
+  const family = stripped || base;
+  const e = String(effort || '').trim().toLowerCase();
+  if (!e) return family;
+  return `${family}-${e}`;
+}
+
+/**
+ * Strip trailing " (High|Medium|Low|Thinking)" style effort from display labels.
+ */
+export function stripEffortFromLabel(label) {
+  const s = String(label || '').trim();
+  if (!s) return s;
+  return s
+    .replace(/\s*\((?:Very\s+)?(?:High|Medium|Low|XHigh|Max|Thinking)\)\s*$/i, '')
+    .trim() || s;
+}
+
+/**
+ * Group flat agy catalog into UI families with subordinate effort options.
+ * @param {Array<{id:string,label:string}>} entries
+ * @returns {Array<{id:string,label:string,description:string,efforts:Array<{id:string,label:string,modelId:string}>,defaultEffort:string,defaultModelId:string}>}
+ */
+export function groupAgyModelFamilies(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  /** @type {Map<string, { id: string, label: string, efforts: Array<{id:string,label:string,modelId:string}>, order: number }>} */
+  const families = new Map();
+  let order = 0;
+
+  for (const entry of list) {
+    if (!entry || !entry.id) continue;
+    const { baseId, effort } = splitAgyModelId(entry.id);
+    const familyId = baseId || entry.id;
+    let fam = families.get(familyId);
+    if (!fam) {
+      fam = {
+        id: familyId,
+        label: stripEffortFromLabel(entry.label) || familyId,
+        efforts: [],
+        order: order++,
+      };
+      families.set(familyId, fam);
+    } else if (effort) {
+      // Prefer non-effort label when we already have a bare entry, else strip
+      const stripped = stripEffortFromLabel(entry.label);
+      if (stripped && stripped.length < fam.label.length) {
+        fam.label = stripped;
+      }
+    } else if (entry.label) {
+      fam.label = stripEffortFromLabel(entry.label) || fam.label;
+    }
+
+    if (effort) {
+      if (!fam.efforts.some((e) => e.id === effort)) {
+        fam.efforts.push({
+          id: effort,
+          label: effortLabel(effort),
+          modelId: entry.id,
+        });
+      }
+    } else {
+      // Bare slug (no effort suffix) — treat as sole "default" option
+      if (!fam.efforts.some((e) => e.modelId === entry.id)) {
+        fam.efforts.push({
+          id: '',
+          label: 'Default',
+          modelId: entry.id,
+        });
+      }
+    }
+  }
+
+  const EFFORT_RANK = { low: 1, medium: 2, high: 3, xhigh: 4, max: 5, thinking: 6, '': 0 };
+  const result = [];
+  for (const fam of [...families.values()].sort((a, b) => a.order - b.order)) {
+    fam.efforts.sort((a, b) => (EFFORT_RANK[a.id] ?? 50) - (EFFORT_RANK[b.id] ?? 50));
+    const defaultEffort =
+      fam.efforts.find((e) => e.id === 'medium')?.id
+      ?? fam.efforts.find((e) => e.id === 'high')?.id
+      ?? fam.efforts.find((e) => e.id === 'thinking')?.id
+      ?? fam.efforts[0]?.id
+      ?? '';
+    const defaultModelId =
+      fam.efforts.find((e) => e.id === defaultEffort)?.modelId
+      ?? fam.efforts[0]?.modelId
+      ?? fam.id;
+    result.push({
+      id: fam.id,
+      label: fam.label,
+      description: fam.efforts.length > 1
+        ? `${fam.efforts.length} effort levels`
+        : (fam.efforts[0]?.label || ''),
+      efforts: fam.efforts,
+      defaultEffort,
+      defaultModelId,
+    });
+  }
+  return result;
+}
+
+function effortLabel(effort) {
+  const e = String(effort || '').toLowerCase();
+  if (e === 'low') return 'Low';
+  if (e === 'medium') return 'Medium';
+  if (e === 'high') return 'High';
+  if (e === 'xhigh') return 'XHigh';
+  if (e === 'max') return 'Max';
+  if (e === 'thinking') return 'Thinking';
+  if (!e) return 'Default';
+  return e.charAt(0).toUpperCase() + e.slice(1);
+}
+
+/**
+ * List models via `agy models` (id + human label per line).
+ * @returns {Array<{id:string,label:string}>}
  */
 export function listAgyModels() {
   const bin = resolveAgyBinary();
@@ -194,14 +374,23 @@ export function listAgyModels() {
       timeout: 15_000,
       env: buildAgyEnv(),
     });
-    const out = String(r.stdout || '');
-    return out
-      .split(/\r?\n/)
-      .map((l) => l.trim().split(/\s+/)[0])
-      .filter((s) => s && !s.startsWith('Usage') && !s.startsWith('CLI'));
+    return parseAgyModelsOutput(String(r.stdout || ''));
   } catch {
     return [];
   }
+}
+
+/**
+ * Full catalog for the plugin UI: flat models + grouped families.
+ */
+export function buildAgyModelsCatalog() {
+  const models = listAgyModels();
+  const families = groupAgyModelFamilies(models);
+  return {
+    models,
+    families,
+    binary: resolveAgyBinary() || '',
+  };
 }
 
 export function normalizeUsageToSnakeCase(usage) {

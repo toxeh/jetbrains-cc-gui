@@ -3,20 +3,21 @@ import { sendBridgeEvent } from '../../utils/bridge';
 import {
   CLAUDE_MODELS,
   CODEX_MODELS,
-  GEMINI_MODELS,
   DEFAULT_CLAUDE_MODEL_ID,
   DEFAULT_GEMINI_MODEL_ID,
   isValidPermissionMode,
   normalizeClaudeModelId,
   apply1MContextSuffix,
   strip1MContextSuffix,
+  splitGeminiAgyModelId,
+  toGeminiFamilyId,
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
 
 const KNOWN_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
 
 const STORAGE_KEY = 'model-selection-state';
-const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max', 'thinking'] as const;
 const CODEX_FAST_MODE_VALUES = ['normal', 'fast'] as const;
 
 const getCustomModels = (key: string): { id: string }[] => {
@@ -146,9 +147,17 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       };
       const applyGeminiModel = (modelId: string) => {
         if (typeof modelId !== 'string' || !modelId.trim()) return;
-        if (GEMINI_MODELS.find(m => m.id === modelId)) {
-          restoredGeminiModel = modelId;
-          setSelectedGeminiModel(modelId);
+        // Accept family ids or full agy slugs (...-high / ...-thinking).
+        const split = splitGeminiAgyModelId(modelId);
+        const baseId = toGeminiFamilyId(modelId) || split.baseId || modelId;
+        const effort = split.effort;
+        // Accept any non-empty family id (live catalog may add families beyond fallback).
+        if (baseId) {
+          restoredGeminiModel = baseId;
+          setSelectedGeminiModel(baseId);
+          if (effort && isReasoningEffort(effort)) {
+            setReasoningEffort(effort);
+          }
         }
       };
 

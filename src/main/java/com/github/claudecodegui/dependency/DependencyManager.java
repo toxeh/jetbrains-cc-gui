@@ -629,7 +629,7 @@ public class DependencyManager {
                 return null;
             }
         }
-        String home = System.getProperty("user.home", "");
+        String home = PlatformUtils.getHomeDirectory();
         // Prefer user-facing `agy` over internal `agy.real` install artifact.
         String[] candidates = {
                 home + "/.local/bin/agy",
@@ -653,7 +653,9 @@ public class DependencyManager {
         String pathEnv = System.getenv("PATH");
         if (pathEnv != null) {
             for (String dir : pathEnv.split(Pattern.quote(File.pathSeparator))) {
-                if (dir == null || dir.isEmpty()) continue;
+                if (dir == null || dir.isEmpty()) {
+                    continue;
+                }
                 for (String name : new String[]{"agy", "agy.real"}) {
                     try {
                         Path p = Paths.get(dir, name);

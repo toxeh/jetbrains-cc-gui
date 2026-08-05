@@ -9,6 +9,7 @@ import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -381,6 +382,97 @@ public class GeminiSDKBridge extends BaseSDKBridge {
             stdinInput.add("attachments", attArr);
         }
         return stdinInput;
+    }
+
+    /**
+     * Fetch live model catalog from {@code agy models} via channel-manager listModels.
+     * Returns JSON: {@code { success, models:[{id,label}], families:[...], binary }}.
+     */
+    public CompletableFuture<JsonObject> listModels() {
+        return CompletableFuture.supplyAsync(() -> {
+            JsonObject fallback = new JsonObject();
+            fallback.addProperty("success", false);
+            fallback.add("models", new JsonArray());
+            fallback.add("families", new JsonArray());
+            fallback.addProperty("binary", "");
+            fallback.addProperty("error", "listModels failed");
+
+            try {
+                List<String> command = buildBaseCommand("listModels");
+                if (command.isEmpty()) {
+                    fallback.addProperty("error", "channel-manager command unavailable");
+                    return fallback;
+                }
+
+                File bridgeDir = getDirectoryResolver().findSdkDir();
+                if (bridgeDir == null) {
+                    fallback.addProperty("error", "Bridge directory not ready");
+                    return fallback;
+                }
+
+                ProcessBuilder pb = new ProcessBuilder(command);
+                pb.directory(bridgeDir);
+                Map<String, String> env = pb.environment();
+                envConfigurator.configureTempDir(env, processManager.prepareClaudeTempDir());
+                configureProviderEnv(env, "{}");
+                String node = nodeDetector.findNodeExecutable();
+                envConfigurator.updateProcessEnvironment(pb, node);
+                pb.redirectErrorStream(true);
+
+                Process process = pb.start();
+                // listModels needs no stdin payload
+                try {
+                    process.getOutputStream().close();
+                } catch (Exception ignored) {
+                }
+
+                StringBuilder out = new StringBuilder();
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        out.append(line).append('\n');
+                    }
+                }
+                boolean finished = process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS);
+                if (!finished) {
+                    process.destroyForcibly();
+                    fallback.addProperty("error", "listModels timed out");
+                    return fallback;
+                }
+
+                JsonObject parsed = extractLastJsonObject(out.toString());
+                if (parsed != null && parsed.has("success")) {
+                    return parsed;
+                }
+                fallback.addProperty("error", "No listModels JSON in output");
+                fallback.addProperty("raw", out.length() > 500 ? out.substring(0, 500) : out.toString());
+                return fallback;
+            } catch (Exception e) {
+                LOG.warn("[Gemini] listModels failed: " + e.getMessage());
+                fallback.addProperty("error", e.getMessage() != null ? e.getMessage() : "listModels exception");
+                return fallback;
+            }
+        });
+    }
+
+    private JsonObject extractLastJsonObject(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String[] lines = text.split("\\R");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i].trim();
+            if (line.isEmpty() || !line.startsWith("{")) {
+                continue;
+            }
+            try {
+                return gson.fromJson(line, JsonObject.class);
+            } catch (Exception ignored) {
+                // try previous line
+            }
+        }
+        return null;
     }
 
     /**

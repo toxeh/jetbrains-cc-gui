@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import {
@@ -6,7 +6,7 @@ import {
   normalizeClaudeModelId,
   strip1MContextSuffix,
 } from '../components/ChatInputBox/types';
-import type { PermissionMode } from '../components/ChatInputBox/types';
+import type { PermissionMode, ReasoningEffort } from '../components/ChatInputBox/types';
 import { isSpecialProviderId } from '../types/provider';
 import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
@@ -65,11 +65,46 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     codexPermissionMode, setCodexPermissionMode,
     reasoningEffort, setReasoningEffort,
     codexFastMode, setCodexFastMode,
+    handleReasoningChange: codexHandleReasoningChange,
+    handleCodexFastModeChange,
   } = codex;
   const {
     selectedGeminiModel, setSelectedGeminiModel,
     geminiPermissionMode, setGeminiPermissionMode,
+    geminiFamilies,
+    geminiModels,
+    geminiCatalogLoaded,
+    fetchGeminiModels,
+    resolveGeminiAgyModelId,
+    resolveDefaultEffortForFamily,
   } = gemini;
+
+  // Pull live agy catalog when Gemini is active (new tab / provider switch).
+  useEffect(() => {
+    if (currentProvider === 'gemini') {
+      fetchGeminiModels();
+    }
+  }, [currentProvider, fetchGeminiModels]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const prev = window.onTabActivated;
+    window.onTabActivated = () => {
+      if (currentProviderRef.current === 'gemini') {
+        fetchGeminiModels();
+      }
+      if (typeof prev === 'function') {
+        try {
+          prev();
+        } catch {
+          // ignore
+        }
+      }
+    };
+    return () => {
+      window.onTabActivated = prev;
+    };
+  }, [fetchGeminiModels]);
 
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
@@ -148,10 +183,41 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       setSelectedCodexModel(modelId);
       sendBridgeEvent('set_model', modelId);
     } else if (currentProvider === 'gemini') {
+      // modelId is the family base (e.g. gemini-3.5-flash); effort is subordinate.
       setSelectedGeminiModel(modelId);
-      sendBridgeEvent('set_model', modelId);
+      const effort = resolveDefaultEffortForFamily(modelId);
+      setReasoningEffort(effort);
+      sendBridgeEvent('set_reasoning_effort', effort);
+      const fullSlug = resolveGeminiAgyModelId(modelId, effort);
+      sendBridgeEvent('set_model', fullSlug);
     }
-  }, [currentProvider, longContextEnabled, setSelectedClaudeModel, setSelectedCodexModel, setSelectedGeminiModel]);
+  }, [
+    currentProvider,
+    longContextEnabled,
+    resolveDefaultEffortForFamily,
+    resolveGeminiAgyModelId,
+    setReasoningEffort,
+    setSelectedClaudeModel,
+    setSelectedCodexModel,
+    setSelectedGeminiModel,
+  ]);
+
+  const handleReasoningChange = useCallback((effort: ReasoningEffort) => {
+    if (currentProvider === 'gemini') {
+      setReasoningEffort(effort);
+      sendBridgeEvent('set_reasoning_effort', effort);
+      const fullSlug = resolveGeminiAgyModelId(selectedGeminiModel, effort);
+      sendBridgeEvent('set_model', fullSlug);
+      return;
+    }
+    codexHandleReasoningChange(effort);
+  }, [
+    codexHandleReasoningChange,
+    currentProvider,
+    resolveGeminiAgyModelId,
+    selectedGeminiModel,
+    setReasoningEffort,
+  ]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
     setCurrentProvider(providerId);
@@ -162,6 +228,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       modeToSet = codexPermissionMode === 'plan' ? 'default' : codexPermissionMode;
     } else if (providerId === 'gemini') {
       modeToSet = geminiPermissionMode;
+      fetchGeminiModels();
     }
     setPermissionMode(modeToSet);
     sendBridgeEvent('set_mode', modeToSet);
@@ -170,17 +237,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     if (providerId === 'codex') {
       newModel = selectedCodexModel;
     } else if (providerId === 'gemini') {
-      newModel = selectedGeminiModel;
+      newModel = resolveGeminiAgyModelId(selectedGeminiModel, reasoningEffort);
     }
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
     codexPermissionMode,
+    fetchGeminiModels,
     geminiPermissionMode,
-    selectedCodexModel,
-    selectedClaudeModel,
-    selectedGeminiModel,
     longContextEnabled,
+    reasoningEffort,
+    resolveGeminiAgyModelId,
+    selectedClaudeModel,
+    selectedCodexModel,
+    selectedGeminiModel,
   ]);
 
   const handleLongContextChange = useCallback((enabled: boolean) => {
@@ -240,13 +310,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     currentProvider, setCurrentProvider,
     permissionMode, setPermissionMode,
     selectedModel,
+    geminiFamilies,
+    geminiModels,
+    geminiCatalogLoaded,
     currentSdkInstalled,
     claudeSdkMeetsMinimum,
     currentProviderRef,
     handleModeSelect,
     handleModelSelect,
     handleProviderSelect,
+    handleReasoningChange,
+    handleCodexFastModeChange,
     handleLongContextChange,
     handleToggleThinking,
+    fetchGeminiModels,
+    resolveGeminiAgyModelId,
   };
 }

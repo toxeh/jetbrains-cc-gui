@@ -8,6 +8,12 @@ import {
   buildErrorPayload,
   buildAgyEnv,
   resolveAgyBinary,
+  parseAgyModelLine,
+  parseAgyModelsOutput,
+  splitAgyModelId,
+  composeAgyModelId,
+  groupAgyModelFamilies,
+  stripEffortFromLabel,
 } from './agy-utils.js';
 
 test('resolveAgyBinary honors explicit AGY_PATH without fallback', () => {
@@ -173,4 +179,56 @@ test('buildAgyEnv sets non-interactive defaults', () => {
   assert.equal(env.CI, '1');
   assert.equal(env.NO_COLOR, '1');
   assert.equal(env.TERM, 'dumb');
+});
+
+test('parseAgyModelLine reads id and label', () => {
+  const p = parseAgyModelLine('gemini-3.6-flash-high     Gemini 3.6 Flash (High)');
+  assert.deepEqual(p, { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)' });
+  assert.equal(parseAgyModelLine('Usage of agy'), null);
+  assert.deepEqual(parseAgyModelLine('claude-sonnet-4-6'), {
+    id: 'claude-sonnet-4-6',
+    label: 'claude-sonnet-4-6',
+  });
+});
+
+test('groupAgyModelFamilies nests effort under family base', () => {
+  const sample = `
+gemini-3.6-flash-high     Gemini 3.6 Flash (High)
+gemini-3.6-flash-medium   Gemini 3.6 Flash (Medium)
+gemini-3.6-flash-low      Gemini 3.6 Flash (Low)
+claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)
+claude-opus-4-6-thinking  Claude Opus 4.6 (Thinking)
+gpt-oss-120b-medium       GPT-OSS 120B (Medium)
+`.trim();
+  const entries = parseAgyModelsOutput(sample);
+  const families = groupAgyModelFamilies(entries);
+  const flash = families.find((f) => f.id === 'gemini-3.6-flash');
+  assert.ok(flash);
+  assert.equal(flash.label, 'Gemini 3.6 Flash');
+  assert.deepEqual(flash.efforts.map((e) => e.id), ['low', 'medium', 'high']);
+  assert.equal(flash.defaultEffort, 'medium');
+  assert.equal(flash.defaultModelId, 'gemini-3.6-flash-medium');
+
+  const sonnet = families.find((f) => f.id === 'claude-sonnet-4-6');
+  assert.ok(sonnet);
+  assert.equal(sonnet.efforts.length, 1);
+  assert.equal(sonnet.efforts[0].modelId, 'claude-sonnet-4-6');
+
+  const opus = families.find((f) => f.id === 'claude-opus-4-6');
+  assert.ok(opus);
+  assert.equal(opus.efforts[0].id, 'thinking');
+  assert.equal(opus.efforts[0].modelId, 'claude-opus-4-6-thinking');
+
+  const gpt = families.find((f) => f.id === 'gpt-oss-120b');
+  assert.ok(gpt);
+  assert.equal(gpt.efforts[0].id, 'medium');
+});
+
+test('split/compose agy model ids', () => {
+  assert.deepEqual(splitAgyModelId('gemini-3.5-flash-high'), {
+    baseId: 'gemini-3.5-flash',
+    effort: 'high',
+  });
+  assert.equal(composeAgyModelId('gemini-3.5-flash', 'low'), 'gemini-3.5-flash-low');
+  assert.equal(stripEffortFromLabel('Gemini 3.6 Flash (High)'), 'Gemini 3.6 Flash');
 });

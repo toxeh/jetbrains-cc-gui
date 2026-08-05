@@ -42,11 +42,15 @@ export function runAgyTurn(options = {}) {
     ));
   }
 
+  // When model slug already embeds effort (…-high / …-thinking), do not also
+  // pass --effort — agy catalog treats effort as part of the model id.
+  const modelStr = String(model || '').trim();
+  const effortEmbedded = /-(?:low|medium|high|xhigh|thinking)$/i.test(modelStr);
   const args = buildAgyArgs({
     message,
     conversationId: sessionId,
-    model,
-    effort: reasoningEffort,
+    model: modelStr,
+    effort: effortEmbedded ? '' : reasoningEffort,
     agent,
     permissionMode,
     printTimeout,

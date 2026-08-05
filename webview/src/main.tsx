@@ -670,6 +670,12 @@ if (typeof window !== 'undefined') {
   window.onTabActivated = () => {
     forceWebviewRepaint('tab-activated');
   };
+  // Placeholder until useGeminiProvider mounts — drops early listModels pushes safely.
+  if (!window.updateGeminiModels) {
+    window.updateGeminiModels = (_json: string) => {
+      // no-op placeholder
+    };
+  }
 }
 
 // Render the React application

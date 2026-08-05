@@ -7,7 +7,7 @@
 import { sendMessage as geminiSendMessage } from '../services/gemini/message-service.js';
 import {
   isAgyAvailable,
-  listAgyModels,
+  buildAgyModelsCatalog,
   buildGeminiContextUsagePayload,
   resolveAgyBinary,
 } from '../services/gemini/agy-utils.js';
@@ -62,11 +62,12 @@ export async function handleGeminiCommand(command, args, stdinData) {
     }
 
     case 'listModels': {
-      const models = listAgyModels();
+      const catalog = buildAgyModelsCatalog();
       console.log(JSON.stringify({
         success: true,
-        models,
-        binary: resolveAgyBinary() || '',
+        models: catalog.models,
+        families: catalog.families,
+        binary: catalog.binary || resolveAgyBinary() || '',
       }));
       break;
     }

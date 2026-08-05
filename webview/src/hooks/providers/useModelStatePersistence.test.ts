@@ -26,7 +26,7 @@ function makeOptions(overrides: Partial<UseModelStatePersistenceOptions> = {}): 
     currentProvider: 'claude',
     selectedClaudeModel: 'claude-sonnet-4-5',
     selectedCodexModel: 'gpt-5-codex',
-    selectedGeminiModel: 'gemini-3.5-flash-medium',
+    selectedGeminiModel: 'gemini-3.5-flash',
     claudePermissionMode: 'default' as PermissionMode,
     codexPermissionMode: 'default' as PermissionMode,
     geminiPermissionMode: 'default' as PermissionMode,

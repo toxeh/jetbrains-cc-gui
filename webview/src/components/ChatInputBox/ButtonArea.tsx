@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
 import { CLAUDE_MODELS, CODEX_MODELS, GEMINI_MODELS } from './types';
+// GEMINI_MODELS is fallback until live agy catalog arrives
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
@@ -76,6 +77,8 @@ export const ButtonArea = ({
   currentProvider = 'claude',
   reasoningEffort = 'high',
   codexFastMode = 'normal',
+  geminiFamilies,
+  geminiModels,
   onSubmit,
   onStop,
   onModeSelect,
@@ -169,7 +172,7 @@ export const ButtonArea = ({
       return [...customModels, ...filteredBuiltIn];
     }
     if (currentProvider === 'gemini') {
-      return GEMINI_MODELS;
+      return (geminiModels && geminiModels.length > 0) ? geminiModels : GEMINI_MODELS;
     }
     if (typeof window === 'undefined' || !window.localStorage) {
       return CLAUDE_MODELS;
@@ -195,7 +198,7 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, geminiModels]);
 
   /**
    * Handle submit button click
@@ -277,7 +280,7 @@ export const ButtonArea = ({
         />
         <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
         <ModelSelect value={selectedModel} onChange={handleModelSelect} models={availableModels} currentProvider={currentProvider} onAddModel={onAddModel} longContextEnabled={longContextEnabled} onLongContextChange={onLongContextChange} />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
+        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} geminiFamilies={geminiFamilies} />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
         )}
