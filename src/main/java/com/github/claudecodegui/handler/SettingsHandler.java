@@ -38,6 +38,8 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_provider",
         "set_reasoning_effort",
         "get_gemini_models",
+        "get_gemini_plan_usage",
+        "get_claude_plan_usage",
         "set_codex_fast_mode",
         "get_node_path",
         "set_node_path",
@@ -157,6 +159,12 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "get_gemini_models":
                 modelProviderHandler.handleGetGeminiModels(content);
+                return true;
+            case "get_gemini_plan_usage":
+                projectConfigHandler.handleGetGeminiPlanUsage();
+                return true;
+            case "get_claude_plan_usage":
+                projectConfigHandler.handleGetClaudePlanUsage();
                 return true;
             case "set_codex_fast_mode":
                 modelProviderHandler.handleSetCodexFastMode(content);
