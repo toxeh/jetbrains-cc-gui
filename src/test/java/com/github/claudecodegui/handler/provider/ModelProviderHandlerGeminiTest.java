@@ -16,8 +16,15 @@ public class ModelProviderHandlerGeminiTest {
     }
 
     @Test
-    public void genericGeminiFallbackIsTwoHundredK() {
-        assertEquals(200_000, ModelProviderHandler.getModelContextLimit("gemini"));
+    public void genericGeminiFallbackIsOneMillion() {
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("gemini"));
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("gemini-unknown-future-model"));
+    }
+
+    @Test
+    public void agyClaudeCatalogModelsKeepTwoHundredK() {
+        assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-6"));
+        assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-4-6-thinking"));
     }
 
     @Test

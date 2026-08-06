@@ -67,7 +67,7 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("o1-preview", 128_000);
 
         // Gemini / Antigravity models (common catalog defaults)
-        MODEL_CONTEXT_LIMITS.put("gemini", 200_000);
+        MODEL_CONTEXT_LIMITS.put("gemini", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-2.5-pro", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-2.5-flash", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3-pro", 1_000_000);
@@ -75,11 +75,19 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-high", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-medium", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-high", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-medium", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-high", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-low", 1_000_000);
+        // Claude models exposed via agy catalog (same windows as Claude provider)
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-opus-4-6", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-opus-4-6-thinking", 200_000);
+        // Open-weight / other agy catalog entries — conservative defaults
+        MODEL_CONTEXT_LIMITS.put("gpt-oss-120b", 128_000);
     }
 
     private final HandlerContext context;
@@ -130,8 +138,11 @@ public class ModelProviderHandler {
 
             String provider = context.getCurrentProvider();
             boolean isCodex = "codex".equalsIgnoreCase(provider);
-            String resolvedModelForUsage = isCodex ? model : resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = isCodex
+            boolean isGemini = "gemini".equalsIgnoreCase(provider);
+            String resolvedModelForUsage = isCodex || isGemini
+                    ? model
+                    : resolveConfiguredClaudeModelFromSettings(model);
+            int newMaxTokens = (isCodex || isGemini)
                     ? getModelContextLimit(provider, model)
                     : getModelContextLimit(resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
@@ -524,7 +535,30 @@ public class ModelProviderHandler {
             }
         }
 
-        return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
+        Integer exact = MODEL_CONTEXT_LIMITS.get(model);
+        if (exact != null) {
+            return exact;
+        }
+
+        // Prefix match for agy family slugs (gemini-3.6-flash-medium → gemini-3.6-flash)
+        String bestKey = null;
+        for (String key : MODEL_CONTEXT_LIMITS.keySet()) {
+            if (model.startsWith(key + "-") || model.startsWith(key + "[")) {
+                if (bestKey == null || key.length() > bestKey.length()) {
+                    bestKey = key;
+                }
+            }
+        }
+        if (bestKey != null) {
+            return MODEL_CONTEXT_LIMITS.get(bestKey);
+        }
+
+        // Gemini catalog models default to 1M when unknown (agy/Gemini long context)
+        if (model.startsWith("gemini")) {
+            return 1_000_000;
+        }
+
+        return 200_000;
     }
 
     public static int getModelContextLimit(String provider, String model) {

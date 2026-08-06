@@ -9,7 +9,7 @@
  *   [USAGE] [SESSION_ID] [STREAM_END] [MESSAGE_END] [SEND_ERROR]
  */
 
-import { normalizeUsageToSnakeCase } from './agy-utils.js';
+import { normalizeUsageToSnakeCase, extractAgyContextTokens } from './agy-utils.js';
 
 export class AgyEventNormalizer {
   constructor({ log = console.log, error = console.error } = {}) {
@@ -22,12 +22,22 @@ export class AgyEventNormalizer {
     this.messageEnded = false;
     this.conversationId = null;
     this.lastUsage = null;
+    /** Peak context tokens seen this turn (ignore tiny checkpoint regressions). */
+    this.peakContextTokens = 0;
     this.emittedToolKeys = new Set();
     this._terminalError = null;
     this._terminalStatus = null;
   }
 
   begin() {
+    this.lastUsage = null;
+    this.peakContextTokens = 0;
+    this.assistantText = '';
+    this.emittedToolKeys = new Set();
+    this._terminalError = null;
+    this._terminalStatus = null;
+    this.streamEnded = false;
+    this.messageEnded = false;
     this._emit('[MESSAGE_START]');
     this.messageStarted = true;
     this._emit('[STREAM_START]');
@@ -71,8 +81,7 @@ export class AgyEventNormalizer {
 
     const usage = normalizeUsageToSnakeCase(step.usage);
     if (usage) {
-      this.lastUsage = usage;
-      this._emit(`[USAGE] ${JSON.stringify(usage)}`);
+      this._maybeEmitUsage(usage, { authoritative: false });
     }
 
     const stepType = String(step.step_type || '').toLowerCase();
@@ -166,8 +175,8 @@ export class AgyEventNormalizer {
 
     const usage = normalizeUsageToSnakeCase(result.usage);
     if (usage) {
-      this.lastUsage = usage;
-      this._emit(`[USAGE] ${JSON.stringify(usage)}`);
+      // Final result usage is authoritative for the turn (includes all steps).
+      this._maybeEmitUsage(usage, { authoritative: true });
     }
 
     const responseText = result.response != null ? String(result.response) : '';
@@ -189,6 +198,24 @@ export class AgyEventNormalizer {
         this._terminalStatus = status;
       }
     }
+  }
+
+  /**
+   * Emit [USAGE] for the status bar.
+   * Intermediate step usage (esp. tiny checkpoint rows) must not replace a larger
+   * peak — agy often ends with checkpoint usage ~100 tokens after a 20k+ response step.
+   */
+  _maybeEmitUsage(usage, { authoritative = false } = {}) {
+    if (!usage) return;
+    const ctx = extractAgyContextTokens(usage);
+    if (!authoritative && ctx > 0 && ctx < this.peakContextTokens) {
+      return;
+    }
+    if (ctx > this.peakContextTokens) {
+      this.peakContextTokens = ctx;
+    }
+    this.lastUsage = usage;
+    this._emit(`[USAGE] ${JSON.stringify(usage)}`);
   }
 
   finishSuccess(conversationId, resultText) {

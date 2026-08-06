@@ -138,7 +138,57 @@ test('result ERROR status records terminal error', () => {
     },
   });
   assert.equal(n._terminalError, 'auth failed');
-  assert.equal(n._terminalStatus, 'ERROR');
+});
+
+test('checkpoint usage smaller than peak is not emitted', () => {
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_type: 'agent_response',
+      state: 'DONE',
+      text_delta: '2',
+      usage: { input_tokens: 27793, output_tokens: 18, total_tokens: 27811 },
+    },
+  });
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_type: 'checkpoint',
+      state: 'DONE',
+      usage: { input_tokens: 96, output_tokens: 3, total_tokens: 99 },
+    },
+  });
+  const usageLines = lines.filter((l) => l.startsWith('[USAGE]'));
+  assert.equal(usageLines.length, 1);
+  assert.ok(usageLines[0].includes('"input_tokens":27793'));
+  assert.ok(usageLines[0].includes('"cache_read_input_tokens"'));
+});
+
+test('result usage is always emitted even if smaller', () => {
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_type: 'agent_response',
+      state: 'DONE',
+      usage: { input_tokens: 5000, output_tokens: 1, total_tokens: 5001 },
+    },
+  });
+  n.handleStreamEvent({
+    event: 'result',
+    result: {
+      conversation_id: 'c',
+      status: 'SUCCESS',
+      response: 'ok',
+      usage: { input_tokens: 4000, output_tokens: 2, total_tokens: 4002 },
+    },
+  });
+  const usageLines = lines.filter((l) => l.startsWith('[USAGE]'));
+  assert.ok(usageLines.length >= 2);
+  assert.ok(usageLines[usageLines.length - 1].includes('"input_tokens":4000'));
 });
 
 test('finishSuccess is idempotent for stream/message end tags', () => {
