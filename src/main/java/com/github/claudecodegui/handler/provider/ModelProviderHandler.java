@@ -121,7 +121,6 @@ public class ModelProviderHandler {
 
             String provider = context.getCurrentProvider();
             if (context.getSession() != null) {
-                String previousModel = context.getSession().getModel();
                 context.getSession().setModel(model);
                 if (modelChanged) {
                     TokenUsageUtils.clearContextUsageFromSessionMessages(
