@@ -68,6 +68,7 @@ function getCustomClaudeModels(): ModelInfo[] {
  * Contains mode selector, model selector, attachment button, prompt enhancer button, send/stop button
  */
 export const ButtonArea = ({
+  geminiFamilies,
   geminiModels,
   disabled = false,
   hasInputContent = false,
@@ -208,7 +209,7 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, geminiModels]);
 
   // When CLI model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
@@ -311,7 +312,13 @@ export const ButtonArea = ({
           longContextEnabled={longContextEnabled}
           onLongContextChange={onLongContextChange}
         />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
+        <ReasoningSelect
+          value={reasoningEffort}
+          onChange={handleReasoningChange}
+          selectedModel={selectedModel}
+          currentProvider={currentProvider}
+          geminiFamilies={geminiFamilies}
+        />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
         )}

@@ -96,6 +96,8 @@ export interface ChatScreenProps {
   claudeSettingsAlwaysThinkingEnabled: ProviderState['claudeSettingsAlwaysThinkingEnabled'];
   reasoningEffort: ProviderState['reasoningEffort'];
   codexFastMode: ProviderState['codexFastMode'];
+  geminiFamilies?: ProviderState['geminiFamilies'];
+  geminiModels?: ProviderState['geminiModels'];
   streamingEnabledSetting: ProviderState['streamingEnabledSetting'];
   sendShortcut: ProviderState['sendShortcut'];
   autoOpenFileEnabled: ProviderState['autoOpenFileEnabled'];
@@ -142,7 +144,7 @@ export const ChatScreen = ({
   currentProvider, selectedModel, permissionMode, selectedAgent,
   sdkStatusLoading, sdkStatusError, onRetrySdkStatus, currentSdkInstalled,
   activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
-  reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
+  reasoningEffort, codexFastMode, geminiFamilies, geminiModels, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
   longContextEnabled, usagePercentage, usageUsedTokens, usageMaxTokens,
   onModeSelect, onModelSelect, onAgentSelect, onReasoningChange, onCodexFastModeChange, onToggleThinking,
   onStreamingEnabledChange,
@@ -358,6 +360,8 @@ export const ChatScreen = ({
           onReasoningChange={onReasoningChange}
           codexFastMode={codexFastMode}
           onCodexFastModeChange={onCodexFastModeChange}
+          geminiFamilies={geminiFamilies}
+          geminiModels={geminiModels}
           onToggleThinking={onToggleThinking}
           streamingEnabled={streamingEnabledSetting}
           onStreamingEnabledChange={onStreamingEnabledChange}

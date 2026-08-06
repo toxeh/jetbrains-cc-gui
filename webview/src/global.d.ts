@@ -898,6 +898,12 @@ interface Window {
   updateCliStatus?: (json: string) => void;
 
   /**
+   * Live Gemini/agy model catalog from `agy models` (get_gemini_models).
+   * JSON: { success, models:[{id,label}], families:[...], binary?, error? }
+   */
+  updateGeminiModels?: (json: string) => void;
+
+  /**
    * Dependency install progress callback
    */
   dependencyInstallProgress?: (json: string) => void;

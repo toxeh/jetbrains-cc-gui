@@ -151,7 +151,7 @@ const App = () => {
     claudeSdkMeetsMinimum,
     currentProviderRef,
     activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
-    reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
+    reasoningEffort, codexFastMode, geminiFamilies, geminiModels, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
     longContextEnabled,
     usagePercentage, usageUsedTokens, usageMaxTokens,
     setPermissionMode, setCurrentProvider,
@@ -546,6 +546,8 @@ const App = () => {
           claudeSettingsAlwaysThinkingEnabled={claudeSettingsAlwaysThinkingEnabled}
           reasoningEffort={reasoningEffort}
           codexFastMode={codexFastMode}
+          geminiFamilies={geminiFamilies}
+          geminiModels={geminiModels}
           streamingEnabledSetting={streamingEnabledSetting}
           sendShortcut={sendShortcut}
           autoOpenFileEnabled={autoOpenFileEnabled}
