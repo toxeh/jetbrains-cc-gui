@@ -87,3 +87,33 @@ process.exit(2);
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('runAgyTurn never passes --effort (effort is in model slug only)', async () => {
+  const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
+const fs = require('fs');
+fs.writeFileSync(process.env.AGY_ARGV_LOG, JSON.stringify(process.argv.slice(2)));
+console.log(JSON.stringify({ event: 'result', result: { conversation_id: 'c', status: 'SUCCESS', response: 'ok' } }));
+process.exit(0);
+`);
+  const prev = process.env.AGY_PATH;
+  const logPath = join(dir, 'argv.json');
+  process.env.AGY_PATH = bin;
+  process.env.AGY_ARGV_LOG = logPath;
+  try {
+    await runAgyTurn({
+      message: 'hi',
+      model: 'claude-sonnet-4-6',
+      reasoningEffort: 'medium',
+    });
+    const { readFileSync } = await import('node:fs');
+    const argv = JSON.parse(readFileSync(logPath, 'utf8'));
+    assert.ok(argv.includes('--model'));
+    assert.ok(argv.includes('claude-sonnet-4-6'));
+    assert.ok(!argv.includes('--effort'), 'must not pass --effort, got: ' + argv.join(' '));
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    delete process.env.AGY_ARGV_LOG;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
