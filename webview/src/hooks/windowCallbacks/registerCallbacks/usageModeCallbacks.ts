@@ -8,8 +8,14 @@
  */
 
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
-import type { PermissionMode } from '../../../components/ChatInputBox/types';
-import { isValidPermissionMode, normalizeClaudeModelId } from '../../../components/ChatInputBox/types';
+import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../../components/ChatInputBox/types';
+import {
+  has1MContextSuffix,
+  isValidPermissionMode,
+  normalizeClaudeModelId,
+  strip1MContextSuffix,
+  toGeminiFamilyId,
+} from '../../../components/ChatInputBox/types';
 import { drainPendingSettings, startInitialSettingsRequest } from '../settingsBootstrap';
 import { clampPermissionDialogTimeoutSeconds } from '../../../utils/permissionDialogTimeout';
 
@@ -19,12 +25,16 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     setUsageUsedTokens,
     setUsageMaxTokens,
     setPermissionMode,
+    setCurrentProvider,
     setClaudePermissionMode,
     setCodexPermissionMode,
     setGeminiPermissionMode,
     setSelectedClaudeModel,
     setSelectedCodexModel,
     setSelectedGeminiModel,
+    setLongContextEnabled,
+    setReasoningEffort,
+    setCodexFastMode,
     setProviderConfigVersion,
     setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled,
@@ -69,6 +79,12 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     }
   };
 
+  if (typeof window.__pendingUsageUpdate === 'string') {
+    const pending = window.__pendingUsageUpdate;
+    delete window.__pendingUsageUpdate;
+    window.onUsageUpdate(pending);
+  }
+
   const updateMode = (mode?: PermissionMode, providerOverride?: string) => {
     const activeProvider = providerOverride || currentProviderRef.current;
     if (isValidPermissionMode(mode)) {
@@ -88,6 +104,12 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
   window.onModeChanged = (mode) => updateMode(mode as PermissionMode);
   window.onModeReceived = (mode) => updateMode(mode as PermissionMode);
 
+  const applyGeminiModelFromBackend = (modelId: string) => {
+    // Backend stores full agy slugs (...-high / ...-thinking). UI selection is family base only.
+    const family = toGeminiFamilyId(modelId) || modelId;
+    setSelectedGeminiModel?.(family);
+  };
+
   window.onModelChanged = (modelId) => {
     const provider = currentProviderRef.current;
     if (provider === 'claude') {
@@ -95,7 +117,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
     } else if (provider === 'gemini') {
-      setSelectedGeminiModel?.(modelId);
+      applyGeminiModelFromBackend(modelId);
     }
   };
 
@@ -105,9 +127,52 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
     } else if (provider === 'gemini') {
-      setSelectedGeminiModel?.(modelId);
+      applyGeminiModelFromBackend(modelId);
     }
   };
+
+  window.applyBackendTabState = (json: string) => {
+    try {
+      const state = JSON.parse(json) as Record<string, unknown>;
+      const provider = state.provider;
+      if (provider !== 'claude' && provider !== 'codex') {
+        throw new Error('invalid provider');
+      }
+
+      // This is Java -> UI recovery state, not a user selection. Update the
+      // synchronous ref and React state without emitting set_provider/set_model.
+      currentProviderRef.current = provider;
+      setCurrentProvider(provider);
+
+      if (typeof state.model === 'string' && state.model.length > 0) {
+        if (provider === 'claude') {
+          setSelectedClaudeModel(normalizeClaudeModelId(strip1MContextSuffix(state.model)));
+          setLongContextEnabled(has1MContextSuffix(state.model));
+        } else {
+          setSelectedCodexModel(state.model);
+        }
+      }
+
+      updateMode(state.permissionMode as PermissionMode | undefined, provider);
+
+      const reasoningValues: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+      if (reasoningValues.includes(state.reasoningEffort as ReasoningEffort)) {
+        setReasoningEffort(state.reasoningEffort as ReasoningEffort);
+      }
+      if (state.codexFastMode === 'normal' || state.codexFastMode === 'fast') {
+        setCodexFastMode(state.codexFastMode as CodexFastMode);
+      }
+      window.__CCGUI_RECOVERY_STATE_APPLIED__ = true;
+    } catch (error) {
+      console.error('[Frontend] Failed to apply backend tab state:', error);
+    }
+  };
+
+  if (typeof window.__pendingBackendTabState === 'string') {
+    const pending = window.__pendingBackendTabState;
+    delete window.__pendingBackendTabState;
+    window.applyBackendTabState(pending);
+  }
 
   window.updateActiveProvider = (jsonStr: string) => {
     try {

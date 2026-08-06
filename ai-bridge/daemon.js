@@ -28,7 +28,6 @@ import path from 'node:path';
 import { createInterface } from 'readline';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
-import { handleGrokCommand } from './channels/grok-channel.js';
 import { handleGeminiCommand } from './channels/gemini-channel.js';
 import { loadClaudeSdk, isClaudeSdkAvailable } from './utils/sdk-loader.js';
 import {
@@ -483,16 +482,6 @@ async function processRequest(request) {
       await resetRuntimePersistent(stdinData);
     } else if (provider === 'claude' && command === 'getContextUsage') {
       await getContextUsagePersistent(stdinData);
-    } else if (provider === 'grok' && command === 'getContextUsage') {
-      await grokGetContextUsagePersistent(stdinData);
-    } else if (provider === 'grok' && command === 'getUsage') {
-      await grokGetUsagePersistent(stdinData);
-    } else if (provider === 'grok' && command === 'send') {
-      await grokSendPersistent(stdinData);
-    } else if (provider === 'grok' && command === 'preconnect') {
-      await grokPreconnectPersistent(stdinData);
-    } else if (provider === 'grok' && command === 'resetRuntime') {
-      await grokResetRuntimePersistent(stdinData);
     } else if (provider === 'gemini' && command === 'send') {
       await handleGeminiCommand('send', [], stdinData);
     } else if (provider === 'gemini' && (command === 'getContextUsage' || command === 'getUsage' || command === 'listModels' || command === 'checkCli')) {
@@ -506,10 +495,7 @@ async function processRequest(request) {
         case 'codex':
           await handleCodexCommand(command, [], stdinData);
           break;
-        case 'grok':
-          await handleGrokCommand(command, [], stdinData);
-          break;
-                case 'gemini':
+        case 'gemini':
           await handleGeminiCommand(command, [], stdinData);
           break;
         default:

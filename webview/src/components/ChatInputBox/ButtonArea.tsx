@@ -6,6 +6,7 @@ import { CLAUDE_MODELS, CODEX_MODELS, GEMINI_MODELS, GROK_MODELS } from './types
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
+import { useCliModels } from '../../hooks/providers/useCliModels';
 
 /**
  * Get custom Codex model list from localStorage
@@ -67,6 +68,8 @@ function getCustomClaudeModels(): ModelInfo[] {
  * Contains mode selector, model selector, attachment button, prompt enhancer button, send/stop button
  */
 export const ButtonArea = ({
+  geminiFamilies,
+  geminiModels,
   disabled = false,
   hasInputContent = false,
   isLoading = false,
@@ -97,6 +100,7 @@ export const ButtonArea = ({
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
+  const { cliModels, cliModelsLoading, cliModelsError, refreshCliModels } = useCliModels(currentProvider);
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -168,12 +172,18 @@ export const ButtonArea = ({
       const filteredBuiltIn = CODEX_MODELS.filter(m => !customIds.has(m.id));
       return [...customModels, ...filteredBuiltIn];
     }
+    if (currentProvider === 'gemini') {
+      // Prefer live catalog rows when parent passes geminiModels; else static fallback.
+      if (geminiModels && geminiModels.length > 0) {
+        return geminiModels;
+      }
+      return GEMINI_MODELS;
+    }
     if (currentProvider === 'grok') {
-      // Grok: use built-in list (custom models can be added later)
       return GROK_MODELS;
     }
-    if (currentProvider === 'gemini') {
-      return GEMINI_MODELS;
+    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
+      return cliModels;
     }
     if (typeof window === 'undefined' || !window.localStorage) {
       return CLAUDE_MODELS;
@@ -199,7 +209,17 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, geminiModels]);
+
+  // When CLI model catalog arrives, ensure selection is a real entry.
+  useEffect(() => {
+    if (currentProvider !== 'kimi' && currentProvider !== 'opencode' && currentProvider !== 'pi') return;
+    if (!cliModels.length || !onModelSelect) return;
+    const exists = cliModels.some((model) => model.id === selectedModel);
+    if (!exists) {
+      onModelSelect(cliModels[0].id);
+    }
+  }, [cliModels, currentProvider, onModelSelect, selectedModel]);
 
   /**
    * Handle submit button click
@@ -280,8 +300,25 @@ export const ButtonArea = ({
           compact
         />
         <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
-        <ModelSelect value={selectedModel} onChange={handleModelSelect} models={availableModels} currentProvider={currentProvider} onAddModel={onAddModel} longContextEnabled={longContextEnabled} onLongContextChange={onLongContextChange} />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
+        <ModelSelect
+          value={selectedModel}
+          onChange={handleModelSelect}
+          models={availableModels}
+          currentProvider={currentProvider}
+          loading={cliModelsLoading}
+          error={cliModelsError}
+          onRetry={() => refreshCliModels(currentProvider)}
+          onAddModel={onAddModel}
+          longContextEnabled={longContextEnabled}
+          onLongContextChange={onLongContextChange}
+        />
+        <ReasoningSelect
+          value={reasoningEffort}
+          onChange={handleReasoningChange}
+          selectedModel={selectedModel}
+          currentProvider={currentProvider}
+          geminiFamilies={geminiFamilies}
+        />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
         )}

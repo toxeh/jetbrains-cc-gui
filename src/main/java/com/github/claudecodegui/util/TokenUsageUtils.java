@@ -28,15 +28,55 @@ public final class TokenUsageUtils {
         if (usage == null) {
             return 0;
         }
-        int input = usage.has("input_tokens") ? usage.get("input_tokens").getAsInt() : 0;
+        int input = readNonNegativeInt(usage, "input_tokens");
         if ("codex".equals(provider)) {
             return input;
         }
-        int cacheCreation = usage.has("cache_creation_input_tokens")
-                ? usage.get("cache_creation_input_tokens").getAsInt() : 0;
-        int cacheRead = usage.has("cache_read_input_tokens")
-                ? usage.get("cache_read_input_tokens").getAsInt() : 0;
+        // Context window occupancy = prompt/input side only (not output / total_tokens).
+        // agy emits cache_read_tokens; Claude uses cache_read_input_tokens.
+        int cacheCreation = firstNonNegativeInt(usage,
+                "cache_creation_input_tokens", "cache_write_tokens");
+        int cacheRead = firstNonNegativeInt(usage,
+                "cache_read_input_tokens", "cache_read_tokens", "cached_input_tokens");
+
+        // Gemini/agy: input_tokens is already the prompt occupancy. Cache fields are
+        // informational; adding them when input already includes cached tokens
+        // double-counts and can show multi-million "context" on small turns.
+        if ("gemini".equals(provider)) {
+            if (input > 0) {
+                // If cache is reported separately and is larger than bare input, prefer
+                // the larger single value rather than summing (agy usually reports cache=0).
+                return Math.max(input, cacheRead);
+            }
+            return cacheRead + cacheCreation;
+        }
+
+        // Claude: input excludes cache; sum the parts.
         return input + cacheCreation + cacheRead;
+    }
+
+    private static int readNonNegativeInt(JsonObject usage, String key) {
+        if (usage == null || key == null || !usage.has(key) || usage.get(key).isJsonNull()) {
+            return 0;
+        }
+        try {
+            return Math.max(0, usage.get(key).getAsInt());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static int firstNonNegativeInt(JsonObject usage, String... keys) {
+        if (usage == null || keys == null) {
+            return 0;
+        }
+        for (String key : keys) {
+            int value = readNonNegativeInt(usage, key);
+            if (value > 0) {
+                return value;
+            }
+        }
+        return 0;
     }
 
     /**
@@ -69,6 +109,31 @@ public final class TokenUsageUtils {
         int cacheCreation = usage.has("cache_creation_input_tokens") ? usage.get("cache_creation_input_tokens").getAsInt() : 0;
         int cacheRead = usage.has("cache_read_input_tokens") ? usage.get("cache_read_input_tokens").getAsInt() : 0;
         return calculateTotalTokens(input, cacheCreation, cacheRead, output);
+    }
+
+    /**
+     * Resolve the effective context window retained in provider usage metadata.
+     * Providers that do not report a session-specific value keep the supplied
+     * static model limit as a compatibility fallback.
+     */
+    public static int extractMaxTokens(JsonObject usage, int fallbackMaxTokens) {
+        if (usage != null) {
+            String[] keys = {"model_context_window", "maxTokens", "limit"};
+            for (String key : keys) {
+                if (!usage.has(key) || usage.get(key).isJsonNull()) {
+                    continue;
+                }
+                try {
+                    int value = usage.get(key).getAsInt();
+                    if (value > 0) {
+                        return value;
+                    }
+                } catch (RuntimeException ignored) {
+                    // Ignore malformed provider metadata and retain the static fallback.
+                }
+            }
+        }
+        return Math.max(0, fallbackMaxTokens);
     }
 
     /**
@@ -135,5 +200,25 @@ public final class TokenUsageUtils {
             }
         }
         return null;
+    }
+
+    /**
+     * Remove provider/model-specific current-context snapshots from retained messages.
+     * Historical per-turn accounting remains intact because turnUsage and turnCostUsd
+     * are deliberately not touched.
+     */
+    public static void clearContextUsageFromSessionMessages(List<ClaudeSession.Message> messages) {
+        if (messages == null) {
+            return;
+        }
+        for (ClaudeSession.Message message : messages) {
+            if (message == null || message.raw == null) {
+                continue;
+            }
+            message.raw.remove("usage");
+            if (message.raw.has("message") && message.raw.get("message").isJsonObject()) {
+                message.raw.getAsJsonObject("message").remove("usage");
+            }
+        }
     }
 }

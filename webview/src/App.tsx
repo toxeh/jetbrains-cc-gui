@@ -152,12 +152,13 @@ const App = () => {
     claudeSdkMeetsMinimum,
     currentProviderRef,
     activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
-    reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
+    reasoningEffort, codexFastMode, geminiFamilies, geminiModels, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
     longContextEnabled,
     usagePercentage, usageUsedTokens, usageMaxTokens,
-    setPermissionMode,
+    setPermissionMode, setCurrentProvider,
     setClaudePermissionMode, setCodexPermissionMode, setGeminiPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel, setSelectedGeminiModel,
+    setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
     setSendShortcut, setAutoOpenFileEnabled,
@@ -282,8 +283,9 @@ const App = () => {
     setMessages, setStatus, setLoading, setLoadingStartTime,
     setIsThinking, setStreamingActive, setHistoryData,
     setCurrentSessionId, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
-    setPermissionMode, setClaudePermissionMode, setCodexPermissionMode, setGeminiPermissionMode,
+    setPermissionMode, setCurrentProvider, setClaudePermissionMode, setCodexPermissionMode, setGeminiPermissionMode,
     setSelectedClaudeModel, setSelectedCodexModel, setSelectedGeminiModel,
+    setLongContextEnabled, setReasoningEffort, setCodexFastMode,
     setProviderConfigVersion, setActiveProviderConfig,
     setClaudeSettingsAlwaysThinkingEnabled, setStreamingEnabledSetting,
     setSendShortcut, setAutoOpenFileEnabled,
@@ -551,6 +553,8 @@ const App = () => {
           claudeSettingsAlwaysThinkingEnabled={claudeSettingsAlwaysThinkingEnabled}
           reasoningEffort={reasoningEffort}
           codexFastMode={codexFastMode}
+          geminiFamilies={geminiFamilies}
+          geminiModels={geminiModels}
           streamingEnabledSetting={streamingEnabledSetting}
           sendShortcut={sendShortcut}
           autoOpenFileEnabled={autoOpenFileEnabled}

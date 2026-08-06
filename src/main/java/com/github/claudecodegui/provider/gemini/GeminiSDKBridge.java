@@ -9,6 +9,7 @@ import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -151,7 +152,9 @@ public class GeminiSDKBridge extends BaseSDKBridge {
             try {
                 JsonObject usage = gson.fromJson(usageJson, JsonObject.class);
                 int used = extractUsedTokens(usage);
-                if (used > 0) {
+                // Keep peak context this process lifetime for /context synthesis;
+                // small checkpoint rows must not wipe a larger peak.
+                if (used > lastUsedTokens.get()) {
                     lastUsedTokens.set(used);
                 }
             } catch (Exception ignored) {
@@ -196,26 +199,12 @@ public class GeminiSDKBridge extends BaseSDKBridge {
         }
     }
 
+    /**
+     * Context occupancy for the status ring: input (+ cache), never total/output.
+     * Matches {@link com.github.claudecodegui.util.TokenUsageUtils#extractContextTokens}.
+     */
     private static int extractUsedTokens(JsonObject usage) {
-        if (usage == null) {
-            return 0;
-        }
-        if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
-            try {
-                return usage.get("total_tokens").getAsInt();
-            } catch (Exception ignored) {
-            }
-        }
-        int sum = 0;
-        for (String k : new String[]{"input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens"}) {
-            if (usage.has(k) && !usage.get(k).isJsonNull()) {
-                try {
-                    sum += usage.get(k).getAsInt();
-                } catch (Exception ignored) {
-                }
-            }
-        }
-        return sum;
+        return com.github.claudecodegui.util.TokenUsageUtils.extractContextTokens(usage, "gemini");
     }
 
     private String decodeJsonStringPayload(String rawPayload) {
@@ -384,13 +373,108 @@ public class GeminiSDKBridge extends BaseSDKBridge {
     }
 
     /**
+     * Fetch live model catalog from {@code agy models} via channel-manager listModels.
+     * Returns JSON: {@code { success, models:[{id,label}], families:[...], binary }}.
+     */
+    public CompletableFuture<JsonObject> listModels() {
+        return CompletableFuture.supplyAsync(() -> {
+            JsonObject fallback = new JsonObject();
+            fallback.addProperty("success", false);
+            fallback.add("models", new JsonArray());
+            fallback.add("families", new JsonArray());
+            fallback.addProperty("binary", "");
+            fallback.addProperty("error", "listModels failed");
+
+            try {
+                List<String> command = buildBaseCommand("listModels");
+                if (command.isEmpty()) {
+                    fallback.addProperty("error", "channel-manager command unavailable");
+                    return fallback;
+                }
+
+                File bridgeDir = getDirectoryResolver().findSdkDir();
+                if (bridgeDir == null) {
+                    fallback.addProperty("error", "Bridge directory not ready");
+                    return fallback;
+                }
+
+                ProcessBuilder pb = new ProcessBuilder(command);
+                pb.directory(bridgeDir);
+                Map<String, String> env = pb.environment();
+                envConfigurator.configureTempDir(env, processManager.prepareClaudeTempDir());
+                configureProviderEnv(env, "{}");
+                String node = nodeDetector.findNodeExecutable();
+                envConfigurator.updateProcessEnvironment(pb, node);
+                pb.redirectErrorStream(true);
+
+                Process process = pb.start();
+                // listModels needs no stdin payload
+                try {
+                    process.getOutputStream().close();
+                } catch (Exception ignored) {
+                }
+
+                StringBuilder out = new StringBuilder();
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        out.append(line).append('\n');
+                    }
+                }
+                boolean finished = process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS);
+                if (!finished) {
+                    process.destroyForcibly();
+                    fallback.addProperty("error", "listModels timed out");
+                    return fallback;
+                }
+
+                JsonObject parsed = extractLastJsonObject(out.toString());
+                if (parsed != null && parsed.has("success")) {
+                    return parsed;
+                }
+                fallback.addProperty("error", "No listModels JSON in output");
+                fallback.addProperty("raw", out.length() > 500 ? out.substring(0, 500) : out.toString());
+                return fallback;
+            } catch (Exception e) {
+                LOG.warn("[Gemini] listModels failed: " + e.getMessage());
+                fallback.addProperty("error", e.getMessage() != null ? e.getMessage() : "listModels exception");
+                return fallback;
+            }
+        });
+    }
+
+    private JsonObject extractLastJsonObject(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String[] lines = text.split("\\R");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i].trim();
+            if (line.isEmpty() || !line.startsWith("{")) {
+                continue;
+            }
+            try {
+                return gson.fromJson(line, JsonObject.class);
+            } catch (Exception ignored) {
+                // try previous line
+            }
+        }
+        return null;
+    }
+
+    /**
      * Best-effort context usage from last [USAGE] tags (agy has no live /context RPC).
      * Signature matches Claude bridge for ContextHandler routing.
      */
     public CompletableFuture<JsonObject> getContextUsage(String sessionId, String cwd, String model) {
         int used = lastUsedTokens.get();
         String m = model != null && !model.isEmpty() ? model : lastUsageModel;
-        int max = 200_000;
+        int max = com.github.claudecodegui.handler.provider.ModelProviderHandler
+                .getModelContextLimit("gemini", m != null ? m : "");
+        if (max <= 0) {
+            max = 200_000;
+        }
         JsonObject data = new JsonObject();
         data.addProperty("usedTokens", used);
         data.addProperty("maxTokens", max);

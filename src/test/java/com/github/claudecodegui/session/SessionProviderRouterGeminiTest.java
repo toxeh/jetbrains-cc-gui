@@ -95,7 +95,7 @@ public class SessionProviderRouterGeminiTest {
         StubClaude claude = new StubClaude();
         StubCodex codex = new StubCodex();
         StubGemini gemini = new StubGemini();
-        SessionProviderRouter router = new SessionProviderRouter(claude, codex, gemini);
+        SessionProviderRouter router = new SessionProviderRouter(claude, codex, null, gemini);
 
         JsonObject result = router.launchChannel("gemini", "ch-1", "sid-1", "/tmp/p");
         assertTrue(result.get("success").getAsBoolean());
@@ -108,7 +108,7 @@ public class SessionProviderRouterGeminiTest {
         StubClaude claude = new StubClaude();
         StubCodex codex = new StubCodex();
         StubGemini gemini = new StubGemini();
-        SessionProviderRouter router = new SessionProviderRouter(claude, codex, gemini);
+        SessionProviderRouter router = new SessionProviderRouter(claude, codex, null, gemini);
 
         router.interruptChannel("gemini", "ch-9");
         assertTrue(gemini.interruptCalled.get());
@@ -121,7 +121,7 @@ public class SessionProviderRouterGeminiTest {
         StubClaude claude = new StubClaude();
         StubCodex codex = new StubCodex();
         StubGemini gemini = new StubGemini();
-        SessionProviderRouter router = new SessionProviderRouter(claude, codex, gemini);
+        SessionProviderRouter router = new SessionProviderRouter(claude, codex, null, gemini);
 
         List<JsonObject> msgs = router.getSessionMessages("gemini", "sid-g", "/cwd");
         assertEquals(1, msgs.size());
@@ -132,7 +132,7 @@ public class SessionProviderRouterGeminiTest {
     public void nullGeminiBridgeFallsBackToClaude() {
         StubClaude claude = new StubClaude();
         StubCodex codex = new StubCodex();
-        SessionProviderRouter router = new SessionProviderRouter(claude, codex, null);
+        SessionProviderRouter router = new SessionProviderRouter(claude, codex, null, null);
 
         JsonObject result = router.launchChannel("gemini", "ch", "s", "/c");
         assertEquals("claude", result.get("provider").getAsString());

@@ -112,10 +112,6 @@ public class DependencyManager {
         if (sdk == SdkDefinition.GEMINI_CLI) {
             return resolveAgyBinary() != null;
         }
-        // Grok uses a local CLI binary, not ~/.codemoss/dependencies npm packages.
-        if (sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary()) {
-            return resolveGrokCliPath() != null;
-        }
 
         // Check if the main package exists in node_modules
         Path packageDir = getPackageDir(sdkId, sdk.getNpmPackage());
@@ -304,6 +300,10 @@ public class DependencyManager {
         SdkDefinition sdk = SdkDefinition.fromId(sdkId);
         if (sdk == null || !isInstalled(sdkId)) {
             return null;
+        }
+        if (sdk == SdkDefinition.GEMINI_CLI) {
+            String bin = resolveAgyBinary();
+            return bin != null ? bin : "agy";
         }
 
         if (sdk == SdkDefinition.GEMINI_CLI) {
@@ -766,20 +766,6 @@ public class DependencyManager {
             // Add the status field for frontend consumption
             status.addProperty("status", installed ? "installed" : "not_installed");
 
-            if (sdk == SdkDefinition.GROK_CLI || sdk.isCliBinary()) {
-                String cliPath = resolveGrokCliPath();
-                if (cliPath != null) {
-                    status.addProperty("installPath", cliPath);
-                }
-            }
-            if (sdk == SdkDefinition.GEMINI_CLI) {
-                String bin = resolveAgyBinary();
-                if (bin != null) {
-                    status.addProperty("installPath", bin);
-                    status.addProperty("binary", bin);
-                }
-            }
-
             if (installed) {
                 if (sdk == SdkDefinition.GEMINI_CLI) {
                     String bin = resolveAgyBinary();
@@ -807,6 +793,82 @@ public class DependencyManager {
         }
 
         return result;
+    }
+
+    /**
+     * Resolve Antigravity CLI ({@code agy}) binary for Gemini provider status.
+     * Mirrors ai-bridge/services/gemini/agy-utils.js resolveAgyBinary().
+     * ONLY {@code agy} is allowed — never {@code agy.real}.
+     */
+    private String resolveAgyBinary() {
+        // Explicit override: accept only if executable and not agy.real.
+        String[] envKeys = {"AGY_PATH", "GEMINI_CLI_PATH", "AGY_CLI_PATH"};
+        for (String key : envKeys) {
+            String v = System.getenv(key);
+            if (v != null && !v.trim().isEmpty()) {
+                String path = v.trim();
+                if (isForbiddenAgyBinaryName(path)) {
+                    break; // fall through to discover real `agy`
+                }
+                Path p = Paths.get(path);
+                if (Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+                return null;
+            }
+        }
+        String home = PlatformUtils.getHomeDirectory();
+        // User-facing `agy` only — never agy.real.
+        String[] candidates = {
+                home + "/.local/bin/agy",
+                home + "/.gemini/antigravity-cli/bin/agy",
+                home + "/bin/agy",
+                "/usr/local/bin/agy",
+                "/opt/homebrew/bin/agy",
+        };
+        for (String c : candidates) {
+            try {
+                if (isForbiddenAgyBinaryName(c)) {
+                    continue;
+                }
+                Path p = Paths.get(c);
+                if (Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        // PATH lookup — only `agy`
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv != null) {
+            for (String dir : pathEnv.split(Pattern.quote(File.pathSeparator))) {
+                if (dir == null || dir.isEmpty()) {
+                    continue;
+                }
+                try {
+                    Path p = Paths.get(dir, "agy");
+                    if (isForbiddenAgyBinaryName(p.toString())) {
+                        continue;
+                    }
+                    if (Files.isExecutable(p)) {
+                        return p.toAbsolutePath().toString();
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    /** {@code agy.real} is an internal install artifact and must never be invoked. */
+    private static boolean isForbiddenAgyBinaryName(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        String norm = path.replace('\\', '/');
+        int slash = norm.lastIndexOf('/');
+        String base = slash >= 0 ? norm.substring(slash + 1) : norm;
+        return "agy.real".equalsIgnoreCase(base);
     }
 
     /**

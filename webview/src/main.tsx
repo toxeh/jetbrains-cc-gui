@@ -660,6 +660,22 @@ if (typeof window !== 'undefined' && !window.onModeReceived) {
   };
 }
 
+// Java may refresh recovery usage immediately after frontend_ready, before
+// React's callback effect mounts. Retain the latest snapshot until registration.
+if (typeof window !== 'undefined' && !window.onUsageUpdate) {
+  window.onUsageUpdate = (json: string) => {
+    window.__pendingUsageUpdate = json;
+  };
+}
+
+// Java can answer frontend_ready before React's callback effect mounts. Keep
+// the authoritative recovery snapshot until the real callback is registered.
+if (typeof window !== 'undefined' && !window.applyBackendTabState) {
+  window.applyBackendTabState = (json: string) => {
+    window.__pendingBackendTabState = json;
+  };
+}
+
 if (typeof window !== 'undefined' && !window.showPermissionDialog) {
   debugLog('[Main] Pre-registering showPermissionDialog placeholder');
   window.showPermissionDialog = (json: string) => {
@@ -694,6 +710,12 @@ if (typeof window !== 'undefined') {
   window.onTabActivated = () => {
     forceWebviewRepaint('tab-activated');
   };
+  // Placeholder until useGeminiProvider mounts — drops early listModels pushes safely.
+  if (!window.updateGeminiModels) {
+    window.updateGeminiModels = (_json: string) => {
+      // no-op placeholder
+    };
+  }
 }
 
 // Render the React application

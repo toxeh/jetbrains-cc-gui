@@ -391,76 +391,174 @@ export const CODEX_MODELS: ModelInfo[] = [
 ];
 
 /**
- * Gemini / Antigravity CLI model list (from `agy models` catalog).
- * Effort suffixes (-high/-medium/-low) are separate model ids in agy.
+ * Grok CLI `-m` value must be a **config profile name** from
+ * `~/.grok/config.toml` (`[model."name"]`), NOT the nested `model = "grok-4.5"`
+ * upstream id. Your default profile is typically:
+ *
+ *   [models]
+ *   default = "grok"
+ *
+ *   [model."grok"]
+ *   model = "grok-4.5"
+ *   base_url = "..."
+ *   api_key = "..."
+ *
+ * Passing `-m grok-4.5` hits official cli-chat-proxy and ignores custom base_url/api_key.
  */
-export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash-medium';
-
-export const GEMINI_MODELS: ModelInfo[] = [
-  {
-    id: 'gemini-3.6-flash-high',
-    label: 'Gemini 3.6 Flash High',
-    description: 'Newest Flash · high effort',
-  },
-  {
-    id: 'gemini-3.6-flash-medium',
-    label: 'Gemini 3.6 Flash Medium',
-    description: 'Newest Flash · balanced',
-  },
-  {
-    id: 'gemini-3.6-flash-low',
-    label: 'Gemini 3.6 Flash Low',
-    description: 'Newest Flash · fast / cheap',
-  },
-  {
-    id: 'gemini-3.5-flash-high',
-    label: 'Gemini 3.5 Flash High',
-    description: 'Flash 3.5 · high effort',
-  },
-  {
-    id: 'gemini-3.5-flash-medium',
-    label: 'Gemini 3.5 Flash Medium',
-    description: 'Flash 3.5 · default balanced',
-  },
-  {
-    id: 'gemini-3.5-flash-low',
-    label: 'Gemini 3.5 Flash Low',
-    description: 'Flash 3.5 · fast / cheap',
-  },
-  {
-    id: 'gemini-3.1-pro-high',
-    label: 'Gemini 3.1 Pro High',
-    description: 'Pro 3.1 · high effort',
-  },
-  {
-    id: 'gemini-3.1-pro-low',
-    label: 'Gemini 3.1 Pro Low',
-    description: 'Pro 3.1 · faster',
-  },
-];
-
+export const GROK_DEFAULT_MODEL_ID = 'grok';
 
 /**
- * Grok (xAI) model list
- * Using IDs that the grok-channel.js + @xai-official/grok will understand.
- * Default: Grok 4.5 (strong coding). Secondary: Grok Build (agentic).
+ * Grok CLI model picker entries.
+ * id = profile name for CLI `-m`; label can show the human-facing model name.
  */
 export const GROK_MODELS: ModelInfo[] = [
   {
-    id: 'grok-4.5',
+    id: GROK_DEFAULT_MODEL_ID,
     label: 'Grok 4.5',
-    description: 'Default Grok model. Excellent for coding and reasoning.',
+    description: 'xAI Grok 4.5',
+  },
+];
+
+/** Kimi CLI default: omit `--model` when empty / auto. */
+export const KIMI_DEFAULT_MODEL_ID = 'auto';
+
+export const KIMI_MODELS: ModelInfo[] = [
+  {
+    id: KIMI_DEFAULT_MODEL_ID,
+    label: 'Kimi Auto',
+    description: 'Use Kimi CLI default model',
   },
   {
-    id: 'grok-build',
-    label: 'Grok Build',
-    description: 'Grok Build — agentic coding model (full tool use).',
+    id: 'kimi-k2.5',
+    label: 'Kimi K2.5',
+    description: 'Moonshot Kimi coding model',
+  },
+  {
+    id: 'kimi-k3',
+    label: 'Kimi K3',
+    description: 'Moonshot Kimi K3',
+  },
+];
+
+/** OpenCode default: omit `--model` so CLI resolves its own default. */
+export const OPENCODE_DEFAULT_MODEL_ID = 'opencode-default';
+
+export const OPENCODE_MODELS: ModelInfo[] = [
+  {
+    id: OPENCODE_DEFAULT_MODEL_ID,
+    label: 'OpenCode Default',
+    description: 'Use OpenCode CLI default model',
+  },
+];
+
+/** PI default: omit `--model` so CLI resolves its own default. */
+export const PI_DEFAULT_MODEL_ID = 'auto';
+
+export const PI_MODELS: ModelInfo[] = [
+  {
+    id: PI_DEFAULT_MODEL_ID,
+    label: 'PI Auto',
+    description: 'Use PI CLI default model',
   },
 ];
 
 /**
  * Available models (backward compatibility)
  */
+/**
+ * Gemini / Antigravity CLI model families (base ids).
+ * Live catalog is loaded via `agy models` → get_gemini_models.
+ * Effort (high/medium/low/thinking) is a subordinate ReasoningSelect list;
+ * full agy slugs are composed at send time (e.g. gemini-3.5-flash-medium).
+ */
+export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash';
+
+/** Fallback when agy is offline / listModels has not returned yet. */
+export const GEMINI_MODELS: ModelInfo[] = [
+  {
+    id: 'gemini-3.6-flash',
+    label: 'Gemini 3.6 Flash',
+    description: 'Newest Flash',
+  },
+  {
+    id: 'gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
+    description: 'Flash 3.5 · default',
+  },
+  {
+    id: 'gemini-3.1-pro',
+    label: 'Gemini 3.1 Pro',
+    description: 'Pro 3.1',
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    description: 'Sonnet via Antigravity',
+  },
+  {
+    id: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    description: 'Opus via Antigravity',
+  },
+  {
+    id: 'gpt-oss-120b',
+    label: 'GPT-OSS 120B',
+    description: 'Open-weight GPT via Antigravity',
+  },
+];
+
+/** Effort option under a Gemini/agy model family. */
+export interface GeminiEffortOption {
+  id: string;
+  label: string;
+  /** Full agy model slug to send as --model */
+  modelId: string;
+}
+
+/** Family row from live `agy models` grouping. */
+export interface GeminiModelFamily {
+  id: string;
+  label: string;
+  description?: string;
+  efforts: GeminiEffortOption[];
+  defaultEffort: string;
+  defaultModelId: string;
+}
+
+export type GeminiAgyEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'thinking' | '';
+
+const AGY_EFFORT_SUFFIXES = ['thinking', 'xhigh', 'medium', 'high', 'low'] as const;
+
+/** Split full agy slug into family base + effort suffix. */
+export function splitGeminiAgyModelId(modelId: string): { baseId: string; effort: string } {
+  const id = (modelId || '').trim();
+  if (!id) return { baseId: '', effort: '' };
+  for (const effort of AGY_EFFORT_SUFFIXES) {
+    const suffix = `-${effort}`;
+    if (id.endsWith(suffix) && id.length > suffix.length) {
+      return { baseId: id.slice(0, -suffix.length), effort };
+    }
+  }
+  return { baseId: id, effort: '' };
+}
+
+/** Compose full agy slug from family + effort (effort may be empty). */
+export function composeGeminiAgyModelId(baseId: string, effort: string): string {
+  const base = (baseId || '').trim();
+  if (!base) return '';
+  const { baseId: stripped } = splitGeminiAgyModelId(base);
+  const family = stripped || base;
+  const e = (effort || '').trim().toLowerCase();
+  if (!e) return family;
+  return `${family}-${e}`;
+}
+
+/** Normalize a stored/full slug or family id to the family base used in ModelSelect. */
+export function toGeminiFamilyId(modelId: string): string {
+  const { baseId } = splitGeminiAgyModelId(modelId);
+  return baseId || modelId;
+}
+
 export const AVAILABLE_MODELS = CLAUDE_MODELS;
 
 /**
@@ -471,6 +569,8 @@ export interface ProviderInfo {
   label: string;
   icon: string;
   enabled: boolean;
+  /** When true, show a Beta badge and first-click notice dialog. */
+  beta?: boolean;
 }
 
 /**
@@ -479,9 +579,11 @@ export interface ProviderInfo {
 export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
-  { id: 'grok', label: 'Grok', icon: 'codicon-terminal', enabled: true },
   { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: true },
-  { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: false },
+  { id: 'grok', label: 'Grok CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },
+  { id: 'pi', label: 'PI CLI', icon: 'codicon-terminal', enabled: true, beta: true },
 ];
 
 /**
@@ -780,6 +882,11 @@ export interface ChatInputBoxProps {
   longContextEnabled?: boolean;
   /** Toggle long context callback */
   onLongContextChange?: (enabled: boolean) => void;
+  /** Live Gemini/agy families for subordinate effort list. */
+  geminiFamilies?: GeminiModelFamily[];
+  /** Live Gemini family rows for ModelSelect. */
+  geminiModels?: ModelInfo[];
+
 }
 
 /**
@@ -839,6 +946,11 @@ export interface ButtonAreaProps {
   longContextEnabled?: boolean;
   /** Toggle long context callback */
   onLongContextChange?: (enabled: boolean) => void;
+  /** Live Gemini/agy model families (effort subordinates). */
+  geminiFamilies?: GeminiModelFamily[];
+  /** Live Gemini family list for ModelSelect (fallback: GEMINI_MODELS). */
+  geminiModels?: ModelInfo[];
+
 }
 
 /**

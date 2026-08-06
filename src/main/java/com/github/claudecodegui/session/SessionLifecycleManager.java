@@ -4,15 +4,13 @@ import com.github.claudecodegui.bridge.NodeDetector;
 import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.model.SessionTemplate;
 import com.github.claudecodegui.settings.CodemossSettingsService;
+import com.github.claudecodegui.handler.UsagePushService;
 import com.github.claudecodegui.handler.core.HandlerContext;
-import com.github.claudecodegui.handler.SettingsHandler;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
-import com.github.claudecodegui.provider.grok.GrokSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
 import com.github.claudecodegui.util.JsUtils;
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -21,6 +19,7 @@ import com.intellij.ui.jcef.JBCefBrowser;
 
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -42,7 +41,7 @@ public class SessionLifecycleManager {
 
         CodexSDKBridge getCodexSDKBridge();
 
-        GrokSDKBridge getGrokSDKBridge();
+        Map<String, MarkerCliBridge> getCliBridges();
 
         default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() {
             return null;
@@ -308,28 +307,39 @@ public class SessionLifecycleManager {
      */
     public String determineWorkingDirectory() {
         String projectPath = host.getProject().getBasePath();
+        String candidate = null;
 
-        if (projectPath == null || !new File(projectPath).exists()) {
-            String userHome = NodeDetector.resolveHomeForFileOps();
-            LOG.warn("Using user home directory as fallback: " + userHome);
-            return userHome;
-        }
-
-        try {
-            CodemossSettingsService settingsService = new CodemossSettingsService();
-            // Normalized effective working directory (custom dir if valid, else the
-            // project path). Collapsing relative segments here keeps the launched cwd
-            // consistent with the directory history is read from.
-            String resolvedPath = settingsService.getEffectiveWorkingDirectory(projectPath);
-            if (resolvedPath != null && !resolvedPath.isEmpty()) {
-                LOG.info("Using working directory: " + resolvedPath);
-                return resolvedPath;
+        if (projectPath != null && new File(projectPath).exists()) {
+            try {
+                CodemossSettingsService settingsService = new CodemossSettingsService();
+                // Normalized effective working directory (custom dir if valid, else the
+                // project path). Collapsing relative segments here keeps the launched cwd
+                // consistent with the directory history is read from.
+                String resolvedPath = settingsService.getEffectiveWorkingDirectory(projectPath);
+                if (resolvedPath != null && !resolvedPath.isEmpty()) {
+                    candidate = resolvedPath;
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to resolve working directory: " + e.getMessage());
             }
-        } catch (Exception e) {
-            LOG.warn("Failed to resolve working directory: " + e.getMessage());
+            if (candidate == null) {
+                candidate = projectPath;
+            }
         }
 
-        return projectPath;
+        String guarded = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(candidate, projectPath);
+        if (guarded != null) {
+            if (candidate != null && !guarded.equals(candidate)) {
+                LOG.warn("Rejected unsafe cwd candidate=" + candidate + ", using guarded=" + guarded);
+            } else {
+                LOG.info("Using working directory: " + guarded);
+            }
+            return guarded;
+        }
+
+        String userHome = NodeDetector.resolveHomeForFileOps();
+        LOG.warn("Using user home directory as fallback: " + userHome);
+        return userHome;
     }
 
     /**
@@ -413,34 +423,11 @@ public class SessionLifecycleManager {
     }
 
     /**
-     * Reset token usage statistics in the frontend (used after new session creation).
+     * Clear transient context usage after creating a new session. The new provider has
+     * not reported a trusted token count yet, so used/max values remain unknown.
      */
     private void resetTokenUsage() {
-        int maxTokens = SettingsHandler.getModelContextLimit(
-                host.getHandlerContext().getCurrentProvider(),
-                host.getHandlerContext().getCurrentModel()
-        );
-        JsonObject usageUpdate = new JsonObject();
-        usageUpdate.addProperty("percentage", 0);
-        usageUpdate.addProperty("totalTokens", 0);
-        usageUpdate.addProperty("limit", maxTokens);
-        usageUpdate.addProperty("usedTokens", 0);
-        usageUpdate.addProperty("maxTokens", maxTokens);
-
-        String usageJson = new Gson().toJson(usageUpdate);
-
-        JBCefBrowser browser = host.getBrowser();
-        if (browser != null && !host.isDisposed()) {
-            String js = "(function() {" +
-                                "  if (typeof window.onUsageUpdate === 'function') {" +
-                                "    window.onUsageUpdate('" + JsUtils.escapeJs(usageJson) + "');" +
-                                "    console.log('[Backend->Frontend] Usage reset for new session');" +
-                                "  } else {" +
-                                "    console.warn('[Backend->Frontend] window.onUsageUpdate not found');" +
-                                "  }" +
-                                "})();";
-            browser.getCefBrowser().executeJavaScript(js, browser.getCefBrowser().getURL(), 0);
-        }
+        new UsagePushService(host.getHandlerContext()).clearUsageDisplay();
     }
 
     private String getCurrentEditorFilePath() {
@@ -452,9 +439,8 @@ public class SessionLifecycleManager {
                 host.getProject(),
                 host.getClaudeSDKBridge(),
                 host.getCodexSDKBridge(),
-                host.getGrokSDKBridge(),
-                host.getGeminiSDKBridge()
-        );
+                host.getCliBridges(),
+                host.getGeminiSDKBridge());
     }
 
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {

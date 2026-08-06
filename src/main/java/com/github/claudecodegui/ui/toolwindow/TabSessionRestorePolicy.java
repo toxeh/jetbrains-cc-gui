@@ -8,7 +8,15 @@ final class TabSessionRestorePolicy {
     }
 
     static boolean shouldLoadHistory(TabStateService.TabSessionState savedState) {
-        return savedState != null && isNonEmpty(savedState.sessionId);
+        if (savedState == null || !isNonEmpty(savedState.sessionId)) {
+            return false;
+        }
+        // Gemini/agy has no on-disk history import yet — loading would be a no-op
+        // while still risking resume via a restored sessionId elsewhere.
+        if ("gemini".equalsIgnoreCase(savedState.provider)) {
+            return false;
+        }
+        return true;
     }
 
     static boolean shouldLoadImmediately(TabStateService.TabSessionState savedState, boolean selectedTab) {

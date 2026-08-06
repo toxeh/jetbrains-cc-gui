@@ -1,6 +1,12 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AVAILABLE_MODELS, normalizeClaudeModelId, modelSupports1MContext, strip1MContextSuffix } from '../types';
+import {
+  AVAILABLE_MODELS,
+  normalizeClaudeModelId,
+  modelSupports1MContext,
+  strip1MContextSuffix,
+  toGeminiFamilyId,
+} from '../types';
 import type { ModelInfo } from '../types';
 import { readClaudeModelMapping } from '../../../utils/claudeModelMapping';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
@@ -22,16 +28,31 @@ const MODEL_TEXT_STYLE: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 
 const LONG_CONTEXT_OPTION_STYLE: React.CSSProperties = { justifyContent: 'space-between', cursor: 'default' };
 const LONG_CONTEXT_LABEL_STYLE: React.CSSProperties = { fontSize: '12px' };
 const MAX_VISIBLE_MODEL_OPTIONS = 100;
+/** Cap model dropdown height so long lists scroll instead of filling the panel. */
+const DROPDOWN_MAX_HEIGHT_PX = 300;
 
 interface ModelSelectProps {
   value: string;
   onChange: (modelId: string) => void;
   models?: ModelInfo[];
   currentProvider?: string;
+  /** True while CLI providers (OpenCode / Kimi) are still fetching model catalogs. */
+  loading?: boolean;
+  /** Set when the CLI model catalog fetch failed (or timed out); row offers retry. */
+  error?: string | null;
+  /** Retries the CLI model catalog fetch for the current provider. */
+  onRetry?: () => void;
   onAddModel?: () => void;
   longContextEnabled?: boolean;
   onLongContextChange?: (enabled: boolean) => void;
 }
+
+const LOADING_OPTION_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  cursor: 'default',
+};
 
 const DEFAULT_MODEL_MAP: Record<string, ModelInfo> = AVAILABLE_MODELS.reduce(
   (acc, model) => {
@@ -56,6 +77,8 @@ const MODEL_LABEL_KEYS: Record<string, string> = {
   'gpt-5.6-luna': 'models.codex.gpt56luna.label',
   'gpt-5.5': 'models.codex.gpt55.label',
   'gpt-5.4': 'models.codex.gpt54.label',
+  'grok-4.5': 'models.grok.grok45.label',
+  grok: 'models.grok.grok45.label',
 };
 
 const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
@@ -73,6 +96,8 @@ const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
   'gpt-5.6-luna': 'models.codex.gpt56luna.description',
   'gpt-5.5': 'models.codex.gpt55.description',
   'gpt-5.4': 'models.codex.gpt54.description',
+  'grok-4.5': 'models.grok.grok45.description',
+  grok: 'models.grok.grok45.description',
 };
 
 /**
@@ -131,7 +156,7 @@ const resolveModelIdForIcon = (
  * ModelSelect - Model selector component
  * Supports switching between Sonnet 4.5, Opus 4.5, and other models, including Codex models
  */
-export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
+export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', loading = false, error = null, onRetry, onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -144,13 +169,21 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     preferredAlignment: 'right',
   });
 
-  // Strip [1m] suffix for finding the model in the list
+  // Strip [1m] suffix for finding the model in the list.
+  // Gemini: backend may echo full agy slugs (...-high); UI list is family base ids.
   const strippedValue = strip1MContextSuffix(value);
-  const normalizedValue = currentProvider === 'claude' ? normalizeClaudeModelId(strippedValue) : strippedValue;
+  const normalizedValue = currentProvider === 'claude'
+    ? normalizeClaudeModelId(strippedValue)
+    : currentProvider === 'gemini'
+      ? toGeminiFamilyId(strippedValue) || strippedValue
+      : strippedValue;
   const currentModel = models.find(m => m.id === normalizedValue) || models.find(m => m.id === strippedValue) || models[0];
   const modelMapping = readClaudeModelMapping();
 
   const isSelectedModel = (modelId: string): boolean => {
+    if (currentProvider === 'gemini') {
+      return modelId === normalizedValue || modelId === strippedValue;
+    }
     if (currentProvider !== 'claude') {
       return modelId === strippedValue;
     }
@@ -266,7 +299,7 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     if (isOpen) {
       recalculate();
     }
-  }, [isOpen, filteredModels.length, recalculate]);
+  }, [isOpen, filteredModels.length, loading, recalculate]);
 
   return (
     <div style={RELATIVE_INLINE_BLOCK_STYLE}>
@@ -290,7 +323,14 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
         <div
           ref={dropdownRef}
           className="selector-dropdown"
-          style={{ ...DROPDOWN_STYLE, ...positionedStyle, maxHeight, overflowY: 'auto' }}
+          style={{
+            ...DROPDOWN_STYLE,
+            ...positionedStyle,
+            maxHeight: maxHeight
+              ? `${Math.min(DROPDOWN_MAX_HEIGHT_PX, maxHeight)}px`
+              : `${DROPDOWN_MAX_HEIGHT_PX}px`,
+            overflowY: 'auto',
+          }}
         >
           {showSearch && (
             <div className="selector-search-row">
@@ -302,6 +342,29 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
                 placeholder={t('models.searchPlaceholder', { defaultValue: 'Search models' })}
                 autoFocus
               />
+            </div>
+          )}
+          {loading && (
+            <div
+              className="selector-option selector-option-status"
+              data-testid="model-loading"
+              style={LOADING_OPTION_STYLE}
+            >
+              <span className="codicon codicon-loading codicon-modifier-spin" />
+              <span>{t('chat.loadingDropdown')}</span>
+            </div>
+          )}
+          {!loading && error && (
+            <div
+              className="selector-option selector-option-status"
+              data-testid="model-load-error"
+              style={{ ...LOADING_OPTION_STYLE, cursor: onRetry ? 'pointer' : 'default' }}
+              title={error}
+              onClick={() => onRetry?.()}
+            >
+              <span className="codicon codicon-warning" />
+              <span style={{ flex: 1, minWidth: 0 }}>{t('chat.modelsLoadFailed')}</span>
+              <span className="codicon codicon-refresh" />
             </div>
           )}
           {visibleModels.map((model) => (

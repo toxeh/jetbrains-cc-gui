@@ -1,12 +1,16 @@
 package com.github.claudecodegui.session;
 
+import com.github.claudecodegui.handler.SettingsHandler;
+import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.session.ClaudeSession.Message;
+import com.github.claudecodegui.util.TokenUsageUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.project.Project;
 
 import java.util.List;
 
@@ -26,10 +30,13 @@ public class GeminiMessageHandler implements MessageCallback {
 
     private final SessionState state;
     private final CallbackHandler callbackHandler;
+    private final Project project;
     private final Gson gson = new Gson();
 
     private final StringBuilder assistantContent = new StringBuilder();
     private Message currentAssistantMessage = null;
+    /** Peak context tokens this stream (ignore tiny agy checkpoint regressions). */
+    private int peakContextTokens = 0;
     /**
      * Assistant bubble owned by the active stream. After {@code stream_start} we only
      * attach content to this message — never to a completed previous-turn assistant
@@ -43,8 +50,13 @@ public class GeminiMessageHandler implements MessageCallback {
     private boolean isThinking = false;
 
     public GeminiMessageHandler(SessionState state, CallbackHandler callbackHandler) {
+        this(state, callbackHandler, null);
+    }
+
+    public GeminiMessageHandler(SessionState state, CallbackHandler callbackHandler, Project project) {
         this.state = state;
         this.callbackHandler = callbackHandler;
+        this.project = project;
     }
 
     @Override
@@ -246,11 +258,27 @@ public class GeminiMessageHandler implements MessageCallback {
         }
         try {
             JsonObject resultJson = gson.fromJson(jsonContent, JsonObject.class);
-            if (resultJson != null && resultJson.has("usage") && currentAssistantMessage != null) {
-                if (currentAssistantMessage.raw == null) {
-                    currentAssistantMessage.raw = new JsonObject();
+            if (resultJson == null) {
+                return;
+            }
+            if (resultJson.has("usage") && resultJson.get("usage").isJsonObject()) {
+                JsonObject usage = resultJson.getAsJsonObject("usage");
+                if (currentAssistantMessage != null) {
+                    if (currentAssistantMessage.raw == null) {
+                        currentAssistantMessage.raw = new JsonObject();
+                    }
+                    // Per-turn display (MessageItem) reads turnUsage; status bar uses context extract.
+                    currentAssistantMessage.raw.add("turnUsage", usage.deepCopy());
+                    ensureAssistantRaw();
+                    JsonObject message = currentAssistantMessage.raw.has("message")
+                            && currentAssistantMessage.raw.get("message").isJsonObject()
+                            ? currentAssistantMessage.raw.getAsJsonObject("message")
+                            : new JsonObject();
+                    message.add("usage", usage.deepCopy());
+                    currentAssistantMessage.raw.add("message", message);
                 }
-                currentAssistantMessage.raw.add("turnUsage", resultJson.get("usage").deepCopy());
+                // Final result is authoritative for the turn context occupancy.
+                applyContextUsage(usage, true);
                 callbackHandler.notifyMessageUpdate(state.getMessages());
             }
         } catch (Exception e) {
@@ -269,6 +297,7 @@ public class GeminiMessageHandler implements MessageCallback {
     private void handleStreamStart() {
         isStreaming = true;
         streamEndedThisTurn = false;
+        peakContextTokens = 0;
         resetStreamingAccumulator();
         callbackHandler.notifyStreamStart();
     }
@@ -380,6 +409,10 @@ public class GeminiMessageHandler implements MessageCallback {
             if (usage == null) {
                 return;
             }
+            // Intermediate step usage (agy checkpoint rows are tiny) must not replace a larger peak.
+            if (!applyContextUsage(usage, false)) {
+                return;
+            }
             ensureAssistantRaw();
             JsonObject message = currentAssistantMessage.raw.has("message")
                     && currentAssistantMessage.raw.get("message").isJsonObject()
@@ -387,30 +420,39 @@ public class GeminiMessageHandler implements MessageCallback {
                     : new JsonObject();
             message.add("usage", usage);
             currentAssistantMessage.raw.add("message", message);
-
-            int used = 0;
-            if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
-                used = usage.get("total_tokens").getAsInt();
-            } else {
-                if (usage.has("input_tokens") && !usage.get("input_tokens").isJsonNull()) {
-                    used += usage.get("input_tokens").getAsInt();
-                }
-                if (usage.has("output_tokens") && !usage.get("output_tokens").isJsonNull()) {
-                    used += usage.get("output_tokens").getAsInt();
-                }
-                if (usage.has("prompt_tokens") && !usage.get("prompt_tokens").isJsonNull()) {
-                    used += usage.get("prompt_tokens").getAsInt();
-                }
-            }
-            if (used > 0) {
-                int maxTokens = com.github.claudecodegui.handler.provider.ModelProviderHandler
-                        .getModelContextLimit(state.getModel());
-                callbackHandler.notifyUsageUpdate(used, maxTokens);
-            }
             callbackHandler.notifyMessageUpdate(state.getMessages());
         } catch (Exception e) {
             LOG.debug("Gemini usage parse skipped: " + e.getMessage());
         }
+    }
+
+    /**
+     * Push context occupancy to the status bar.
+     * Uses input (+ cache) only — never total_tokens (includes output).
+     *
+     * @param authoritative when true, always apply (final result); when false, ignore regressions
+     * @return true if applied
+     */
+    private boolean applyContextUsage(JsonObject usage, boolean authoritative) {
+        if (usage == null) {
+            return false;
+        }
+        int used = TokenUsageUtils.extractContextTokens(usage, "gemini");
+        if (used <= 0) {
+            return false;
+        }
+        if (!authoritative && used < peakContextTokens) {
+            return false;
+        }
+        if (used > peakContextTokens) {
+            peakContextTokens = used;
+        }
+        int maxTokens = SettingsHandler.getModelContextLimit(state.getProvider(), state.getModel());
+        if (project != null) {
+            ClaudeNotifier.setTokenUsage(project, used, maxTokens);
+        }
+        callbackHandler.notifyUsageUpdate(used, maxTokens);
+        return true;
     }
 
     private void handleMessageEnd() {

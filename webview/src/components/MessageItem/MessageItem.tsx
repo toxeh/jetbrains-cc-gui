@@ -42,10 +42,11 @@ export interface MessageItemProps {
   detailedOutputEnabled?: boolean;
 }
 
-/** Map provider id to a localized label (see `providers.*.label` in i18n). */
-function getProviderDisplayName(providerId: string | undefined, t: TFunction): string {
-  const id = providerId || 'claude';
-  return t(`providers.${id}.label`);
+/** Map provider id to a human-readable label used in UI text. */
+function getProviderDisplayName(providerId?: string): string {
+  if (providerId === 'codex') return 'Codex';
+  if (providerId === 'gemini') return 'Gemini';
+  return 'Claude';
 }
 
 type GroupedBlock =

@@ -1,8 +1,9 @@
-import React, { useRef, useState, useEffect, useCallback, memo } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getFileIcon } from '../../utils/fileIcons';
-import { useGrokPlanUsage } from '../../hooks/useGrokPlanUsage';
 import { useClaudePlanUsage } from '../../hooks/useClaudePlanUsage';
+import { useGeminiPlanUsage } from '../../hooks/useGeminiPlanUsage';
+import { selectGeminiPlanFamily } from '../../utils/grokBillingPace';
 import { GrokPlanUsageIndicator } from './GrokPlanUsageIndicator';
 import { TokenIndicator } from './TokenIndicator';
 import type { SelectedAgent } from './types';
@@ -31,6 +32,8 @@ interface ContextBarProps {
   onClearAgent?: () => void;
   /** Current provider (for conditional rendering) */
   currentProvider?: string;
+  /** Selected model id (Gemini: picks Gemini vs Claude/GPT quota family) */
+  selectedModel?: string;
   /** Whether there are messages (for rewind button visibility) */
   hasMessages?: boolean;
   /** Rewind callback */
@@ -57,6 +60,7 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
   selectedAgent,
   onClearAgent,
   currentProvider = 'claude',
+  selectedModel,
   hasMessages = false,
   onRewind,
   statusPanelExpanded = true,
@@ -66,10 +70,15 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const isGrok = currentProvider === 'grok';
   const isClaude = currentProvider === 'claude';
-  const grokPlanUsage = useGrokPlanUsage(currentProvider);
+  const isGemini = currentProvider === 'gemini';
   const claudePlanUsage = useClaudePlanUsage(currentProvider);
+  const geminiPlanUsage = useGeminiPlanUsage(currentProvider);
+  // Family (Gemini Models vs Claude/GPT) follows selected model; bar only switches 5h/7d
+  const geminiSnapshotForModel = useMemo(
+    () => selectGeminiPlanFamily(geminiPlanUsage.snapshot, selectedModel),
+    [geminiPlanUsage.snapshot, selectedModel],
+  );
   const popoverRef = useRef<HTMLDivElement>(null);
   const [showEnablePopover, setShowEnablePopover] = useState(false);
 
@@ -270,17 +279,14 @@ export const ContextBar: React.FC<ContextBarProps> = memo(({
         </div>
       )}
 
-      {/* Right side tools - Grok plan usage, StatusPanel toggle, Rewind */}
+      {/* Right side tools - plan usage, StatusPanel toggle, Rewind */}
       <div className="context-tools-right">
-        {/* Grok plan % usage + reset (between File Context and Collapse) */}
-        {isGrok && (
+        {isGemini && (
           <GrokPlanUsageIndicator
-            snapshot={grokPlanUsage.snapshot}
-            status={grokPlanUsage.status}
+            snapshot={geminiSnapshotForModel}
+            status={geminiPlanUsage.status}
           />
         )}
-
-        {/* Claude plan % usage + reset (5h / 7d windows) */}
         {isClaude && (
           <GrokPlanUsageIndicator
             snapshot={claudePlanUsage.snapshot}

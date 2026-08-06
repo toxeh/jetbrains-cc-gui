@@ -50,22 +50,6 @@ public enum SdkDefinition {
         Collections.emptyList(),
         "Gemini provider requires Antigravity CLI (agy). Install from https://antigravity.google/docs/cli/install and sign in once via agy.",
         null
-    ),
-
-    /**
-     * Grok is not an npm SDK under ~/.codemoss/dependencies.
-     * It is a local CLI binary ({@code grok}) used via ACP stdio.
-     * npmPackage is a marker; installation status is resolved by CLI path detection.
-     */
-    GROK_CLI(
-        "grok-cli",
-        "Grok CLI",
-        "grok-cli-binary",
-        "latest",
-        Collections.emptyList(),
-        Collections.emptyList(),
-        "Grok (xAI) provider requires the local Grok CLI (e.g. @vibe-kit/grok-cli). Prefer OAuth via `grok login`.",
-        null
     );
 
     private final String id;
@@ -177,8 +161,6 @@ public enum SdkDefinition {
             return CODEX_SDK;
         } else if ("gemini".equalsIgnoreCase(provider)) {
             return GEMINI_CLI;
-        } else if ("grok".equalsIgnoreCase(provider)) {
-            return GROK_CLI;
         }
         return null;
     }

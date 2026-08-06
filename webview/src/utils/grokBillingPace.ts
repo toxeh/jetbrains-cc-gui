@@ -25,11 +25,79 @@ export interface GrokPlanUsageSnapshot {
   periodType?: string | null;
   /** All known windows (weekly/monthly or 5h/7d). */
   windows?: CapacityWindow[];
-  /** Provider from capacity payload (grok | claude). */
+  /** Provider from capacity payload (grok | claude | gemini). */
   provider?: string;
   source?: string;
   message?: string;
   workerId?: string;
+  /**
+   * Antigravity dual billing families (optional).
+   * Keys: {@code gemini} | {@code third_party}. Each value is a mini-snapshot
+   * with only 5h/7d windows. Webview binds by selected model.
+   */
+  families?: Record<string, GrokPlanUsageSnapshot>;
+  defaultFamily?: string | null;
+}
+
+/** Which Antigravity quota family a model slug bills against. */
+export type GeminiQuotaFamily = 'gemini' | 'third_party';
+
+/**
+ * Map selected agy model id → quota family.
+ * Gemini Models vs Claude and GPT models (TUI /usage groups).
+ */
+export function resolveGeminiQuotaFamily(modelId?: string | null): GeminiQuotaFamily {
+  const id = (modelId || '').trim().toLowerCase();
+  if (!id) return 'gemini';
+  if (
+    id.includes('claude')
+    || id.includes('opus')
+    || id.includes('sonnet')
+    || id.includes('gpt')
+    || id.includes('oss')
+    || id.startsWith('3p')
+  ) {
+    return 'third_party';
+  }
+  return 'gemini';
+}
+
+/**
+ * Bind top-level capacity fields to the family matching {@code modelId}.
+ * Switcher stays 5h/7d only (family chosen by model, not by chip).
+ */
+export function selectGeminiPlanFamily(
+  snapshot: GrokPlanUsageSnapshot | null,
+  modelId?: string | null,
+): GrokPlanUsageSnapshot | null {
+  if (!snapshot?.present) return snapshot;
+  const families = snapshot.families;
+  if (!families || Object.keys(families).length === 0) {
+    return snapshot;
+  }
+  const famKey = resolveGeminiQuotaFamily(modelId);
+  const fam = families[famKey]
+    || (snapshot.defaultFamily ? families[snapshot.defaultFamily] : undefined)
+    || families.gemini
+    || Object.values(families)[0];
+  if (!fam) return snapshot;
+  const windows = fam.windows ?? [];
+  const capacityPct = typeof fam.capacityPct === 'number'
+    ? fam.capacityPct
+    : windows[0]?.usedPct;
+  if (typeof capacityPct !== 'number' && windows.length === 0) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    present: true,
+    capacityPct: typeof capacityPct === 'number' ? capacityPct : snapshot.capacityPct,
+    resetAt: fam.resetAt ?? windows[0]?.resetAt ?? snapshot.resetAt,
+    periodType: fam.periodType ?? windows[0]?.periodType ?? snapshot.periodType,
+    periodStart: fam.periodStart ?? snapshot.periodStart,
+    // Only this family's 5h/7d — bar switcher cycles period, not family
+    windows: windows.length > 0 ? windows : snapshot.windows,
+  };
 }
 
 export const PLAN_USAGE_WINDOW_STORAGE_KEY = 'ccgui.planUsage.windowId';
@@ -257,10 +325,12 @@ export function parseCapacityPayload(data: unknown): GrokPlanUsageSnapshot {
     };
   }
   const windows = parseWindows(o.windows);
+  const families = parseFamilies(o.families);
   const pctRaw = o.capacity_pct ?? o.used_pct ?? o.capacityPct;
   const pct = typeof pctRaw === 'number' ? pctRaw : Number(pctRaw);
-  // Present if top-level % OR at least one window
-  if (!Number.isFinite(pct) && windows.length === 0) {
+  // Present if top-level % OR at least one window OR any family
+  const familyHasData = families && Object.keys(families).length > 0;
+  if (!Number.isFinite(pct) && windows.length === 0 && !familyHasData) {
     return {
       present: false,
       message: 'capacity missing capacity_pct',
@@ -277,10 +347,49 @@ export function parseCapacityPayload(data: unknown): GrokPlanUsageSnapshot {
     periodType: typeof o.period_type === 'string' ? o.period_type : typeof o.periodType === 'string' ? o.periodType : null,
     periodStart: typeof o.period_start === 'string' ? o.period_start : null,
     windows: windows.length > 0 ? windows : undefined,
+    families,
+    defaultFamily:
+      typeof o.default_family === 'string'
+        ? o.default_family
+        : typeof o.defaultFamily === 'string'
+          ? o.defaultFamily
+          : null,
     provider: typeof o.provider === 'string' ? o.provider : undefined,
     source: typeof o.source === 'string' ? o.source : 'gateway',
     workerId: typeof o.worker_id === 'string' ? o.worker_id : typeof o.workerId === 'string' ? o.workerId : undefined,
   };
+}
+
+function parseFamilies(raw: unknown): Record<string, GrokPlanUsageSnapshot> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, GrokPlanUsageSnapshot> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!val || typeof val !== 'object') continue;
+    const v = val as Record<string, unknown>;
+    const windows = parseWindows(v.windows);
+    const pctRaw = v.capacity_pct ?? v.used_pct ?? v.capacityPct;
+    const pct = typeof pctRaw === 'number' ? pctRaw : Number(pctRaw);
+    if (!Number.isFinite(pct) && windows.length === 0) continue;
+    out[key] = {
+      present: true,
+      capacityPct: Number.isFinite(pct) ? clampPercent(pct) : windows[0]?.usedPct,
+      resetAt:
+        typeof v.reset_at === 'string'
+          ? v.reset_at
+          : typeof v.resetAt === 'string'
+            ? v.resetAt
+            : null,
+      periodType:
+        typeof v.period_type === 'string'
+          ? v.period_type
+          : typeof v.periodType === 'string'
+            ? v.periodType
+            : null,
+      periodStart: typeof v.period_start === 'string' ? v.period_start : null,
+      windows: windows.length > 0 ? windows : undefined,
+    };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Prefer stored window id if present; else binding top-level; else first window. */
@@ -342,7 +451,7 @@ export function windowShortLabel(idOrType?: string | null): string {
   const t = (idOrType || '').toLowerCase();
   if (!t) return '·';
   if (t === '5h' || t.includes('5h')) return '5h';
-  if (t === '7d' || t === '7day') return '7d';
+  if (t === '7d' || t === '7day' || t.includes('7d')) return '7d';
   if (t.includes('week')) return '7d';
   if (t.includes('month')) return 'mo';
   return t.length > 4 ? t.slice(0, 4) : t;

@@ -4,8 +4,8 @@ import com.github.claudecodegui.permission.PermissionManager;
 import com.github.claudecodegui.permission.PermissionRequest;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
-import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -56,7 +56,6 @@ public class ClaudeSession {
     // SDK bridges
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
-    private final GrokSDKBridge grokSDKBridge;
     private final GeminiSDKBridge geminiSDKBridge;
 
     // Permission manager
@@ -154,16 +153,25 @@ public class ClaudeSession {
         }
     }
 
-    public ClaudeSession(Project project, ClaudeSDKBridge claudeSDKBridge, CodexSDKBridge codexSDKBridge, GrokSDKBridge grokSDKBridge) {
-        this(project, claudeSDKBridge, codexSDKBridge, grokSDKBridge, null);
+    public ClaudeSession(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges
+    ) {
+        this(project, claudeSDKBridge, codexSDKBridge, cliBridges, null);
     }
 
-    public ClaudeSession(Project project, ClaudeSDKBridge claudeSDKBridge, CodexSDKBridge codexSDKBridge,
-                         GrokSDKBridge grokSDKBridge, GeminiSDKBridge geminiSDKBridge) {
+    public ClaudeSession(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GeminiSDKBridge geminiSDKBridge
+    ) {
         this.project = project;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
-        this.grokSDKBridge = grokSDKBridge;
         this.geminiSDKBridge = geminiSDKBridge != null ? geminiSDKBridge : new GeminiSDKBridge();
 
         // Initialize managers
@@ -173,7 +181,8 @@ public class ClaudeSession {
         this.contextCollector = new com.github.claudecodegui.session.EditorContextCollector(project);
         this.callbackFacade = new SessionCallbackFacade(project);
         this.contextService = new SessionContextService(project, MAX_FILE_SIZE_BYTES);
-        this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge, grokSDKBridge, this.geminiSDKBridge);
+        this.providerRouter = new SessionProviderRouter(
+                claudeSDKBridge, codexSDKBridge, cliBridges, this.geminiSDKBridge);
         this.sendService = new SessionSendService(
                 project,
                 state,
@@ -183,7 +192,7 @@ public class ClaudeSession {
                 gson,
                 claudeSDKBridge,
                 codexSDKBridge,
-                grokSDKBridge,
+                cliBridges,
                 this.geminiSDKBridge,
                 contextService
         );
@@ -261,17 +270,34 @@ public class ClaudeSession {
 
     /**
      * Set session ID and working directory (used for session restoration).
+     * Always notifies the UI (empty string when cleared) so tab state and
+     * webview do not keep a stale resume id after new-session / model switch.
      */
     public void setSessionInfo(String sessionId, String cwd) {
-        state.setSessionId(sessionId);
-        if (sessionId != null && !sessionId.trim().isEmpty()) {
-            callbackFacade.notifySessionIdReceived(sessionId);
-        }
+        String normalizedId = (sessionId != null && !sessionId.trim().isEmpty()) ? sessionId.trim() : null;
+        state.setSessionId(normalizedId);
+        // Notify even when null so frontend/tab persistence drop stale resume ids.
+        callbackFacade.notifySessionIdReceived(normalizedId != null ? normalizedId : "");
         if (cwd != null) {
             setCwd(cwd);
         } else {
             state.setCwd(null);
         }
+    }
+
+    /**
+     * Drop the provider conversation/thread id so the next send starts a fresh
+     * remote session (no {@code --conversation} / resume). Used when switching
+     * Gemini models or providers so fat multi-model agy histories are not resumed.
+     */
+    public void clearSessionId() {
+        String previous = state.getSessionId();
+        if (previous == null || previous.isEmpty()) {
+            return;
+        }
+        state.setSessionId(null);
+        callbackFacade.notifySessionIdReceived("");
+        LOG.info("Cleared provider session id (was " + previous + ")");
     }
 
     /**

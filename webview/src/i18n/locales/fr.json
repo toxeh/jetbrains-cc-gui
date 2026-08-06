@@ -46,6 +46,7 @@
     "removeAttachment": "Supprimer la pièce jointe",
     "closePreview": "Fermer l'aperçu",
     "loadingDropdown": "Chargement...",
+    "modelsLoadFailed": "Échec du chargement des modèles. Cliquez pour réessayer",
     "addAttachment": "Ajouter une pièce jointe",
     "stopGeneration": "Arrêter la génération",
     "generatingResponse": "Génération de la réponse",
@@ -311,7 +312,7 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "grok": "Grok"
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "Modèles personnalisés",
@@ -786,29 +787,55 @@
         "saveChanges": "Save"
       }
     },
-    "grokProvider": {
-      "title": "Grok (xAI)",
-      "desc": "Uses the local Grok CLI over ACP (grok agent stdio). Prefer OAuth via `grok login`. API key is optional.",
-      "oauthHint": "Auth: run `grok login` in a terminal (OAuth for SuperGrok/Heavy). Optional API key only if you use xAI API billing.",
-      "cliHint": "CLI required: install `@vibe-kit/grok-cli` (or set GROK_CLI_PATH). Detected automatically from common paths.",
-      "openDependencies": "Open Dependencies",
-      "authMethodLabel": "Authentication",
-      "authMethodHint": "Choose how the plugin authenticates Grok CLI (like Claude provider selection). OAuth uses `grok login` / SuperGrok; API key uses console.x.ai credits.",
-      "authOauth": "OAuth (grok login / SuperGrok)",
-      "authApiKey": "API key (XAI_API_KEY / console.x.ai)",
-      "authAuto": "Auto (prefer OAuth, then API key)",
-      "apiKeyLabel": "xAI API key",
-      "apiKeyHint": "Used only when Auth is API key or Auto. Leave empty to use the process environment.",
-      "saveApiKey": "Save key",
-      "gatewayLabel": "ai-proxy gateway base URLs",
-      "gatewayHint": "Root gateway POST /v1/chat/completions is always 403. Use namespaced bases: API key → …/xai/v1, OAuth → …/grok/v1. Leave empty for direct xAI / cli-chat-proxy.",
-      "gatewayOriginLabel": "Gateway origin (optional)",
-      "applyGatewayDefaults": "Apply …/xai + …/grok",
-      "apiBaseUrlLabel": "API base URL (api_key)",
-      "oauthBaseUrlLabel": "OAuth base URL (cli-chat-proxy)",
-      "saveBaseUrls": "Save base URLs",
-      "bareV1Warn": "Warning: bare …/v1 without /xai or /grok will hit the gateway lock (403). Use …/xai/v1 or …/grok/v1.",
-      "tokenHint": "x-gateway-token: Grok CLI cannot send custom headers. Point bases at local-agent (e.g. http://127.0.0.1:18789/xai/v1) which injects the token toward the remote gateway."
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "Install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Agent de codage terminal minimaliste avec prise en charge multi-fournisseurs"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "Outils CLI locaux",
+      "summary": "{{installed}} / {{total}} installés",
+      "moreComingSoon": "D’autres à venir",
+      "copyPath": "Copier le chemin"
     }
   },
   "history": {
@@ -1558,8 +1585,8 @@
     "opencode": {
       "label": "OpenCode"
     },
-    "grok": {
-      "label": "Grok"
+    "pi": {
+      "label": "PI CLI"
     }
   },
   "promptEnhancer": {

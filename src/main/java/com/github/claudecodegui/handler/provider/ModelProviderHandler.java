@@ -7,6 +7,7 @@ import com.github.claudecodegui.session.SessionSendService;
 import com.github.claudecodegui.skill.SlashCommandRegistry;
 import com.github.claudecodegui.provider.CustomModelContextWindowProvider;
 import com.github.claudecodegui.util.EditorFileUtils;
+import com.github.claudecodegui.util.TokenUsageUtils;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
@@ -65,20 +66,8 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("o1-mini", 128_000);
         MODEL_CONTEXT_LIMITS.put("o1-preview", 128_000);
 
-        // Grok models (xAI) - common context windows
-        // Note: grok / grok-4.5 / grok-4 / grok-build use 500k per current catalog / model info
-        // Older models (grok-2 etc.) remain at 128k
-        MODEL_CONTEXT_LIMITS.put("grok-2", 128_000);
-        MODEL_CONTEXT_LIMITS.put("grok-2-latest", 128_000);
-        MODEL_CONTEXT_LIMITS.put("grok-beta", 128_000);
-        MODEL_CONTEXT_LIMITS.put("grok", 500_000);
-        MODEL_CONTEXT_LIMITS.put("grok-1.5", 128_000);
-        MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000);
-        MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
-        MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
-
         // Gemini / Antigravity models (common catalog defaults)
-        MODEL_CONTEXT_LIMITS.put("gemini", 200_000);
+        MODEL_CONTEXT_LIMITS.put("gemini", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-2.5-pro", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-2.5-flash", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3-pro", 1_000_000);
@@ -86,11 +75,19 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-high", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-medium", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-high", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-medium", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-high", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-low", 1_000_000);
+        // Claude models exposed via agy catalog (same windows as Claude provider)
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-opus-4-6", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-opus-4-6-thinking", 200_000);
+        // Open-weight / other agy catalog entries — conservative defaults
+        MODEL_CONTEXT_LIMITS.put("gpt-oss-120b", 128_000);
     }
 
     private final HandlerContext context;
@@ -116,30 +113,65 @@ public class ModelProviderHandler {
                 }
             }
 
-            LOG.info("[ModelProviderHandler] Setting model to: " + model);
+            String previousModel = resolveCurrentSessionModel(context);
+            boolean modelChanged = isActualModelSwitch(previousModel, model);
+            LOG.info("[ModelProviderHandler] Setting model to: " + model
+                    + " (was: " + previousModel + ")");
             context.setCurrentModel(model);
 
+            String provider = context.getCurrentProvider();
             if (context.getSession() != null) {
                 context.getSession().setModel(model);
+                if (modelChanged) {
+                    TokenUsageUtils.clearContextUsageFromSessionMessages(
+                            context.getSession().getMessages());
+                }
                 LOG.info("[ModelProviderHandler] Updated session model to canonical ID: " + model);
+                // agy resumes the full conversation blob via --conversation. Switching
+                // models (or effort slugs) inside one fat multi-model history is what
+                // blew context to ~2M tokens. Start a fresh conversation instead.
+                if (shouldResetGeminiSessionOnModelChange(provider, previousModel, model)) {
+                    context.getSession().clearSessionId();
+                    LOG.info("[ModelProviderHandler] Cleared Gemini conversation id after model change: "
+                            + previousModel + " -> " + model);
+                }
             }
 
-            com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
+            if (modelChanged) {
+                usagePushService.clearUsageDisplay();
+            }
 
-            String provider = context.getCurrentProvider();
-            boolean isClaude = provider == null || "claude".equalsIgnoreCase(provider);
-            String resolvedModelForUsage = isClaude ? resolveConfiguredClaudeModelFromSettings(model) : model;
-            int newMaxTokens = getModelContextLimit(provider, resolvedModelForUsage);
+            if (context.getProject() != null) {
+                com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
+            }
+
+            boolean isCodex = "codex".equalsIgnoreCase(provider);
+            boolean isGemini = "gemini".equalsIgnoreCase(provider);
+            String resolvedModelForUsage = isCodex || isGemini
+                    ? model
+                    : resolveConfiguredClaudeModelFromSettings(model);
+            int newMaxTokens = (isCodex || isGemini)
+                    ? getModelContextLimit(provider, model)
+                    : getModelContextLimit(resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
                     + " tokens for selected model: " + model
                     + ", resolved model: " + resolvedModelForUsage);
 
             final String confirmedModel = model;
             final String confirmedProvider = context.getCurrentProvider();
-            ApplicationManager.getApplication().invokeLater(() -> {
+            Runnable confirmModel = () -> {
                 context.callJavaScript("window.onModelConfirmed", context.escapeJs(confirmedModel), context.escapeJs(confirmedProvider));
-                usagePushService.pushUsageUpdateAfterModelChange(newMaxTokens);
-            });
+                if (modelChanged) {
+                    usagePushService.pushUsageUpdateAfterModelChange(newMaxTokens);
+                }
+            };
+            if (ApplicationManager.getApplication() != null) {
+                ApplicationManager.getApplication().invokeLater(confirmModel);
+            } else {
+                // Plain unit tests have no IntelliJ Application; keep the state
+                // transition testable without changing the IDE's EDT behavior.
+                confirmModel.run();
+            }
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set model: " + e.getMessage(), e);
         }
@@ -162,12 +194,29 @@ public class ModelProviderHandler {
             // Capture previous provider BEFORE mutating context so we can detect
             // the leave-claude transition that needs daemon cleanup.
             String previousProvider = context.getCurrentProvider();
+            boolean providerChanged = isActualProviderSwitch(previousProvider, provider);
             LOG.info("[ModelProviderHandler] Setting provider to: " + provider
                     + " (was: " + previousProvider + ")");
             context.setCurrentProvider(provider);
 
             if (context.getSession() != null) {
                 context.getSession().setProvider(provider);
+                if (providerChanged) {
+                    TokenUsageUtils.clearContextUsageFromSessionMessages(
+                            context.getSession().getMessages());
+                }
+                // Provider session ids are not interchangeable (Claude UUID vs Codex
+                // thread vs agy conversation). Drop the previous id on a real switch
+                // so the next send cannot resume a foreign conversation.
+                if (shouldClearSessionOnProviderSwitch(previousProvider, provider)) {
+                    context.getSession().clearSessionId();
+                    LOG.info("[ModelProviderHandler] Cleared session id after provider switch: "
+                            + previousProvider + " -> " + provider);
+                }
+            }
+
+            if (providerChanged) {
+                usagePushService.clearUsageDisplay();
             }
 
             // Bug fix (Node process leak L2): when the tab moves AWAY from Claude
@@ -196,6 +245,36 @@ public class ModelProviderHandler {
     }
 
     /**
+     * Gemini/agy only: clear {@code --conversation} resume when the selected model
+     * slug actually changes. Reaffirmations of the same model keep the session.
+     */
+    static boolean shouldResetGeminiSessionOnModelChange(String provider, String previousModel, String newModel) {
+        if (provider == null || !"gemini".equalsIgnoreCase(provider.trim())) {
+            return false;
+        }
+        if (newModel == null || newModel.trim().isEmpty()) {
+            return false;
+        }
+        String prev = previousModel != null ? previousModel.trim() : "";
+        String next = newModel.trim();
+        return !prev.isEmpty() && !prev.equals(next);
+    }
+
+    /**
+     * True when the tab moves between distinct non-empty providers (not a
+     * reaffirmation of the same provider, and not empty init races).
+     */
+    static boolean shouldClearSessionOnProviderSwitch(String previousProvider, String newProvider) {
+        if (previousProvider == null || previousProvider.trim().isEmpty()) {
+            return false;
+        }
+        if (newProvider == null || newProvider.trim().isEmpty()) {
+            return false;
+        }
+        return !previousProvider.trim().equalsIgnoreCase(newProvider.trim());
+    }
+
+    /**
      * Pure decision predicate: should we shut down the Claude daemon when the
      * tab provider transitions from {@code previousProvider} to {@code newProvider}?
      *
@@ -219,6 +298,45 @@ public class ModelProviderHandler {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Return whether a provider command represents a real cross-provider switch.
+     * Null/empty initialization values and same-provider reaffirmations are no-ops.
+     */
+    static boolean isActualProviderSwitch(String previousProvider, String newProvider) {
+        return previousProvider != null
+                && newProvider != null
+                && !previousProvider.isEmpty()
+                && !newProvider.isEmpty()
+                && !previousProvider.equals(newProvider);
+    }
+
+    /**
+     * Return whether a model command represents a real model transition.
+     * Null/empty initialization values and same-model reaffirmations are no-ops.
+     */
+    static boolean isActualModelSwitch(String previousModel, String newModel) {
+        return previousModel != null
+                && newModel != null
+                && !previousModel.isEmpty()
+                && !newModel.isEmpty()
+                && !previousModel.equals(newModel);
+    }
+
+    /**
+     * Resolve the authoritative model before processing a frontend model command.
+     * A restored session may already own the saved model while the handler context
+     * still contains its startup default, so session state takes precedence.
+     */
+    static String resolveCurrentSessionModel(HandlerContext context) {
+        if (context != null && context.getSession() != null) {
+            String sessionModel = context.getSession().getModel();
+            if (sessionModel != null && !sessionModel.isEmpty()) {
+                return sessionModel;
+            }
+        }
+        return context == null ? null : context.getCurrentModel();
     }
 
     /**
@@ -269,6 +387,55 @@ public class ModelProviderHandler {
             }
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set reasoning effort: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Fetch live Gemini/agy model catalog and push to webview via
+     * {@code window.updateGeminiModels}.
+     */
+    public void handleGetGeminiModels(String content) {
+        try {
+            if (context.getGeminiSDKBridge() == null) {
+                LOG.warn("[ModelProviderHandler] get_gemini_models: GeminiSDKBridge unavailable");
+                pushGeminiModelsError("Gemini bridge unavailable");
+                return;
+            }
+            context.getGeminiSDKBridge().listModels()
+                    .thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            if (result == null) {
+                                pushGeminiModelsError("Empty listModels response");
+                                return;
+                            }
+                            String json = gson.toJson(result);
+                            context.callJavaScript("window.updateGeminiModels", context.escapeJs(json));
+                        } catch (Exception e) {
+                            LOG.error("[ModelProviderHandler] Failed to push gemini models: " + e.getMessage(), e);
+                            pushGeminiModelsError(e.getMessage());
+                        }
+                    }))
+                    .exceptionally(ex -> {
+                        LOG.error("[ModelProviderHandler] listModels failed: " + ex.getMessage(), ex);
+                        ApplicationManager.getApplication().invokeLater(() ->
+                                pushGeminiModelsError(ex.getMessage()));
+                        return null;
+                    });
+        } catch (Exception e) {
+            LOG.error("[ModelProviderHandler] get_gemini_models failed: " + e.getMessage(), e);
+            pushGeminiModelsError(e.getMessage());
+        }
+    }
+
+    private void pushGeminiModelsError(String message) {
+        try {
+            JsonObject err = new JsonObject();
+            err.addProperty("success", false);
+            err.add("models", new com.google.gson.JsonArray());
+            err.add("families", new com.google.gson.JsonArray());
+            err.addProperty("error", message != null ? message : "unknown");
+            context.callJavaScript("window.updateGeminiModels", context.escapeJs(gson.toJson(err)));
+        } catch (Exception ignored) {
         }
     }
 
@@ -403,8 +570,10 @@ public class ModelProviderHandler {
             return 200_000;
         }
 
+        String normalized = stripAgyEffortSuffix(model.trim());
+
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
-        java.util.regex.Matcher matcher = pattern.matcher(model);
+        java.util.regex.Matcher matcher = pattern.matcher(normalized);
 
         if (matcher.find()) {
             try {
@@ -421,7 +590,63 @@ public class ModelProviderHandler {
             }
         }
 
-        return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
+        Integer exact = MODEL_CONTEXT_LIMITS.get(normalized);
+        if (exact != null) {
+            return exact;
+        }
+        // Also try original (in case map has full slug keys)
+        exact = MODEL_CONTEXT_LIMITS.get(model);
+        if (exact != null) {
+            return exact;
+        }
+
+        // Longest-prefix match for family slugs (gemini-3.6-flash-medium → gemini-3.6-flash).
+        // Require key length >= 6 so short keys like "o1" / "gpt-4" cannot steal longer ids.
+        String bestKey = null;
+        for (String key : MODEL_CONTEXT_LIMITS.keySet()) {
+            if (key == null || key.length() < 6) {
+                continue;
+            }
+            if (normalized.equals(key)
+                    || normalized.startsWith(key + "-")
+                    || normalized.startsWith(key + "[")
+                    || model.startsWith(key + "-")
+                    || model.startsWith(key + "[")) {
+                if (bestKey == null || key.length() > bestKey.length()) {
+                    bestKey = key;
+                }
+            }
+        }
+        if (bestKey != null) {
+            return MODEL_CONTEXT_LIMITS.get(bestKey);
+        }
+
+        // Provider-ish defaults by id prefix (agy multi-model catalog)
+        if (normalized.startsWith("gemini")) {
+            return 1_000_000;
+        }
+        if (normalized.startsWith("claude")) {
+            return 200_000;
+        }
+        if (normalized.startsWith("gpt-oss")) {
+            return 128_000;
+        }
+
+        return 200_000;
+    }
+
+    /** Strip trailing agy effort suffix (-low|-medium|-high|-xhigh|-thinking). */
+    static String stripAgyEffortSuffix(String modelId) {
+        if (modelId == null || modelId.isEmpty()) {
+            return modelId;
+        }
+        String[] suffixes = { "-thinking", "-xhigh", "-medium", "-high", "-low" };
+        for (String suffix : suffixes) {
+            if (modelId.endsWith(suffix) && modelId.length() > suffix.length()) {
+                return modelId.substring(0, modelId.length() - suffix.length());
+            }
+        }
+        return modelId;
     }
 
     public static int getModelContextLimit(String provider, String model) {

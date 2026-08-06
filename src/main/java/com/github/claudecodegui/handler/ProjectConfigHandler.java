@@ -3,6 +3,7 @@ package com.github.claudecodegui.handler;
 import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
+import com.github.claudecodegui.provider.gemini.GeminiPlanUsageService;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.action.SendShortcutSync;
 import com.github.claudecodegui.provider.grok.GrokSDKBridge;
@@ -19,7 +20,11 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 
-import java.util.concurrent.CompletableFuture;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 
 /**
  * Handles project-level configuration: working directory, streaming, sandbox mode,
@@ -742,237 +747,139 @@ public class ProjectConfigHandler {
         }
     }
 
-    /** Get usage statistics. Supports both Claude and Codex providers. */
-    public void handleGetUsageStatistics(String content) {
-        CompletableFuture.runAsync(() -> {
-            try {
-                String projectPath = "all";
-                String provider = "claude";
-                long cutoffTime = 0;
-                if (content != null && !content.isEmpty() && !content.equals("{}")) {
-                    try {
-                        JsonObject json = gson.fromJson(content, JsonObject.class);
-                        if (json.has("scope")) {
-                            projectPath = "current".equals(json.get("scope").getAsString())
-                                ? context.getProject().getBasePath() : "all";
-                        }
-                        if (json.has("provider")) {
-                            provider = json.get("provider").getAsString();
-                        }
-                        if (json.has("dateRange")) {
-                            String dateRange = json.get("dateRange").getAsString();
-                            long now = System.currentTimeMillis();
-                            if ("7d".equals(dateRange)) { cutoffTime = now - 7L * 24 * 60 * 60 * 1000; }
-                            else if ("30d".equals(dateRange)) { cutoffTime = now - 30L * 24 * 60 * 60 * 1000; }
-                        }
-                    } catch (Exception e) {
-                        projectPath = "current".equals(content) ? context.getProject().getBasePath() : content;
-                    }
-                }
-                String json;
-                if ("grok".equals(provider)) {
-                    // Local session activity (+ plugin ACP ledger tokens). Billing is optional enrichment.
-                    com.github.claudecodegui.provider.grok.GrokUsageAggregator aggregator =
-                            new com.github.claudecodegui.provider.grok.GrokUsageAggregator();
-                    com.github.claudecodegui.provider.grok.GrokUsageAggregator.ProjectStatistics stats =
-                            aggregator.getProjectStatistics(projectPath, cutoffTime);
-                    json = gson.toJson(stats);
-                    LOG.info("[ProjectConfigHandler] Grok activity - sessions: " + stats.totalSessions
-                            + ", tokensFromLedger: " + stats.tokensFromLedger
-                            + ", total tokens: " + stats.totalUsage.totalTokens);
-                    final String activityJson = json;
-                    ApplicationManager.getApplication().invokeLater(() ->
-                            context.callJavaScript("window.updateUsageStatistics",
-                                    context.escapeJs(activityJson)));
-                    // Best-effort live billing attach (does not block / replace activity).
-                    enrichGrokUsageWithBilling(projectPath);
-                    return;
-                }
-                // Claude/Codex/Gemini usage UI is TokenTracker-backed; legacy getProjectStatistics
-                // aggregators were removed. Return an empty compatible shell for residual callers.
-                json = gson.toJson(emptyUsageStatisticsShell(projectPath, provider));
-                final String statsJson = json;
-                ApplicationManager.getApplication().invokeLater(() ->
-                    context.callJavaScript("window.updateUsageStatistics", context.escapeJs(statsJson)));
-            } catch (Exception e) {
-                LOG.error("[ProjectConfigHandler] Failed to get usage statistics: " + e.getMessage(), e);
-                showError("Failed to get statistics: " + e.getMessage());
-            }
-        });
-    }
-
     /**
-     * Empty Claude/Codex-shaped usage payload. Claude/Codex use TokenTracker;
-     * this keeps residual {@code updateUsageStatistics} callers from NPE/empty UI.
+     * ContextBar plan-usage for Gemini: temporary agy statusline hook (no token parsing).
+     * Pushes {@code window.updateGeminiPlanUsage}.
      */
-    private static JsonObject emptyUsageStatisticsShell(String projectPath, String provider) {
-        JsonObject totalUsage = new JsonObject();
-        totalUsage.addProperty("inputTokens", 0);
-        totalUsage.addProperty("outputTokens", 0);
-        totalUsage.addProperty("cacheWriteTokens", 0);
-        totalUsage.addProperty("cacheReadTokens", 0);
-        totalUsage.addProperty("totalTokens", 0);
-
-        JsonObject stats = new JsonObject();
-        stats.addProperty("projectPath", projectPath != null ? projectPath : "all");
-        String name = "all";
-        if (projectPath != null && !projectPath.isEmpty() && !"all".equals(projectPath)) {
-            int slash = Math.max(projectPath.lastIndexOf('/'), projectPath.lastIndexOf('\\'));
-            name = slash >= 0 && slash < projectPath.length() - 1
-                    ? projectPath.substring(slash + 1) : projectPath;
-        }
-        stats.addProperty("projectName", name);
-        stats.addProperty("totalSessions", 0);
-        stats.add("totalUsage", totalUsage);
-        stats.addProperty("estimatedCost", 0.0);
-        stats.add("sessions", new com.google.gson.JsonArray());
-        stats.add("dailyUsage", new com.google.gson.JsonArray());
-        stats.add("byModel", new com.google.gson.JsonArray());
-        stats.addProperty("lastUpdated", System.currentTimeMillis());
-        stats.addProperty("provider", provider != null ? provider : "claude");
-        stats.addProperty("source", "tokentracker");
-        return stats;
-    }
-
-    // ---- Grok auth method --------------------------------------------------
-
-    public void handleGetGrokAuthConfig() {
-        respondWithJson("window.updateGrokAuthConfig",
-            () -> {
-                JsonObject payload = new JsonObject();
-                payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
-                String key = settingsService.getGrokApiKey();
-                payload.addProperty("hasApiKey", key != null && !key.isEmpty());
-                // For editing, frontend may request separately — send empty placeholder.
-                payload.addProperty("apiKey", key != null ? key : "");
-                payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
-                payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
-                payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
-                return payload;
-            },
-            jsonOf("authMethod", CodemossSettingsService.DEFAULT_GROK_AUTH_METHOD),
-            "Failed to get Grok auth config");
-    }
-
-    public void handleSetGrokAuthConfig(String content) {
-        try {
-            JsonObject json = gson.fromJson(content, JsonObject.class);
-            if (json == null) {
-                showError("Invalid Grok auth config");
-                return;
-            }
-            if (json.has("authMethod") && !json.get("authMethod").isJsonNull()) {
-                settingsService.setGrokAuthMethod(json.get("authMethod").getAsString());
-            }
-            if (json.has("apiKey") && !json.get("apiKey").isJsonNull()) {
-                settingsService.setGrokApiKey(json.get("apiKey").getAsString());
-            }
-            if (json.has("apiBaseUrl") && !json.get("apiBaseUrl").isJsonNull()) {
-                settingsService.setGrokApiBaseUrl(json.get("apiBaseUrl").getAsString());
-            }
-            if (json.has("oauthBaseUrl") && !json.get("oauthBaseUrl").isJsonNull()) {
-                settingsService.setGrokOauthBaseUrl(json.get("oauthBaseUrl").getAsString());
-            }
-            if (json.has("gatewayOrigin") && !json.get("gatewayOrigin").isJsonNull()) {
-                settingsService.setGrokGatewayOrigin(json.get("gatewayOrigin").getAsString());
-            }
-            JsonObject payload = new JsonObject();
-            payload.addProperty("authMethod", settingsService.getGrokAuthMethod());
-            String key = settingsService.getGrokApiKey();
-            payload.addProperty("hasApiKey", key != null && !key.isEmpty());
-            payload.addProperty("apiKey", key != null ? key : "");
-            payload.addProperty("apiBaseUrl", settingsService.getGrokApiBaseUrl());
-            payload.addProperty("oauthBaseUrl", settingsService.getGrokOauthBaseUrl());
-            payload.addProperty("gatewayOrigin", settingsService.getGrokGatewayOrigin());
-            LOG.info("[ProjectConfigHandler] Set Grok authMethod=" + payload.get("authMethod").getAsString()
-                    + " apiBaseUrl=" + payload.get("apiBaseUrl").getAsString()
-                    + " oauthBaseUrl=" + payload.get("oauthBaseUrl").getAsString());
-            ApplicationManager.getApplication().invokeLater(() -> {
-                context.callJavaScript("window.updateGrokAuthConfig",
-                    context.escapeJs(gson.toJson(payload)));
-                context.callJavaScript("window.showSuccessI18n", "toast.saveSuccess");
-            });
-        } catch (Exception e) {
-            LOG.error("[ProjectConfigHandler] Failed to set Grok auth config: " + e.getMessage(), e);
-            showError("Failed to save Grok auth config: " + e.getMessage());
-        }
-    }
-
-    /** Get Grok billing/usage snapshot (credits, weekly limit etc.) by calling grok /usage via bridge. */
-    public void handleGetGrokUsage(String content) {
-        GrokSDKBridge grokBridge = context.getGrokSDKBridge();
-        if (grokBridge == null) {
-            showError("Grok bridge not initialized");
-            return;
-        }
-        String cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
-        grokBridge.getUsage(cwd).thenAccept(result -> {
+    public void handleGetGeminiPlanUsage() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            JsonObject payload = GeminiPlanUsageService.resolvePlanUsagePayload();
             ApplicationManager.getApplication().invokeLater(() -> {
                 try {
-                    String json = gson.toJson(result);
-                    context.callJavaScript("window.updateUsageStatistics", context.escapeJs(json));
-                } catch (Exception e) {
-                    LOG.error("[ProjectConfigHandler] Failed to send grok usage: " + e.getMessage(), e);
-                    showError("Failed to get Grok usage: " + e.getMessage());
-                }
-            });
-        });
-    }
-
-    /**
-     * Optionally merge live {@code /usage} billing into the activity stats already shown.
-     * On failure, pushes a small patch with {@code billingUnavailable} so the UI stays honest.
-     */
-    private void enrichGrokUsageWithBilling(String projectPath) {
-        GrokSDKBridge grokBridge = context.getGrokSDKBridge();
-        if (grokBridge == null) {
-            return;
-        }
-        String cwd = context.getProject() != null ? context.getProject().getBasePath() : projectPath;
-        if ("all".equals(cwd)) {
-            cwd = context.getProject() != null ? context.getProject().getBasePath() : null;
-        }
-        grokBridge.getUsage(cwd).thenAccept(result -> {
-            ApplicationManager.getApplication().invokeLater(() -> {
-                try {
-                    JsonObject patch = new JsonObject();
-                    patch.addProperty("provider", "grok");
-                    patch.addProperty("billingEnrichment", true);
-                    if (result != null && result.has("data") && result.get("data").isJsonObject()) {
-                        JsonObject data = result.getAsJsonObject("data");
-                        if (data.has("unavailable") && data.get("unavailable").getAsBoolean()) {
-                            patch.addProperty(
-                                    "billingUnavailable",
-                                    data.has("message") ? data.get("message").getAsString()
-                                            : "Grok live billing unavailable");
-                        } else {
-                            patch.add("grokBilling", data);
-                        }
-                    } else if (result != null && result.has("success")
-                            && !result.get("success").getAsBoolean()) {
-                        patch.addProperty(
-                                "billingUnavailable",
-                                result.has("error") ? result.get("error").getAsString()
-                                        : "Grok live billing unavailable");
-                    } else if (result != null) {
-                        // Raw CLI shape — pass through for the billing panel
-                        if (result.has("data")) {
-                            patch.add("grokBilling", result.get("data"));
-                        } else {
-                            patch.add("grokBilling", result);
-                        }
-                    }
                     context.callJavaScript(
-                            "window.updateUsageStatistics",
-                            context.escapeJs(gson.toJson(patch)));
+                            "window.updateGeminiPlanUsage",
+                            context.escapeJs(gson.toJson(payload)));
                 } catch (Exception e) {
-                    LOG.debug("[ProjectConfigHandler] Grok billing enrich skipped: " + e.getMessage());
+                    LOG.debug("[ProjectConfigHandler] updateGeminiPlanUsage failed: " + e.getMessage());
                 }
             });
-        }).exceptionally(ex -> {
-            LOG.debug("[ProjectConfigHandler] Grok billing enrich failed: " + ex.getMessage());
-            return null;
         });
     }
 
+    /**
+     * ContextBar plan-usage for Claude: local-agent {@code GET /capacity} from
+     * {@code ANTHROPIC_BASE_URL} when configured. Pushes {@code window.updateClaudePlanUsage}.
+     */
+    public void handleGetClaudePlanUsage() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            JsonObject payload = resolveClaudePlanUsagePayload();
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    context.callJavaScript(
+                            "window.updateClaudePlanUsage",
+                            context.escapeJs(gson.toJson(payload)));
+                } catch (Exception e) {
+                    LOG.debug("[ProjectConfigHandler] updateClaudePlanUsage failed: " + e.getMessage());
+                }
+            });
+        });
+    }
+
+    /** Package-visible for tests. */
+    JsonObject resolveClaudePlanUsagePayload() {
+        String base = "";
+        try {
+            JsonObject claudeSettings = settingsService.readClaudeSettings();
+            if (claudeSettings != null && claudeSettings.has("env")) {
+                JsonObject env = claudeSettings.getAsJsonObject("env");
+                if (env.has("ANTHROPIC_BASE_URL") && env.get("ANTHROPIC_BASE_URL").isJsonPrimitive()) {
+                    base = env.get("ANTHROPIC_BASE_URL").getAsString();
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("[ProjectConfigHandler] readClaudeSettings for capacity: " + e.getMessage());
+        }
+
+        String capacityUrl = capacityUrlFromBase(base);
+        if (capacityUrl != null) {
+            JsonObject fromCapacity = fetchCapacityJson(capacityUrl);
+            if (fromCapacity != null && isPresentCapacity(fromCapacity)) {
+                fromCapacity.addProperty("ok", true);
+                if (!fromCapacity.has("source")) {
+                    fromCapacity.addProperty("source", "local-agent");
+                }
+                if (!fromCapacity.has("provider")) {
+                    fromCapacity.addProperty("provider", "claude");
+                }
+                return fromCapacity;
+            }
+        }
+
+        JsonObject unavailable = new JsonObject();
+        unavailable.addProperty("ok", true);
+        unavailable.addProperty("present", false);
+        unavailable.addProperty("message", "Usage unavailable");
+        unavailable.addProperty("source", "plugin");
+        unavailable.addProperty("provider", "claude");
+        return unavailable;
+    }
+
+    /** http://127.0.0.1:18790/v1 → http://127.0.0.1:18790/capacity */
+    static String capacityUrlFromBase(String baseUrl) {
+        if (baseUrl == null) {
+            return null;
+        }
+        String raw = baseUrl.trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        try {
+            URI u = URI.create(raw);
+            if (u.getScheme() == null || u.getHost() == null) {
+                return null;
+            }
+            if (!u.getScheme().startsWith("http")) {
+                return null;
+            }
+            int port = u.getPort();
+            String authority = port > 0 ? u.getHost() + ":" + port : u.getHost();
+            return u.getScheme() + "://" + authority + "/capacity";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private JsonObject fetchCapacityJson(String url) {
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(3))
+                    .build();
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(8))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200 || resp.body() == null || resp.body().isBlank()) {
+                return null;
+            }
+            return gson.fromJson(resp.body(), JsonObject.class);
+        } catch (Exception e) {
+            LOG.debug("[ProjectConfigHandler] capacity fetch " + url + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean isPresentCapacity(JsonObject o) {
+        if (o == null) {
+            return false;
+        }
+        if (o.has("present") && o.get("present").isJsonPrimitive()
+                && o.get("present").getAsJsonPrimitive().isBoolean()
+                && !o.get("present").getAsBoolean()) {
+            return false;
+        }
+        return o.has("capacity_pct") || o.has("used_pct") || o.has("capacityPct")
+                || (o.has("windows") && o.get("windows").isJsonArray()
+                && o.getAsJsonArray("windows").size() > 0);
+    }
 }

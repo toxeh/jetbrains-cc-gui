@@ -99,8 +99,6 @@ public class ContextHandler extends BaseMessageHandler {
         final String finalModel = model;
         final String finalRequestId = requestId;
 
-        // Determine provider to route getContextUsage correctly (Claude has rich data,
-        // Grok synthesizes basic total/max from ACP usage + model limits).
         String provider = "claude";
         try {
             if (this.context.getSession() != null) {
@@ -109,18 +107,18 @@ public class ContextHandler extends BaseMessageHandler {
                     provider = p;
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         try {
             java.util.concurrent.CompletableFuture<com.google.gson.JsonObject> bridgeCall;
             if ("gemini".equalsIgnoreCase(provider) && this.context.getGeminiSDKBridge() != null) {
                 bridgeCall = this.context.getGeminiSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
-            } else if ("grok".equalsIgnoreCase(provider) && this.context.getGrokSDKBridge() != null) {
-                bridgeCall = this.context.getGrokSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
             } else {
                 bridgeCall = this.context.getClaudeSDKBridge().getContextUsage(finalSessionId, finalCwd, finalModel);
             }
-            bridgeCall.thenAccept(result -> {
+            bridgeCall
+                    .thenAccept(result -> {
                         ApplicationManager.getApplication().invokeLater(() -> {
                             try {
                                 // If the result indicates failure, route through the error callback

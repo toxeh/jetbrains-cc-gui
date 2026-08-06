@@ -6,14 +6,16 @@ import com.github.claudecodegui.settings.CodexSettingsManager;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
-import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -32,7 +34,7 @@ public class SessionSendService {
     private final Gson gson;
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
-    private final GrokSDKBridge grokSDKBridge;
+    private final Map<String, MarkerCliBridge> cliBridges;
     private final GeminiSDKBridge geminiSDKBridge;
     private final SessionContextService contextService;
 
@@ -45,11 +47,11 @@ public class SessionSendService {
             Gson gson,
             ClaudeSDKBridge claudeSDKBridge,
             CodexSDKBridge codexSDKBridge,
-            GrokSDKBridge grokSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
             SessionContextService contextService
     ) {
         this(project, state, callbackFacade, messageParser, messageMerger, gson,
-                claudeSDKBridge, codexSDKBridge, grokSDKBridge, null, contextService);
+                claudeSDKBridge, codexSDKBridge, cliBridges, null, contextService);
     }
 
     public SessionSendService(
@@ -61,7 +63,7 @@ public class SessionSendService {
             Gson gson,
             ClaudeSDKBridge claudeSDKBridge,
             CodexSDKBridge codexSDKBridge,
-            GrokSDKBridge grokSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
             GeminiSDKBridge geminiSDKBridge,
             SessionContextService contextService
     ) {
@@ -73,7 +75,7 @@ public class SessionSendService {
         this.gson = gson;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
-        this.grokSDKBridge = grokSDKBridge;
+        this.cliBridges = cliBridges != null ? cliBridges : Collections.emptyMap();
         this.geminiSDKBridge = geminiSDKBridge;
         this.contextService = contextService;
     }
@@ -159,8 +161,8 @@ public class SessionSendService {
             );
         }
 
-        if ("grok".equals(currentProvider)) {
-            return sendToGrok(
+        if ("gemini".equals(currentProvider)) {
+            return sendToGemini(
                     channelId,
                     input,
                     attachments,
@@ -172,15 +174,19 @@ public class SessionSendService {
             );
         }
 
-        if ("gemini".equals(currentProvider)) {
-            return sendToGemini(
+        if (cliBridges.containsKey(currentProvider)) {
+            if (attachments != null && !attachments.isEmpty()) {
+                LOG.warn("[CliProvider] Dropping " + attachments.size()
+                        + " attachment(s): CLI providers do not support attachments (provider="
+                        + currentProvider + ")");
+            }
+            return sendToCliProvider(
+                    currentProvider,
                     channelId,
                     input,
-                    attachments,
                     openedFilesJson,
                     agentPrompt,
                     fileTagPaths,
-                    effectivePermissionMode,
                     normalizedRequestedEffort
             );
         }
@@ -228,7 +234,8 @@ public class SessionSendService {
             resolvedMode = "default";
         }
 
-        if ("codex".equals(provider) && "plan".equals(resolvedMode)) {
+        // Codex + headless CLI providers have no plan mode equivalent.
+        if (("codex".equals(provider) || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
             return "default";
         }
         return resolvedMode;
@@ -331,48 +338,6 @@ public class SessionSendService {
         ).thenApply(result -> null);
     }
 
-    private CompletableFuture<Void> sendToGrok(
-            String channelId,
-            String input,
-            List<ClaudeSession.Attachment> attachments,
-            JsonObject openedFilesJson,
-            String agentPrompt,
-            List<String> fileTagPaths,
-            String effectivePermissionMode,
-            String requestedReasoningEffort
-    ) {
-        GrokMessageHandler handler = new GrokMessageHandler(state, callbackFacade.getCallbackHandler());
-
-        // Claude-shaped context: pass openedFiles structured to the bridge (not Codex string append).
-        // fileTagPaths can be folded into openedFiles later if needed; avoid Codex contamination.
-        Boolean streaming = readStreamingEnabled();
-        final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
-        final String currentModel = state.getModel();
-        LOG.info("[Lifecycle] sendToGrok sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
-                + ", epoch=" + runtimeSessionEpoch
-                + ", cwd=" + state.getCwd()
-                + ", model=" + currentModel
-                + ", fileTags=" + (fileTagPaths != null ? fileTagPaths.size() : 0));
-
-        return grokSDKBridge.sendMessage(
-                channelId,
-                input,
-                state.getSessionId(),
-                runtimeSessionEpoch,
-                state.getCwd(),
-                attachments,
-                effectivePermissionMode,
-                currentModel,
-                openedFilesJson,
-                agentPrompt,
-                streaming,
-                false,
-                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
-                handler
-        ).thenApply(result -> null);
-    }
-
-
     private CompletableFuture<Void> sendToGemini(
             String channelId,
             String input,
@@ -388,7 +353,7 @@ public class SessionSendService {
             callbackFacade.notifyStateChange(false, false, "Gemini bridge not available");
             return CompletableFuture.completedFuture(null);
         }
-        GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler());
+        GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler(), project);
         Boolean streaming = readStreamingEnabled();
         final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
         final String currentModel = state.getModel();
@@ -396,14 +361,25 @@ public class SessionSendService {
         if (effort == null) {
             effort = state.getReasoningEffort();
         }
-        LOG.info("[Lifecycle] sendToGemini model=" + currentModel);
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                state.getCwd(), projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = state.getCwd();
+        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            LOG.warn("[Lifecycle] sendToGemini cwd guard: " + state.getCwd() + " -> " + guardedCwd);
+            state.setCwd(guardedCwd);
+        }
+        LOG.info("[Lifecycle] sendToGemini model=" + currentModel
+                + ", sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", cwd=" + guardedCwd);
 
         return geminiSDKBridge.sendMessage(
                 channelId,
                 input,
                 state.getSessionId(),
                 runtimeSessionEpoch,
-                state.getCwd(),
+                guardedCwd,
                 attachments,
                 effectivePermissionMode,
                 currentModel,
@@ -414,6 +390,115 @@ public class SessionSendService {
                 effort,
                 handler
         ).thenApply(result -> null);
+    }
+
+    private CompletableFuture<Void> sendToCliProvider(
+            String provider,
+            String channelId,
+            String input,
+            JsonObject openedFilesJson,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String requestedReasoningEffort
+    ) {
+        MarkerCliBridge bridge = cliBridges.get(provider);
+        if (bridge == null) {
+            CodexMessageHandler handler = new CodexMessageHandler(state, callbackFacade.getCallbackHandler());
+            handler.onError("CLI provider not registered: " + provider);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        // CLI providers reuse Codex streaming marker handling (content/thinking/session_id/tools).
+        CodexMessageHandler handler = new CodexMessageHandler(state, callbackFacade.getCallbackHandler());
+
+        String contextAppend = contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
+        String finalInput = (input != null ? input : "") + contextAppend;
+        if (agentPrompt != null && !agentPrompt.isEmpty()) {
+            finalInput = finalInput + "\n\n## Agent Role and Instructions\n\n" + agentPrompt;
+            LOG.info("[Agent] ✓ Appending agentPrompt to user message for " + provider
+                    + " (length: " + agentPrompt.length() + " chars)");
+        }
+
+        String effort = normalizeCliReasoningEffort(
+                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort()
+        );
+        String modelForCli = normalizeCliModelForProvider(provider, state.getModel());
+
+        LOG.info("[Lifecycle] sendToCli provider=" + provider
+                + " sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", cwd=" + state.getCwd()
+                + ", modelRaw=" + state.getModel()
+                + ", modelCli=" + (modelForCli != null ? modelForCli : "(config-default)")
+                + ", effort=" + effort);
+
+        return bridge.sendMessage(
+                channelId,
+                finalInput,
+                state.getSessionId(),
+                state.getCwd(),
+                modelForCli != null ? modelForCli : "",
+                effort,
+                handler
+        ).thenApply(result -> null);
+    }
+
+    static String normalizeCliReasoningEffort(String effort) {
+        if (effort == null) {
+            return "medium";
+        }
+        String normalized = effort.trim().toLowerCase();
+        if ("low".equals(normalized) || "medium".equals(normalized) || "high".equals(normalized)) {
+            return normalized;
+        }
+        return "medium";
+    }
+
+    /**
+     * Map UI model selection to CLI model flag. Returns null to omit the flag
+     * (provider CLI uses its own default / config).
+     */
+    static String normalizeCliModelForProvider(String provider, String model) {
+        if (model == null) {
+            return null;
+        }
+        String trimmed = model.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String lower = trimmed.toLowerCase();
+        if ("__config_default__".equals(lower)
+                || "auto".equals(lower)
+                || "default".equals(lower)
+                || "(default)".equals(lower)
+                || "config-default".equals(lower)
+                || "config_default".equals(lower)
+                || "opencode default".equals(lower)
+                || "opencode-default".equals(lower)) {
+            return null;
+        }
+        // Leftovers after a provider switch without model reset. OpenCode
+        // legitimately supports OpenAI models, so gpt-* is only filtered for
+        // the other CLI providers.
+        if (lower.startsWith("claude-") || (lower.startsWith("gpt-") && !"opencode".equals(provider))) {
+            LOG.warn("[" + provider + "] Ignoring non-provider model leftover for CLI: " + trimmed);
+            return null;
+        }
+        if ("grok".equals(provider)) {
+            // Legacy UI stored upstream API id "grok-4.5"; CLI needs profile name "grok".
+            if ("grok-4.5".equals(lower) || "grok-4".equals(lower) || "grok-4.5-build".equals(lower)) {
+                LOG.info("[Grok] Remapping upstream model id '" + trimmed + "' to config profile 'grok'");
+                return "grok";
+            }
+        }
+        return trimmed;
+    }
+
+    /**
+     * @deprecated use {@link #normalizeCliModelForProvider(String, String)}
+     */
+    @Deprecated
+    static String normalizeGrokModelForCli(String model) {
+        return normalizeCliModelForProvider("grok", model);
     }
 
     private CompletableFuture<Void> sendToClaude(

@@ -175,6 +175,9 @@ interface Window {
    */
   onUsageUpdate?: (json: string) => void;
 
+  /** Buffers the latest usage update received before React callbacks mount. */
+  __pendingUsageUpdate?: string;
+
   /**
    * Mode changed callback
    */
@@ -908,6 +911,18 @@ interface Window {
   updateDependencyStatus?: (json: string) => void;
 
   /**
+   * CLI tools install/version detection result (Settings → CLI tab).
+   * Payload is a map of tool id → { id, name, binaryName, installed, version?, path?, error? }.
+   */
+  updateCliStatus?: (json: string) => void;
+
+  /**
+   * Live Gemini/agy model catalog from `agy models` (get_gemini_models).
+   * JSON: { success, models:[{id,label}], families:[...], binary?, error? }
+   */
+  updateGeminiModels?: (json: string) => void;
+
+  /**
    * Dependency install progress callback
    */
   dependencyInstallProgress?: (json: string) => void;
@@ -1055,6 +1070,27 @@ interface Window {
    */
   __INITIAL_TAB_MODEL__?: string;
 
+  /** Runtime page generation established by Java before exposing the bridge. */
+  __CCG_PAGE_GENERATION__?: number;
+
+  /** Identifies initial load, startup retry, or runtime recovery for this page. */
+  __CCGUI_PAGE_LOAD_KIND__?: 'initial_load' | 'startup_retry' | 'runtime_recovery';
+
+  /** True after Java has installed the runtime generation and load context. */
+  __CCGUI_PAGE_CONTEXT_READY__?: boolean;
+
+  /** True for a native watchdog reload that reuses the tab's original HTML. */
+  __CCGUI_RECOVERY_RELOAD__?: boolean;
+
+  /** True after React applies Java's authoritative recovery provider/model state. */
+  __CCGUI_RECOVERY_STATE_APPLIED__?: boolean;
+
+  /** Applies the current Java session configuration without echoing bridge commands. */
+  applyBackendTabState?: (json: string) => void;
+
+  /** Buffers backend tab state when Java responds before React callbacks mount. */
+  __pendingBackendTabState?: string;
+
   // ============================================================================
   // Provider settings panel callbacks (registered by ProviderList)
   // ============================================================================
@@ -1091,4 +1127,20 @@ interface Window {
    * JSON string or object with shape { type, title, message }.
    */
   backend_notification?: (...args: unknown[]) => void;
+
+  /**
+   * CLI provider model catalog (Kimi / OpenCode). Java pushes JSON after
+   * `get_cli_models:<provider>` via channel-manager `listModels`.
+   */
+  setCliModels?: (
+    dataOrStr:
+      | string
+      | {
+          success?: boolean;
+          provider?: string;
+          models?: Array<{ id?: string; label?: string; description?: string }>;
+          error?: string;
+          defaultModel?: string;
+        }
+  ) => void;
 }
