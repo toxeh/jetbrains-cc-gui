@@ -14,7 +14,7 @@ const EMPTY: ClaudePlanUsageState = { status: 'idle', snapshot: null };
 /**
  * Claude plan usage for ContextBar via Java bridge
  * ({@code get_claude_plan_usage} → local-agent /capacity).
- * Mirrors useGrokPlanUsage but for the claude provider.
+ * Claude plan-usage for ContextBar (ANTHROPIC_BASE_URL /capacity).
  */
 export function useClaudePlanUsage(currentProvider: string) {
   const [state, setState] = useState<ClaudePlanUsageState>(EMPTY);
