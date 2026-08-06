@@ -13,6 +13,7 @@ export function ChatInputBoxHeader({
   sdkStatusError,
   sdkInstalled,
   currentProvider,
+  selectedModel,
   onRetrySdkStatus,
   onInstallSdk,
   t,
@@ -43,6 +44,8 @@ export function ChatInputBoxHeader({
   sdkStatusLoading: boolean;
   sdkStatusError: boolean;
   currentProvider: string;
+  /** Active model id — Gemini plan bar binds quota family (Gemini vs Claude/GPT). */
+  selectedModel?: string;
   onRetrySdkStatus?: () => void;
   onInstallSdk?: () => void;
   t: TFunction;
@@ -177,6 +180,7 @@ export function ChatInputBoxHeader({
         selectedAgent={selectedAgent}
         onClearAgent={onClearAgent}
         currentProvider={currentProvider}
+        selectedModel={selectedModel}
         hasMessages={hasMessages}
         onRewind={onRewind}
         statusPanelExpanded={statusPanelExpanded}
