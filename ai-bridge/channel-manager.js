@@ -34,6 +34,7 @@ import { handleGrokCommand } from './channels/grok-channel.js';
 import { handleKimiCommand } from './channels/kimi-channel.js';
 import { handleOpenCodeCommand } from './channels/opencode-channel.js';
 import { handlePiCommand } from './channels/pi-channel.js';
+import { handleGeminiCommand } from './channels/gemini-channel.js';
 import { getSdkStatus, isClaudeSdkAvailable, isCodexSdkAvailable } from './utils/sdk-loader.js';
 import { injectStartupEnvVars, configureCliIdentity } from './config/api-config.js';
 
@@ -129,6 +130,7 @@ const providerHandlers = {
   kimi: handleKimiCommand,
   opencode: handleOpenCodeCommand,
   pi: handlePiCommand,
+  gemini: handleGeminiCommand,
   system: handleSystemCommand
 };
 
@@ -139,7 +141,7 @@ const providerHandlers = {
     // Validate provider
     console.error('[DIAG-EXEC] Validating provider...');
     if (!provider || !providerHandlers[provider]) {
-      console.error('Invalid provider. Use "claude", "codex", "grok", "kimi", "opencode", "pi", or "system"');
+      console.error('Invalid provider. Use "claude", "codex", "grok", "kimi", "opencode", "pi", "gemini", or "system"');
       console.log(JSON.stringify({
         success: false,
         error: 'Invalid provider: ' + provider

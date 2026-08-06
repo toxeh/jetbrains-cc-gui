@@ -324,7 +324,13 @@ export function useMessageSender({
     }
     if (!currentSdkInstalled) {
       addToast(
-        t('chat.sdkNotInstalled', { provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code' }) + ' ' + t('chat.goInstallSdk'),
+        t('chat.sdkNotInstalled', {
+          provider: currentProvider === 'codex'
+            ? 'Codex'
+            : currentProvider === 'gemini'
+              ? 'Antigravity CLI (agy)'
+              : 'Claude Code',
+        }) + ' ' + t('chat.goInstallSdk'),
         'warning'
       );
       setSettingsInitialTab('dependencies');

@@ -9,6 +9,7 @@ const STDIN_ENV_BY_PROVIDER = {
   kimi: 'KIMI_USE_STDIN',
   opencode: 'OPENCODE_USE_STDIN',
   pi: 'PI_USE_STDIN',
+  gemini: 'GEMINI_USE_STDIN',
 };
 
 /**
@@ -21,7 +22,7 @@ function stdinEnvKeyForProvider(provider) {
 
 /**
  * Read JSON data from stdin.
- * @param {string} provider - 'claude' | 'codex' | 'grok' | 'kimi' | 'opencode'
+ * @param {string} provider - 'claude' | 'codex' | 'grok' | 'kimi' | 'opencode' | 'pi' | 'gemini'
  * @returns {Promise<Object|null>} The parsed JSON object, or null
  */
 export async function readStdinData(provider = 'claude') {

@@ -27,8 +27,10 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     setCurrentProvider,
     setClaudePermissionMode,
     setCodexPermissionMode,
+    setGeminiPermissionMode,
     setSelectedClaudeModel,
     setSelectedCodexModel,
+    setSelectedGeminiModel,
     setLongContextEnabled,
     setReasoningEffort,
     setCodexFastMode,
@@ -90,6 +92,8 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
       setPermissionMode((prev) => (prev === nextMode ? prev : nextMode));
       if (activeProvider === 'codex') {
         setCodexPermissionMode((prev) => (prev === nextMode ? prev : nextMode));
+      } else if (activeProvider === 'gemini') {
+        setGeminiPermissionMode?.((prev) => (prev === nextMode ? prev : nextMode));
       } else {
         setClaudePermissionMode((prev) => (prev === nextMode ? prev : nextMode));
       }
@@ -105,6 +109,8 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
       setSelectedClaudeModel(normalizeClaudeModelId(modelId));
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
+    } else if (provider === 'gemini') {
+      setSelectedGeminiModel?.(modelId);
     }
   };
 
@@ -113,6 +119,8 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
       setSelectedClaudeModel(normalizeClaudeModelId(modelId));
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
+    } else if (provider === 'gemini') {
+      setSelectedGeminiModel?.(modelId);
     }
   };
 

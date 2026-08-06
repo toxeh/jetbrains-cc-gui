@@ -7,6 +7,7 @@ import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -34,6 +35,7 @@ public class SessionSendService {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final SessionContextService contextService;
 
     public SessionSendService(
@@ -48,6 +50,23 @@ public class SessionSendService {
             Map<String, MarkerCliBridge> cliBridges,
             SessionContextService contextService
     ) {
+        this(project, state, callbackFacade, messageParser, messageMerger, gson,
+                claudeSDKBridge, codexSDKBridge, cliBridges, null, contextService);
+    }
+
+    public SessionSendService(
+            Project project,
+            SessionState state,
+            SessionCallbackFacade callbackFacade,
+            MessageParser messageParser,
+            MessageMerger messageMerger,
+            Gson gson,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GeminiSDKBridge geminiSDKBridge,
+            SessionContextService contextService
+    ) {
         this.project = project;
         this.state = state;
         this.callbackFacade = callbackFacade;
@@ -57,6 +76,7 @@ public class SessionSendService {
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
         this.cliBridges = cliBridges != null ? cliBridges : Collections.emptyMap();
+        this.geminiSDKBridge = geminiSDKBridge;
         this.contextService = contextService;
     }
 
@@ -138,6 +158,19 @@ public class SessionSendService {
                     effectivePermissionMode,
                     normalizedRequestedEffort,
                     effectiveCodexServiceTier
+            );
+        }
+
+        if ("gemini".equals(currentProvider)) {
+            return sendToGemini(
+                    channelId,
+                    input,
+                    attachments,
+                    openedFilesJson,
+                    agentPrompt,
+                    fileTagPaths,
+                    effectivePermissionMode,
+                    normalizedRequestedEffort
             );
         }
 

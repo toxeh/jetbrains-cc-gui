@@ -65,6 +65,21 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("o1", 200_000);
         MODEL_CONTEXT_LIMITS.put("o1-mini", 128_000);
         MODEL_CONTEXT_LIMITS.put("o1-preview", 128_000);
+
+        // Gemini / Antigravity models (common catalog defaults)
+        MODEL_CONTEXT_LIMITS.put("gemini", 200_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-2.5-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-2.5-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-medium", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-medium", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-low", 1_000_000);
     }
 
     private final HandlerContext context;

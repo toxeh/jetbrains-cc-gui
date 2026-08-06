@@ -83,6 +83,7 @@ public class ChatWindowDelegate {
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
+        default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() { return null; }
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
         JPanel getMainPanel();
