@@ -38,6 +38,20 @@ public final class TokenUsageUtils {
                 "cache_creation_input_tokens", "cache_write_tokens");
         int cacheRead = firstNonNegativeInt(usage,
                 "cache_read_input_tokens", "cache_read_tokens", "cached_input_tokens");
+
+        // Gemini/agy: input_tokens is already the prompt occupancy. Cache fields are
+        // informational; adding them when input already includes cached tokens
+        // double-counts and can show multi-million "context" on small turns.
+        if ("gemini".equals(provider)) {
+            if (input > 0) {
+                // If cache is reported separately and is larger than bare input, prefer
+                // the larger single value rather than summing (agy usually reports cache=0).
+                return Math.max(input, cacheRead);
+            }
+            return cacheRead + cacheCreation;
+        }
+
+        // Claude: input excludes cache; sum the parts.
         return input + cacheCreation + cacheRead;
     }
 

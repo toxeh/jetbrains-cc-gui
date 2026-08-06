@@ -119,13 +119,23 @@ public class ModelProviderHandler {
                     + " (was: " + previousModel + ")");
             context.setCurrentModel(model);
 
+            String provider = context.getCurrentProvider();
             if (context.getSession() != null) {
+                String previousModel = context.getSession().getModel();
                 context.getSession().setModel(model);
                 if (modelChanged) {
                     TokenUsageUtils.clearContextUsageFromSessionMessages(
                             context.getSession().getMessages());
                 }
                 LOG.info("[ModelProviderHandler] Updated session model to canonical ID: " + model);
+                // agy resumes the full conversation blob via --conversation. Switching
+                // models (or effort slugs) inside one fat multi-model history is what
+                // blew context to ~2M tokens. Start a fresh conversation instead.
+                if (shouldResetGeminiSessionOnModelChange(provider, previousModel, model)) {
+                    context.getSession().clearSessionId();
+                    LOG.info("[ModelProviderHandler] Cleared Gemini conversation id after model change: "
+                            + previousModel + " -> " + model);
+                }
             }
 
             if (modelChanged) {
@@ -136,7 +146,6 @@ public class ModelProviderHandler {
                 com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
             }
 
-            String provider = context.getCurrentProvider();
             boolean isCodex = "codex".equalsIgnoreCase(provider);
             boolean isGemini = "gemini".equalsIgnoreCase(provider);
             String resolvedModelForUsage = isCodex || isGemini
@@ -197,6 +206,14 @@ public class ModelProviderHandler {
                     TokenUsageUtils.clearContextUsageFromSessionMessages(
                             context.getSession().getMessages());
                 }
+                // Provider session ids are not interchangeable (Claude UUID vs Codex
+                // thread vs agy conversation). Drop the previous id on a real switch
+                // so the next send cannot resume a foreign conversation.
+                if (shouldClearSessionOnProviderSwitch(previousProvider, provider)) {
+                    context.getSession().clearSessionId();
+                    LOG.info("[ModelProviderHandler] Cleared session id after provider switch: "
+                            + previousProvider + " -> " + provider);
+                }
             }
 
             if (providerChanged) {
@@ -219,6 +236,36 @@ public class ModelProviderHandler {
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set provider: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Gemini/agy only: clear {@code --conversation} resume when the selected model
+     * slug actually changes. Reaffirmations of the same model keep the session.
+     */
+    static boolean shouldResetGeminiSessionOnModelChange(String provider, String previousModel, String newModel) {
+        if (provider == null || !"gemini".equalsIgnoreCase(provider.trim())) {
+            return false;
+        }
+        if (newModel == null || newModel.trim().isEmpty()) {
+            return false;
+        }
+        String prev = previousModel != null ? previousModel.trim() : "";
+        String next = newModel.trim();
+        return !prev.isEmpty() && !prev.equals(next);
+    }
+
+    /**
+     * True when the tab moves between distinct non-empty providers (not a
+     * reaffirmation of the same provider, and not empty init races).
+     */
+    static boolean shouldClearSessionOnProviderSwitch(String previousProvider, String newProvider) {
+        if (previousProvider == null || previousProvider.trim().isEmpty()) {
+            return false;
+        }
+        if (newProvider == null || newProvider.trim().isEmpty()) {
+            return false;
+        }
+        return !previousProvider.trim().equalsIgnoreCase(newProvider.trim());
     }
 
     /**
@@ -517,8 +564,10 @@ public class ModelProviderHandler {
             return 200_000;
         }
 
+        String normalized = stripAgyEffortSuffix(model.trim());
+
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
-        java.util.regex.Matcher matcher = pattern.matcher(model);
+        java.util.regex.Matcher matcher = pattern.matcher(normalized);
 
         if (matcher.find()) {
             try {
@@ -535,15 +584,28 @@ public class ModelProviderHandler {
             }
         }
 
-        Integer exact = MODEL_CONTEXT_LIMITS.get(model);
+        Integer exact = MODEL_CONTEXT_LIMITS.get(normalized);
+        if (exact != null) {
+            return exact;
+        }
+        // Also try original (in case map has full slug keys)
+        exact = MODEL_CONTEXT_LIMITS.get(model);
         if (exact != null) {
             return exact;
         }
 
-        // Prefix match for agy family slugs (gemini-3.6-flash-medium → gemini-3.6-flash)
+        // Longest-prefix match for family slugs (gemini-3.6-flash-medium → gemini-3.6-flash).
+        // Require key length >= 6 so short keys like "o1" / "gpt-4" cannot steal longer ids.
         String bestKey = null;
         for (String key : MODEL_CONTEXT_LIMITS.keySet()) {
-            if (model.startsWith(key + "-") || model.startsWith(key + "[")) {
+            if (key == null || key.length() < 6) {
+                continue;
+            }
+            if (normalized.equals(key)
+                    || normalized.startsWith(key + "-")
+                    || normalized.startsWith(key + "[")
+                    || model.startsWith(key + "-")
+                    || model.startsWith(key + "[")) {
                 if (bestKey == null || key.length() > bestKey.length()) {
                     bestKey = key;
                 }
@@ -553,12 +615,32 @@ public class ModelProviderHandler {
             return MODEL_CONTEXT_LIMITS.get(bestKey);
         }
 
-        // Gemini catalog models default to 1M when unknown (agy/Gemini long context)
-        if (model.startsWith("gemini")) {
+        // Provider-ish defaults by id prefix (agy multi-model catalog)
+        if (normalized.startsWith("gemini")) {
             return 1_000_000;
+        }
+        if (normalized.startsWith("claude")) {
+            return 200_000;
+        }
+        if (normalized.startsWith("gpt-oss")) {
+            return 128_000;
         }
 
         return 200_000;
+    }
+
+    /** Strip trailing agy effort suffix (-low|-medium|-high|-xhigh|-thinking). */
+    static String stripAgyEffortSuffix(String modelId) {
+        if (modelId == null || modelId.isEmpty()) {
+            return modelId;
+        }
+        String[] suffixes = { "-thinking", "-xhigh", "-medium", "-high", "-low" };
+        for (String suffix : suffixes) {
+            if (modelId.endsWith(suffix) && modelId.length() > suffix.length()) {
+                return modelId.substring(0, modelId.length() - suffix.length());
+            }
+        }
+        return modelId;
     }
 
     public static int getModelContextLimit(String provider, String model) {

@@ -653,13 +653,34 @@ public class ClaudeChatWindow {
             session.setReasoningEffort(savedState.reasoningEffort);
         }
 
-        String restoredSessionId = isNonEmpty(savedState.sessionId) ? savedState.sessionId : null;
+        // Gemini/agy has no on-disk history loader yet (getSessionMessages is empty).
+        // Restoring a persisted conversation id with an empty UI still passes
+        // --conversation and resumes a fat multi-model blob (~2M context). Skip
+        // resume-id restore for gemini until history import exists; keep model/cwd.
+        String restoredSessionId = null;
+        if (isNonEmpty(savedState.sessionId)
+                && !"gemini".equalsIgnoreCase(savedState.provider)) {
+            restoredSessionId = savedState.sessionId;
+        } else if (isNonEmpty(savedState.sessionId)
+                && "gemini".equalsIgnoreCase(savedState.provider)) {
+            LOG.info("[TabRestore] Skipping Gemini conversation resume id (no history import): "
+                    + savedState.sessionId);
+        }
         String restoredCwd = isNonEmpty(savedState.cwd) ? savedState.cwd : session.getCwd();
-        session.setSessionInfo(restoredSessionId, restoredCwd);
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                restoredCwd, projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = restoredCwd;
+        } else if (restoredCwd != null && !guardedCwd.equals(restoredCwd)) {
+            LOG.warn("[TabRestore] Rejected unsafe restored cwd=" + restoredCwd
+                    + ", using=" + guardedCwd);
+        }
+        session.setSessionInfo(restoredSessionId, guardedCwd);
         persistTabSessionState();
 
         LOG.info("[TabRestore] Restored tab session state: provider=" + savedState.provider
-                + ", sessionId=" + savedState.sessionId + ", cwd=" + savedState.cwd + ")");
+                + ", sessionId=" + restoredSessionId + ", cwd=" + guardedCwd + ")");
     }
 
     public void restorePersistedTabSessionState(TabStateService.TabSessionState savedState, boolean loadImmediately) {
@@ -917,7 +938,9 @@ public class ClaudeChatWindow {
             @Override
             public void onSessionIdReceived(String newSessionId) {
                 super.onSessionIdReceived(newSessionId);
-                sessionId = newSessionId;
+                // Empty string = clear resume id (model/provider switch). Keep
+                // permissionServiceKey as the exposed id for detach/routing.
+                sessionId = resolveExposedSessionId(newSessionId, permissionServiceKey);
                 persistTabSessionState();
             }
         };

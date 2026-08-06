@@ -6,6 +6,7 @@
 import { runAgyTurn } from './agy-runner.js';
 import { AgyEventNormalizer } from './agy-event-normalizer.js';
 import { buildErrorPayload, isAgyAvailable, resolveAgyBinary } from './agy-utils.js';
+import { selectWorkingDirectory } from '../../utils/path-utils.js';
 
 /**
  * @param {object|string} messageOrOptions Claude-shaped options bag or plain message
@@ -47,10 +48,12 @@ export async function sendMessage(messageOrOptions, sessionId = '', cwd = '', pe
       );
     }
 
+    const guardedCwd = selectWorkingDirectory(workCwd);
+
     console.error('[DEBUG] Gemini/agy sendMessage:', {
       bin: resolveAgyBinary(),
       hasSessionId: !!sid,
-      cwd: workCwd || '(current)',
+      cwd: guardedCwd || '(current)',
       model: modelId || '(default)',
       permissionMode: perm || '(default)',
       reasoningEffort: reasoningEffort || '(none)',
@@ -68,7 +71,7 @@ export async function sendMessage(messageOrOptions, sessionId = '', cwd = '', pe
     const turn = await runAgyTurn({
       message: finalMessage,
       sessionId: sid,
-      cwd: workCwd,
+      cwd: guardedCwd,
       model: modelId,
       reasoningEffort,
       agent,

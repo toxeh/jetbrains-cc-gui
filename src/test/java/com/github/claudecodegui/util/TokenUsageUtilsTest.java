@@ -41,8 +41,21 @@ public class TokenUsageUtilsTest {
         usage.addProperty("cache_read_tokens", 100);
         usage.addProperty("total_tokens", 27911);
 
-        // Must NOT use total_tokens (would overstate context by including output)
-        assertEquals(27893, TokenUsageUtils.extractContextTokens(usage, "gemini"));
+        // Must NOT use total_tokens; must NOT sum input+cache (double-count)
+        assertEquals(27793, TokenUsageUtils.extractContextTokens(usage, "gemini"));
+    }
+
+    @Test
+    public void geminiDoesNotInflateWhenCacheEqualsInput() {
+        JsonObject usage = new JsonObject();
+        usage.addProperty("input_tokens", 900000);
+        usage.addProperty("cache_read_tokens", 900000);
+        usage.addProperty("cache_creation_input_tokens", 150000);
+        usage.addProperty("output_tokens", 10);
+        usage.addProperty("total_tokens", 1950010);
+
+        // Would be ~1.95M if we summed input+cache+creation; occupancy is input.
+        assertEquals(900000, TokenUsageUtils.extractContextTokens(usage, "gemini"));
     }
 
     @Test

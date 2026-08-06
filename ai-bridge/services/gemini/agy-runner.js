@@ -8,7 +8,9 @@ import {
   resolveAgyBinary,
   buildAgyArgs,
   buildAgyEnv,
+  resolveAgySpawnModel,
 } from './agy-utils.js';
+import { selectWorkingDirectory } from '../../utils/path-utils.js';
 
 /**
  * Run one agy headless turn.
@@ -42,11 +44,11 @@ export function runAgyTurn(options = {}) {
     ));
   }
 
-  // agy catalog exposes effort as part of the model slug
-  // (gemini-3.5-flash-medium, claude-opus-4-6-thinking, …). Passing a separate
-  // --effort is rejected for bare slugs (e.g. claude-sonnet-4-6) and is redundant
-  // when the slug already encodes effort. Never send --effort — only --model.
-  const modelStr = String(model || '').trim();
+  // Resolve family base (gemini-3.6-flash) → full catalog slug (…-medium).
+  // Never pass a separate --effort: bare slugs like claude-sonnet-4-6 reject it,
+  // and effort-required families are selected via the full --model slug.
+  const resolved = resolveAgySpawnModel(model, reasoningEffort);
+  const modelStr = resolved.model;
   const args = buildAgyArgs({
     message,
     conversationId: sessionId,
@@ -59,7 +61,8 @@ export function runAgyTurn(options = {}) {
   });
 
   const env = buildAgyEnv(envOverride || process.env);
-  const workCwd = cwd && String(cwd).trim() ? String(cwd).trim() : process.cwd();
+  // Guard against plugin/ai-bridge/~/.gemini paths becoming workspaceDirs.
+  const workCwd = selectWorkingDirectory(cwd);
 
   // Avoid logging full prompt body (-p value)
   const safeArgs = args.map((a, i) => (i > 0 && args[i - 1] === '-p' ? '<prompt>' : a));

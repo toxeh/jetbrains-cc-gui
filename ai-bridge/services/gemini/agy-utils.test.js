@@ -13,6 +13,7 @@ import {
   parseAgyModelsOutput,
   splitAgyModelId,
   composeAgyModelId,
+  resolveAgySpawnModel,
   groupAgyModelFamilies,
   stripEffortFromLabel,
 } from './agy-utils.js';
@@ -193,6 +194,34 @@ test('extractAgyContextTokens uses input+cache not total/output', () => {
     total_tokens: 1174,
   }), 175);
   assert.equal(extractAgyContextTokens(null), 0);
+});
+
+test('resolveAgySpawnModel upgrades bare gemini family to effort slug', () => {
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.6-flash', ''), {
+    model: 'gemini-3.6-flash-medium',
+    effort: '',
+  });
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.6-flash', 'high'), {
+    model: 'gemini-3.6-flash-high',
+    effort: '',
+  });
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.6-flash-low', 'high'), {
+    model: 'gemini-3.6-flash-low',
+    effort: '',
+  });
+  // Bare Claude models must never get a fake -medium suffix or --effort
+  assert.deepEqual(resolveAgySpawnModel('claude-sonnet-4-6', 'medium'), {
+    model: 'claude-sonnet-4-6',
+    effort: '',
+  });
+  assert.deepEqual(resolveAgySpawnModel('claude-sonnet-4-6', ''), {
+    model: 'claude-sonnet-4-6',
+    effort: '',
+  });
+  assert.deepEqual(resolveAgySpawnModel('claude-opus-4-6', 'thinking'), {
+    model: 'claude-opus-4-6-thinking',
+    effort: '',
+  });
 });
 
 test('buildGeminiContextUsagePayload percentage', () => {
