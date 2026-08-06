@@ -18,14 +18,25 @@ describe('useUsageTracking gemini mapping', () => {
     expect(result.current.isSdkInstalled('claude')).toBe(false);
   });
 
-  it('returns false for gemini before sdk status is loaded', () => {
+  it('returns false for gemini when status is unknown and not loaded', () => {
+    const { result } = renderHook(() => useUsageTracking());
+    act(() => {
+      result.current.setSdkStatus({});
+      result.current.setSdkStatusLoaded(false);
+    });
+    expect(result.current.isSdkInstalled('gemini')).toBe(false);
+    expect(result.current.isSdkStatusKnown('gemini')).toBe(false);
+  });
+
+  it('maps gemini provider id to gemini-cli for isSdkStatusKnown', () => {
     const { result } = renderHook(() => useUsageTracking());
     act(() => {
       result.current.setSdkStatus({
-        'gemini-cli': { status: 'installed', installed: true },
+        'gemini-cli': { status: 'not_installed', installed: false },
       });
-      result.current.setSdkStatusLoaded(false);
+      result.current.setSdkStatusLoaded(true);
     });
+    expect(result.current.isSdkStatusKnown('gemini')).toBe(true);
     expect(result.current.isSdkInstalled('gemini')).toBe(false);
   });
 });
