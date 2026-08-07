@@ -155,8 +155,10 @@ export function runAgyTurn(options = {}) {
       const st = String(status || '').toUpperCase();
 
       if (exitCode !== 0 && (!st || st === 'ERROR' || st === 'INVALID')) {
+        const stderrSnippet = String(stderrBuf || '').trim();
         const errText = resultError
           || extractAuthHint(stderrBuf)
+          || (stderrSnippet ? `agy stderr: ${stderrSnippet}` : null)
           || `agy exited with code ${exitCode}`;
         if (!response && !conversationId) {
           reject(new Error(errText));

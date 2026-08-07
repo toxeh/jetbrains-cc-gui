@@ -58,15 +58,16 @@ public class GeminiSDKBridge extends BaseSDKBridge {
             AtomicReference<String> lastNodeError
     ) {
         if (line.contains("[DEBUG]") || line.startsWith("[AGY]") || line.startsWith("[DIAG-")) {
-            LOG.debug("[Gemini] " + line);
-            return;
+            LOG.info("[Gemini] " + line);
         }
 
         if (line.startsWith("[STDIN_ERROR]")
                 || line.startsWith("[STDIN_PARSE_ERROR]")
                 || line.startsWith("[COMMAND_ERROR]")
                 || line.startsWith("[UNCAUGHT_ERROR]")
-                || line.startsWith("[UNHANDLED_REJECTION]")) {
+                || line.startsWith("[UNHANDLED_REJECTION]")
+                || line.startsWith("[AGY]")
+                || line.startsWith("[AGY-STDOUT-NONJSON]")) {
             lastNodeError.set(line);
         }
 
