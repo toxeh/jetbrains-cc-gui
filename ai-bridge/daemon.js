@@ -481,8 +481,6 @@ async function processRequest(request) {
       await preconnectPersistent(stdinData);
     } else if (provider === 'claude' && command === 'resetRuntime') {
       await resetRuntimePersistent(stdinData);
-    } else if (provider === 'claude' && command === 'getContextUsage') {
-      await getContextUsagePersistent(stdinData);
     } else if (provider === 'gemini' && command === 'send') {
       await handleGeminiCommand('send', [], stdinData);
     } else if (provider === 'gemini' && (command === 'getContextUsage' || command === 'getUsage' || command === 'listModels' || command === 'checkCli')) {
@@ -497,6 +495,8 @@ async function processRequest(request) {
       await grokPreconnectPersistent(stdinData);
     } else if (provider === 'grok' && command === 'resetRuntime') {
       await grokResetRuntimePersistent(stdinData);
+    } else if (provider === 'grok' && command === 'setPermissionMode') {
+      await grokSetPermissionModePersistent(stdinData);
     } else {
       // Dispatch to the existing handlers for non-send commands.
       switch (provider) {
@@ -511,7 +511,6 @@ async function processRequest(request) {
           break;
         case 'grok':
           await handleGrokCommand(command, [], stdinData);
-          break;
           break;
         default:
           throw new Error(`Unknown provider: ${provider}`);
