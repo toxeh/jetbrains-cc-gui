@@ -88,6 +88,16 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("claude-opus-4-6-thinking", 200_000);
         // Open-weight / other agy catalog entries — conservative defaults
         MODEL_CONTEXT_LIMITS.put("gpt-oss-120b", 128_000);
+
+        // Grok models (xAI)
+        MODEL_CONTEXT_LIMITS.put("grok-2", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-2-latest", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-beta", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-1.5", 128_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
+        MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
     }
 
     private final HandlerContext context;
