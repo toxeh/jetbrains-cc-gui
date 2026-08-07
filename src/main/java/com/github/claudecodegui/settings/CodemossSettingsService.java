@@ -187,7 +187,9 @@ public class CodemossSettingsService {
     }
 
     private String redactUrl(String url) {
-        if (url == null || url.trim().isEmpty()) return "(empty)";
+        if (url == null || url.trim().isEmpty()) {
+            return "(empty)";
+        }
         return url.trim();
     }
     private static final int CONFIG_VERSION = 2;
