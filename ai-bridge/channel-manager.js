@@ -156,6 +156,7 @@ const providerHandlers = {
   try {
     // Validate provider
     console.error('[DIAG-EXEC] Validating provider...');
+    if (!providerHandlers[provider]) {
       console.error('Invalid provider. Use "claude", "codex", "grok", "kimi", "opencode", "pi", "gemini", or "system"');
       writeJsonAndExit({
         success: false,
