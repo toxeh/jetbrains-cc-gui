@@ -481,6 +481,8 @@ async function processRequest(request) {
       await preconnectPersistent(stdinData);
     } else if (provider === 'claude' && command === 'resetRuntime') {
       await resetRuntimePersistent(stdinData);
+    } else if (provider === 'claude' && command === 'getContextUsage') {
+      await getContextUsagePersistent(stdinData);
     } else if (provider === 'gemini' && command === 'send') {
       await handleGeminiCommand('send', [], stdinData);
     } else if (provider === 'gemini' && (command === 'getContextUsage' || command === 'getUsage' || command === 'listModels' || command === 'checkCli')) {
