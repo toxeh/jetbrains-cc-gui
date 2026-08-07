@@ -11,6 +11,7 @@ import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.grok.GrokCliBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.kimi.KimiCliBridge;
 import com.github.claudecodegui.provider.opencode.OpenCodeCliBridge;
 import com.github.claudecodegui.provider.pi.PiCliBridge;
@@ -65,6 +66,7 @@ public class ClaudeChatWindow {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
+    private final GrokSDKBridge grokSDKBridge;
     private final GeminiSDKBridge geminiSDKBridge;
     private final GrokCliBridge grokCliBridge;
     private final KimiCliBridge kimiCliBridge;
@@ -167,6 +169,7 @@ public class ClaudeChatWindow {
         this.piCliBridge = new PiCliBridge();
         this.cliBridges = SessionProviderRouter.registerCliBridges(
                 this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge);
+        this.grokSDKBridge = new GrokSDKBridge();
         this.geminiSDKBridge = new GeminiSDKBridge();
         this.settingsService = new CodemossSettingsService();
         this.htmlLoader = new HtmlLoader(getClass());
@@ -211,7 +214,7 @@ public class ClaudeChatWindow {
                 () -> frontendReady
         );
 
-        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, geminiSDKBridge);
+        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, grokSDKBridge, geminiSDKBridge);
 
         this.chatWindowDelegate = new ChatWindowDelegate(createDelegateHost());
         chatWindowDelegate.loadPermissionModeFromSettings();
@@ -245,6 +248,11 @@ public class ClaudeChatWindow {
             @Override
             public GeminiSDKBridge getGeminiSDKBridge() {
                 return geminiSDKBridge;
+            }
+
+            @Override
+            public GrokSDKBridge getGrokSDKBridge() {
+                return grokSDKBridge;
             }
 
             @Override
@@ -541,6 +549,10 @@ public class ClaudeChatWindow {
 
     public GeminiSDKBridge getGeminiSDKBridge() {
         return geminiSDKBridge;
+    }
+
+    public GrokSDKBridge getGrokSDKBridge() {
+        return grokSDKBridge;
     }
 
     public GrokCliBridge getGrokCliBridge() {
@@ -1543,6 +1555,11 @@ public class ClaudeChatWindow {
             }
 
             @Override
+            public GrokSDKBridge getGrokSDKBridge() {
+                return grokSDKBridge;
+            }
+
+            @Override
             public JPanel getMainPanel() {
                 return mainPanel;
             }
@@ -1662,6 +1679,11 @@ public class ClaudeChatWindow {
             @Override
             public GeminiSDKBridge getGeminiSDKBridge() {
                 return geminiSDKBridge;
+            }
+
+            @Override
+            public GrokSDKBridge getGrokSDKBridge() {
+                return grokSDKBridge;
             }
 
             @Override

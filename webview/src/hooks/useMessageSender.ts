@@ -1,9 +1,9 @@
 import { useCallback, type RefObject } from 'react';
 import type { TFunction } from 'i18next';
-import { sendBridgeEvent, sendToJava } from '../utils/bridge';
+import { sendBridgeEvent } from '../utils/bridge';
 import type { ClaudeContentBlock, ClaudeMessage } from '../types';
 import {
-  modelSupportsReasoningEffort,
+  EFFORT_SUPPORTED_CLAUDE_MODELS,
   apply1MContextSuffix,
 } from '../components/ChatInputBox/types';
 import type { Attachment, ChatInputBoxHandle, PermissionMode, ReasoningEffort, SelectedAgent, CodexFastMode } from '../components/ChatInputBox/types';
@@ -16,8 +16,6 @@ export const NEW_SESSION_COMMANDS = new Set(['/new', '/clear', '/reset']);
 export const RESUME_COMMANDS = new Set(['/resume', '/continue']);
 export const PLAN_COMMANDS = new Set(['/plan']);
 export const CONTEXT_COMMANDS = new Set(['/context']);
-export const USAGE_COMMANDS = new Set(['/usage']);
-export const EFFORT_COMMANDS = new Set(['/effort', '/reasoning', '/thinking']);
 
 // Hoisted regex to avoid creating new RegExp on every call
 const WHITESPACE_REGEX = /\s+/;
@@ -51,10 +49,7 @@ export interface UseMessageSenderOptions {
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
   selectedAgent: SelectedAgent | null;
-  onReasoningChange?: (effort: ReasoningEffort) => void;
-  /** @deprecated prefer sdkStatusLoading */
-  sdkStatusLoaded?: boolean;
-  sdkStatusLoading?: boolean;
+  sdkStatusLoading: boolean;
   currentSdkInstalled: boolean;
   sentAttachmentsRef: RefObject<Map<string, Array<{ fileName: string; mediaType: string }>>>;
   chatInputRef: RefObject<ChatInputBoxHandle | null>;
@@ -87,8 +82,6 @@ export function useMessageSender({
   reasoningEffort,
   codexFastMode,
   selectedAgent,
-  onReasoningChange,
-  sdkStatusLoaded,
   sdkStatusLoading,
   currentSdkInstalled,
   sentAttachmentsRef,
@@ -109,7 +102,6 @@ export function useMessageSender({
   openContextUsageDialog,
   closeContextUsageDialog,
 }: UseMessageSenderOptions) {
-  const isSdkStatusPending = sdkStatusLoading ?? (sdkStatusLoaded === false);
   /**
    * Check if the input is a new session command
    */
@@ -147,41 +139,22 @@ export function useMessageSender({
       return true;
     }
 
-    // /effort <level> (and aliases) - immediate UI update for supported models (Grok / Codex / Claude)
-    if (EFFORT_COMMANDS.has(command)) {
-      const parts = text.split(/\s+/);
-      let level = (parts[1] || '').toLowerCase().trim();
-      if (level === 'x-high' || level === 'x_high') level = 'xhigh';
-      if (level === 'max') level = 'xhigh'; // Grok doc alias
-      const candidate = level as ReasoningEffort;
-      if (['low', 'medium', 'high', 'xhigh', 'max'].includes(candidate) && shouldSendReasoningEffort(currentProvider, selectedModel)) {
-        if (onReasoningChange) {
-          onReasoningChange(candidate);
-        }
-        addToast(t('chat.effortSet', { level: candidate, defaultValue: `Reasoning effort set to ${candidate}` }) as string, 'info');
-        return true;
-      } else {
-        addToast(t('chat.effortNotSupported', { defaultValue: 'Reasoning effort not supported (or not available for current Grok model)' }) as string, 'warning');
-        return true;
-      }
-    }
-
     return false;
-  }, [setCurrentView, handleModeSelect, currentProvider, addToast, t, onReasoningChange, selectedModel]);
+  }, [setCurrentView, handleModeSelect, currentProvider, addToast, t]);
 
   /**
    * Check for context usage command (/context)
-   * Opens a dialog to display context window usage (supported for Claude and Grok).
+   * Only available for Claude provider. Opens a dialog to display context window usage.
    */
   const checkContextCommand = useCallback((text: string): boolean => {
     if (!text.startsWith('/')) return false;
     const command = text.split(WHITESPACE_REGEX)[0].toLowerCase();
     if (CONTEXT_COMMANDS.has(command)) {
-      if (currentProvider !== 'claude' && currentProvider !== 'grok') {
+      if (currentProvider !== 'claude') {
         addToast(t('chat.commandProviderOnly', {
           command,
-          provider: currentProvider === 'codex' ? 'Codex' : 'Claude',
-          defaultValue: `${command} is only available for Claude/Grok providers`,
+          provider: 'Claude',
+          defaultValue: `${command} is only available for Claude provider`,
         }), 'warning');
         return true;
       }
@@ -192,12 +165,10 @@ export function useMessageSender({
       openContextUsageDialog(requestId, true);
 
       // Send bridge event to fetch context usage with current model
-      // Apply [1m] suffix only for Claude if long context enabled.
-      const modelForContext = currentProvider === 'claude'
-        ? apply1MContextSuffix(selectedModel, longContextEnabled ?? false)
-        : selectedModel;
+      // Apply [1m] suffix if long context is enabled so the SDK creates
+      // a runtime with the correct context window limit.
       const sent = sendBridgeEvent('get_context_usage', JSON.stringify({
-        model: modelForContext,
+        model: apply1MContextSuffix(selectedModel, longContextEnabled ?? false),
         requestId,
       }));
 
@@ -207,13 +178,6 @@ export function useMessageSender({
           defaultValue: 'Bridge is not available right now',
         }), 'error');
       }
-      return true;
-    }
-
-    if (USAGE_COMMANDS.has(command) && currentProvider === 'grok') {
-      // For Grok /usage fetch live billing and push to usage stats (or could render as message)
-      sendToJava('get_grok_usage', { cwd: null });
-      addToast(t('chat.grokUsageRequested', { defaultValue: 'Fetching Grok usage...' }), 'info');
       return true;
     }
     return false;
@@ -360,17 +324,11 @@ export function useMessageSender({
     if (!text && !hasAttachments) return;
 
     // Check SDK status
-    if (isSdkStatusPending) {
+    if (sdkStatusLoading) {
       addToast(t('chat.sdkStatusLoading'), 'info');
       return;
     }
     if (!currentSdkInstalled) {
-      const providerLabel =
-        currentProvider === 'codex'
-          ? 'Codex'
-          : currentProvider === 'grok'
-            ? 'Grok'
-            : 'Claude Code';
       addToast(
         t('chat.sdkNotInstalled', {
           provider: currentProvider === 'codex'
@@ -451,7 +409,7 @@ export function useMessageSender({
     // Send message to backend
     sendMessageToBackend(text, attachments, agentInfo, fileTagsInfo, permissionMode);
   }, [
-    isSdkStatusPending,
+    sdkStatusLoading,
     currentSdkInstalled,
     currentProvider,
     permissionMode,

@@ -38,7 +38,7 @@ public class GrokCliBridge extends MarkerCliBridge {
     @Override
     public List<JsonObject> getSessionMessages(String sessionId, String cwd) {
         try {
-            return new GrokHistoryReader().getSessionMessages(sessionId, cwd);
+            return new GrokHistoryReader().getSessionMessages(sessionId);
         } catch (Exception e) {
             LOG.warn("[Grok] Failed to load session messages: " + e.getMessage());
             return Collections.emptyList();

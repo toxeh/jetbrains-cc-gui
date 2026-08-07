@@ -3,8 +3,6 @@ import { sendBridgeEvent } from '../../utils/bridge';
 import {
   CLAUDE_MODELS,
   CODEX_MODELS,
-  GROK_MODELS,
-  GEMINI_MODELS,
   DEFAULT_CLAUDE_MODEL_ID,
   DEFAULT_GEMINI_MODEL_ID,
   GROK_DEFAULT_MODEL_ID,
@@ -20,8 +18,6 @@ import {
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider, normalizeCliPermissionMode } from './cliProviders';
-
-const KNOWN_PROVIDERS = ['claude', 'codex', 'grok', 'gemini'] as const;
 
 const STORAGE_KEY = 'model-selection-state';
 const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max', 'thinking'] as const;
@@ -266,13 +262,6 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
         if (isValidPermissionMode(state.piPermissionMode)) {
           restoredPiPermissionMode = normalizeCliPermissionMode(state.piPermissionMode);
-        }
-
-        if (isValidPermissionMode(state.grokPermissionMode)) {
-          restoredGrokPermissionMode = state.grokPermissionMode;
-        }
-        if (isValidPermissionMode(state.geminiPermissionMode)) {
-          restoredGeminiPermissionMode = state.geminiPermissionMode;
         }
 
         if (typeof state.longContextEnabled === 'boolean') {

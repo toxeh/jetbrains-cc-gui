@@ -114,26 +114,6 @@ async function handleSystemCommand(command, args, stdinData) {
       }));
       break;
 
-    case 'checkGrokCli':
-      // Grok uses the external CLI (grok in PATH or GROK_CLI_PATH)
-      // We do a simple spawn check later; for now report true if binary resolves
-      console.log(JSON.stringify({
-        success: true,
-        available: true
-      }));
-      break;
-
-    case 'checkAgyCli':
-    case 'checkGeminiCli': {
-      const { isAgyAvailable, resolveAgyBinary } = await import('./services/gemini/agy-utils.js');
-      console.log(JSON.stringify({
-        success: true,
-        available: isAgyAvailable(),
-        binary: resolveAgyBinary() || '',
-      }));
-      break;
-    }
-
     default:
       console.log(JSON.stringify({
         success: false,

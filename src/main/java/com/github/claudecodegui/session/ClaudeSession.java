@@ -6,6 +6,7 @@ import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -56,6 +57,7 @@ public class ClaudeSession {
     // SDK bridges
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GrokSDKBridge grokSDKBridge;
     private final GeminiSDKBridge geminiSDKBridge;
 
     // Permission manager
@@ -169,9 +171,21 @@ public class ClaudeSession {
             Map<String, MarkerCliBridge> cliBridges,
             GeminiSDKBridge geminiSDKBridge
     ) {
+        this(project, claudeSDKBridge, codexSDKBridge, cliBridges, null, geminiSDKBridge);
+    }
+
+    public ClaudeSession(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GrokSDKBridge grokSDKBridge,
+            GeminiSDKBridge geminiSDKBridge
+    ) {
         this.project = project;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
+        this.grokSDKBridge = grokSDKBridge;
         this.geminiSDKBridge = geminiSDKBridge != null ? geminiSDKBridge : new GeminiSDKBridge();
 
         // Initialize managers
@@ -182,7 +196,7 @@ public class ClaudeSession {
         this.callbackFacade = new SessionCallbackFacade(project);
         this.contextService = new SessionContextService(project, MAX_FILE_SIZE_BYTES);
         this.providerRouter = new SessionProviderRouter(
-                claudeSDKBridge, codexSDKBridge, cliBridges, this.geminiSDKBridge);
+                claudeSDKBridge, codexSDKBridge, cliBridges, this.grokSDKBridge, this.geminiSDKBridge);
         this.sendService = new SessionSendService(
                 project,
                 state,
@@ -193,6 +207,7 @@ public class ClaudeSession {
                 claudeSDKBridge,
                 codexSDKBridge,
                 cliBridges,
+                this.grokSDKBridge,
                 this.geminiSDKBridge,
                 contextService
         );
@@ -702,16 +717,8 @@ public class ClaudeSession {
      * Set the AI provider.
      */
     public void setProvider(String provider) {
-        String previous = state.getProvider();
         state.setProvider(provider);
         LOG.info("Provider updated to: " + provider);
-        // Reset persistent runtimes for the provider we are leaving (daemon cleanup)
-        if (!"grok".equals(previous) && "grok".equals(provider)) {
-            // switching to grok: nothing to reset on grok yet
-        } else if ("grok".equals(previous) && !"grok".equals(provider)) {
-            grokSDKBridge.resetPersistentRuntime(state.getRuntimeSessionEpoch());
-            LOG.info("[Grok] Reset persistent runtime on leaving Grok provider");
-        }
     }
 
     /**

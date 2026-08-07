@@ -542,7 +542,7 @@ export const MessageItem = memo(function MessageItem({
       return (
         <div className="streaming-connect-status">
           <span className="streaming-connect-text">
-            {t('chat.streamingConnected', { provider: getProviderDisplayName(currentProvider, t) })}
+            {t('chat.streamingConnected', { provider: getProviderDisplayName(currentProvider) })}
           </span>
         </div>
       );

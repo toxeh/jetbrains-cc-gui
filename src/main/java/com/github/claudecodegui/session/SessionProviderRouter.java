@@ -4,6 +4,7 @@ import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.JsonObject;
 
 import java.util.Collections;
@@ -14,20 +15,17 @@ import java.util.Set;
 
 /**
  * Centralizes provider-specific bridge routing for session operations.
+ * Grok prefers ACP ({@link GrokSDKBridge}) when present; other headless CLIs
+ * use the MarkerCliBridge map; Gemini uses {@link GeminiSDKBridge}.
  */
 public class SessionProviderRouter {
 
     /**
-     * Canonical ids of the built-in CLI providers routed through
-     * {@link MarkerCliBridge} — the keys of the map built by
-     * {@link #registerCliBridges(MarkerCliBridge...)} for the bundled bridges.
+     * Headless CLI provider ids (kimi/opencode/pi). Grok is ACP when
+     * GrokSDKBridge is wired, so it is not listed here.
      */
-    private static final Set<String> CLI_PROVIDER_IDS = Set.of("grok", "kimi", "opencode", "pi");
+    private static final Set<String> CLI_PROVIDER_IDS = Set.of("kimi", "opencode", "pi");
 
-    /**
-     * Whether {@code provider} is a headless CLI provider routed through the
-     * CLI bridge map. Use this instead of repeating provider-id literals.
-     */
     public static boolean isCliProvider(String provider) {
         return provider != null && CLI_PROVIDER_IDS.contains(provider);
     }
@@ -35,6 +33,7 @@ public class SessionProviderRouter {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
+    private final GrokSDKBridge grokSDKBridge;
     private final GeminiSDKBridge geminiSDKBridge;
 
     public SessionProviderRouter(
@@ -42,7 +41,7 @@ public class SessionProviderRouter {
             CodexSDKBridge codexSDKBridge,
             Map<String, MarkerCliBridge> cliBridges
     ) {
-        this(claudeSDKBridge, codexSDKBridge, cliBridges, null);
+        this(claudeSDKBridge, codexSDKBridge, cliBridges, null, null);
     }
 
     public SessionProviderRouter(
@@ -51,11 +50,22 @@ public class SessionProviderRouter {
             Map<String, MarkerCliBridge> cliBridges,
             GeminiSDKBridge geminiSDKBridge
     ) {
+        this(claudeSDKBridge, codexSDKBridge, cliBridges, null, geminiSDKBridge);
+    }
+
+    public SessionProviderRouter(
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GrokSDKBridge grokSDKBridge,
+            GeminiSDKBridge geminiSDKBridge
+    ) {
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
         this.cliBridges = cliBridges != null
                 ? Collections.unmodifiableMap(new LinkedHashMap<>(cliBridges))
                 : Collections.emptyMap();
+        this.grokSDKBridge = grokSDKBridge;
         this.geminiSDKBridge = geminiSDKBridge;
     }
 
@@ -80,6 +90,9 @@ public class SessionProviderRouter {
         if ("codex".equals(provider)) {
             return codexSDKBridge.launchChannel(channelId, sessionId, cwd);
         }
+        if ("grok".equals(provider) && grokSDKBridge != null) {
+            return grokSDKBridge.launchChannel(channelId, sessionId, cwd);
+        }
         if ("gemini".equals(provider) && geminiSDKBridge != null) {
             return geminiSDKBridge.launchChannel(channelId, sessionId, cwd);
         }
@@ -93,6 +106,10 @@ public class SessionProviderRouter {
     public void interruptChannel(String provider, String channelId) {
         if ("codex".equals(provider)) {
             codexSDKBridge.interruptChannel(channelId);
+            return;
+        }
+        if ("grok".equals(provider) && grokSDKBridge != null) {
+            grokSDKBridge.interruptChannel(channelId);
             return;
         }
         if ("gemini".equals(provider) && geminiSDKBridge != null) {
@@ -111,6 +128,9 @@ public class SessionProviderRouter {
         if ("codex".equals(provider)) {
             return codexSDKBridge.getSessionMessages(sessionId, cwd);
         }
+        if ("grok".equals(provider) && grokSDKBridge != null) {
+            return grokSDKBridge.getSessionMessages(sessionId, cwd);
+        }
         if ("gemini".equals(provider) && geminiSDKBridge != null) {
             return geminiSDKBridge.getSessionMessages(sessionId, cwd);
         }
@@ -123,6 +143,10 @@ public class SessionProviderRouter {
 
     public Map<String, MarkerCliBridge> getCliBridges() {
         return cliBridges;
+    }
+
+    public GrokSDKBridge getGrokSDKBridge() {
+        return grokSDKBridge;
     }
 
     public GeminiSDKBridge getGeminiSDKBridge() {

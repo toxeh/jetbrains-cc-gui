@@ -629,32 +629,6 @@ export function codexModelSupportsMaxEffort(modelId: string): boolean {
 }
 
 /**
- * Grok models that support reasoning effort (Low/Medium/High/XHigh).
- * Currently empty; UI can still offer effort for Grok when cache says so.
- */
-export const EFFORT_SUPPORTED_GROK_MODELS = new Set<string>([]);
-
-/**
- * Returns true if the given provider+model supports the reasoning effort selector.
- */
-export function modelSupportsReasoningEffort(provider: string | undefined, model: string | undefined): boolean {
-  if (!provider) return false;
-  if (provider === 'claude') {
-    return !!model && EFFORT_SUPPORTED_CLAUDE_MODELS.has(model);
-  }
-  if (provider === 'grok') {
-    return true;
-  }
-  if (provider === 'codex') {
-    return true;
-  }
-  if (provider === 'gemini') {
-    return true;
-  }
-  return false;
-}
-
-/**
  * Reasoning Effort (thinking depth)
  * Controls the depth of reasoning for AI models
  * Claude API values: low, medium, high, xhigh, max

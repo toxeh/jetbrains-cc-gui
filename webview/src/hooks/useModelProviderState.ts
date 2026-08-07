@@ -150,18 +150,6 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     };
   }, [fetchGeminiModels]);
 
-  const grok = useGrokProvider();
-  const {
-    selectedGrokModel, setSelectedGrokModel,
-    grokPermissionMode, setGrokPermissionMode,
-  } = grok;
-
-  const gemini = useGeminiProvider();
-  const {
-    selectedGeminiModel, setSelectedGeminiModel,
-    geminiPermissionMode, setGeminiPermissionMode,
-  } = gemini;
-
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
     setCurrentProvider,
@@ -389,7 +377,6 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     if (currentProvider === 'claude') {
       sendBridgeEvent('set_model', apply1MContextSuffix(selectedClaudeModel, enabled));
     }
-    // Grok and Codex do not use the 1M suffix toggle for now
   }, [currentProvider, selectedClaudeModel, setLongContextEnabled]);
 
   const handleToggleThinking = useCallback((enabled: boolean) => {

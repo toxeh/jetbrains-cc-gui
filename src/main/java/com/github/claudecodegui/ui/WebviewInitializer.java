@@ -82,6 +82,9 @@ public class WebviewInitializer {
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
+        default com.github.claudecodegui.provider.grok.GrokSDKBridge getGrokSDKBridge() {
+            return null;
+        }
         default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() {
             return null;
         }

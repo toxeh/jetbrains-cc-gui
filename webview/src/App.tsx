@@ -24,7 +24,6 @@ import {
   RESUME_COMMANDS,
   PLAN_COMMANDS,
   CONTEXT_COMMANDS,
-  USAGE_COMMANDS,
 } from './hooks/useMessageSender';
 import { applyDiffTheme, getStoredDiffTheme } from './utils/diffTheme';
 import type { Attachment, ChatInputBoxHandle } from './components/ChatInputBox/types';
@@ -345,7 +344,6 @@ const App = () => {
     longContextEnabled,
     openContextUsageDialog,
     closeContextUsageDialog,
-    onReasoningChange: handleReasoningChange,
   });
 
   // ── Message queue ──
@@ -381,11 +379,6 @@ const App = () => {
       }
       // /context - handled locally even while loading
       if (CONTEXT_COMMANDS.has(command)) {
-        hookHandleSubmit(content, attachments);
-        return;
-      }
-      // /usage for Grok billing
-      if (USAGE_COMMANDS.has(command) && currentProvider === 'grok') {
         hookHandleSubmit(content, attachments);
         return;
       }

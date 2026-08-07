@@ -43,6 +43,10 @@ public class SessionLifecycleManager {
 
         Map<String, MarkerCliBridge> getCliBridges();
 
+        default com.github.claudecodegui.provider.grok.GrokSDKBridge getGrokSDKBridge() {
+            return null;
+        }
+
         default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() {
             return null;
         }
@@ -105,9 +109,6 @@ public class SessionLifecycleManager {
         interruptFuture.thenRun(() -> {
             if (oldSession != null) {
                 host.getClaudeSDKBridge().resetPersistentRuntime(oldSession.getRuntimeSessionEpoch());
-                if (host.getGrokSDKBridge() != null) {
-                    host.getGrokSDKBridge().resetPersistentRuntime(oldSession.getRuntimeSessionEpoch());
-                }
                 LOG.info("[Lifecycle] Requested daemon runtime reset for old epoch=" + oldSession.getRuntimeSessionEpoch());
             }
             LOG.info("Old session interrupted, creating new session");
@@ -156,9 +157,6 @@ public class SessionLifecycleManager {
         interruptFuture.thenRun(() -> {
             if (oldSession != null) {
                 host.getClaudeSDKBridge().resetPersistentRuntime(oldSession.getRuntimeSessionEpoch());
-                if (host.getGrokSDKBridge() != null) {
-                    host.getGrokSDKBridge().resetPersistentRuntime(oldSession.getRuntimeSessionEpoch());
-                }
                 LOG.info("[Lifecycle] Requested daemon runtime reset for old epoch=" + oldSession.getRuntimeSessionEpoch());
             }
             LOG.info("Old session interrupted, creating new session from template");
@@ -250,9 +248,6 @@ public class SessionLifecycleManager {
         interruptFuture.thenRun(() -> {
             if (oldSession != null) {
                 host.getClaudeSDKBridge().resetPersistentRuntime(oldSession.getRuntimeSessionEpoch());
-                if (host.getGrokSDKBridge() != null) {
-                    host.getGrokSDKBridge().resetPersistentRuntime(oldSession.getRuntimeSessionEpoch());
-                }
                 LOG.info("[Lifecycle] Requested daemon runtime reset before history load for old epoch="
                         + oldSession.getRuntimeSessionEpoch());
             }
@@ -272,13 +267,8 @@ public class SessionLifecycleManager {
                                     ? projectPath : NodeDetector.convertToWslPath(determineWorkingDirectory());
             newSession.setSessionInfo(sessionId, workingDir);
 
-            String currentProvider = newSession.getProvider();
-            if ("claude".equals(currentProvider)) {
-                host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
-            } else if ("grok".equals(currentProvider) && host.getGrokSDKBridge() != null) {
-                host.getGrokSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
-            }
-            // Gemini/agy is one-shot stream-json — no persistent daemon to prewarm.
+            // Prewarm daemon runtime for the historical session so /context and first message are fast
+            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
 
             newSession.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
@@ -440,6 +430,7 @@ public class SessionLifecycleManager {
                 host.getClaudeSDKBridge(),
                 host.getCodexSDKBridge(),
                 host.getCliBridges(),
+                host.getGrokSDKBridge(),
                 host.getGeminiSDKBridge());
     }
 
@@ -452,13 +443,7 @@ public class SessionLifecycleManager {
 
         newSession.setSessionInfo(null, workingDirectory);
         LOG.info(successLogPrefix + workingDirectory + ", epoch=" + newSession.getRuntimeSessionEpoch());
-        String provider = newSession.getProvider();
-        if ("claude".equals(provider)) {
-            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
-        } else if ("grok".equals(provider) && host.getGrokSDKBridge() != null) {
-            host.getGrokSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
-        }
-        // Gemini/agy is one-shot stream-json — no persistent daemon to prewarm.
+        host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
         fetchSlashCommandsOnStartup();
 
         ApplicationManager.getApplication().invokeLater(() -> {

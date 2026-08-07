@@ -232,13 +232,6 @@ public class ModelProviderHandler {
 
             refreshSlashCommandsForProvider(provider);
             usagePushService.refreshContextBar();
-
-            // Ensure the context usage indicator (upper-left token ring + "X / Yk Context")
-            // immediately knows the correct max for the newly active provider's model.
-            // This makes Grok/Gemini (and others) show the limit even before the first message.
-            String modelForLimit = context.getCurrentModel();
-            int maxTokens = getModelContextLimit(provider, modelForLimit);
-            usagePushService.pushUsageUpdateAfterModelChange(maxTokens);
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set provider: " + e.getMessage(), e);
         }

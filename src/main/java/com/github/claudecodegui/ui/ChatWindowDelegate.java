@@ -39,6 +39,8 @@ import com.github.claudecodegui.handler.file.UndoFileHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import java.util.Map;
 import com.github.claudecodegui.provider.common.MessageCallback;
@@ -83,6 +85,7 @@ public class ChatWindowDelegate {
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
+        default GrokSDKBridge getGrokSDKBridge() { return null; }
         default com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge() { return null; }
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
@@ -116,6 +119,10 @@ public class ChatWindowDelegate {
         /**
          * Soft-reload the currently active session's transcript without interrupting
          * any in-flight turn.
+         * <p>Invoked when the user re-opens the session that is already active —
+         * refreshes the transcript from the server instead of tearing the session
+         * down (interrupt + recreate). Safe to call while a turn is streaming: the
+         * reload is deferred to stream end.</p>
          */
         void reloadActiveSessionMessages();
     }
@@ -248,8 +255,6 @@ public class ChatWindowDelegate {
     public String setupPermissionService() {
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
-        GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
-        GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         Project project = host.getProject();
         String sessionId = claudeSDKBridge.getSessionId();
 
@@ -296,8 +301,6 @@ public class ChatWindowDelegate {
         Project project = host.getProject();
         ClaudeSDKBridge claudeSDKBridge = host.getClaudeSDKBridge();
         CodexSDKBridge codexSDKBridge = host.getCodexSDKBridge();
-        GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
-        GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         CodemossSettingsService settingsService = host.getSettingsService();
 
         HandlerContext.JsCallback jsCallback = new HandlerContext.JsCallback() {
@@ -311,6 +314,8 @@ public class ChatWindowDelegate {
             }
         };
 
+        GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
+        GeminiSDKBridge geminiSDKBridge = host.getGeminiSDKBridge();
         HandlerContext handlerContext = new HandlerContext(
                 project,
                 claudeSDKBridge,
@@ -341,6 +346,7 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new McpMarketplaceHandler(handlerContext));
         messageDispatcher.registerHandler(new McpServerImportHandler(handlerContext));
         messageDispatcher.registerHandler(new CodexMcpServerHandler(handlerContext, settingsService.getCodexMcpServerManager()));
+        messageDispatcher.registerHandler(new CodexPetHandler(handlerContext));
         messageDispatcher.registerHandler(new SkillHandler(handlerContext));
         messageDispatcher.registerHandler(new FileHandler(handlerContext));
         messageDispatcher.registerHandler(new SettingsHandler(handlerContext));
@@ -401,6 +407,8 @@ public class ChatWindowDelegate {
                     && (provider == null || provider.trim().isEmpty()
                                 || provider.equals(current.getProvider()));
             if (sameSession) {
+                // Re-opening the very session already active: soft-reload its transcript
+                // instead of interrupting the in-flight turn.
                 LOG.info("[HistoryHandler] Same-session resume, soft-reloading transcript: " + sessionId);
                 host.reloadActiveSessionMessages();
             } else {

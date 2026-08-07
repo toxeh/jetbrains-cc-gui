@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   REASONING_LEVELS,
   EFFORT_SUPPORTED_CLAUDE_MODELS,
-  EFFORT_SUPPORTED_GROK_MODELS,
   MAX_EFFORT_CLAUDE_MODELS,
   XHIGH_EFFORT_CLAUDE_MODELS,
   codexModelSupportsMaxEffort,
@@ -12,7 +11,6 @@ import {
   type ReasoningInfo,
 } from '../types';
 import { useDropdownPosition } from '../../../hooks/useDropdownPosition';
-import { sendBridgeEvent } from '../../../utils/bridge';
 
 const RELATIVE_INLINE_BLOCK_STYLE: React.CSSProperties = { position: 'relative', display: 'inline-block' };
 const CHEVRON_ICON_STYLE: React.CSSProperties = { fontSize: '10px', marginLeft: '2px' };
@@ -49,13 +47,10 @@ interface ReasoningSelectProps {
  * ReasoningSelect - Reasoning Effort Selector
  * Controls the depth of reasoning for AI models.
  * Visibility and available levels depend on the selected model:
- * - Codex: low/medium/high/xhigh (all Codex models)
- * - Claude Opus 4.8 / Fable 5: low/medium/high/xhigh/max
- * - Claude Sonnet 5, Opus 4.6, Sonnet 4.6: low/medium/high/max
- * - Claude Haiku 4.5 and legacy: hidden
- * - Grok (grok-4.5, grok-build etc): only when the model reports supports_reasoning_effort;
- *   currently hidden for Grok-4.5 / Grok Build because the local CLI models do not support it.
- *   When supported: low/medium/high/xhigh (max aliases to xhigh per Grok docs).
+ * - Codex GPT-5.6: low/medium/high/xhigh/max; other Codex models: up to xhigh
+ * - Claude Opus 5 and Opus 4.8: low/medium/high/xhigh/max
+ * - Claude Sonnet 5, Sonnet 4.7, Opus 4.6, and Sonnet 4.6: low/medium/high/max
+ * - Claude Haiku 4.5 and legacy models: hidden (no adaptive thinking support)
  */
 export const ReasoningSelect = ({
   value,

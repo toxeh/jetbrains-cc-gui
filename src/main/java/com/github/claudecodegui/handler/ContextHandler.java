@@ -17,7 +17,7 @@ public class ContextHandler extends BaseMessageHandler {
     private static final Logger LOG = Logger.getInstance(ContextHandler.class);
     private final Gson gson = new Gson();
 
-    private static final String[] SUPPORTED_TYPES = {"get_context_usage", "get_grok_reasoning_supports"};
+    private static final String[] SUPPORTED_TYPES = {"get_context_usage"};
 
     public ContextHandler(HandlerContext context) {
         super(context);
@@ -33,11 +33,6 @@ public class ContextHandler extends BaseMessageHandler {
         if ("get_context_usage".equals(type)) {
             LOG.info("[ContextHandler] Handling: get_context_usage");
             handleGetContextUsage(content);
-            return true;
-        }
-        if ("get_grok_reasoning_supports".equals(type)) {
-            LOG.info("[ContextHandler] Handling: get_grok_reasoning_supports");
-            handleGetGrokReasoningSupports();
             return true;
         }
         return false;
@@ -168,23 +163,5 @@ public class ContextHandler extends BaseMessageHandler {
             return;
         }
         callJavaScript("onContextUsageError", escapeJs(message));
-    }
-
-    /**
-     * Handle request for Grok reasoning effort supported models (dynamic from cache).
-     * Invokes GrokSDKBridge and pushes result to frontend via updateGrokReasoningSupports.
-     */
-    private void handleGetGrokReasoningSupports() {
-        try {
-            JsonObject result = this.context.getGrokSDKBridge().getReasoningSupportedModels();
-            String json = this.gson.toJson(result);
-            callJavaScript("updateGrokReasoningSupports", escapeJs(json));
-        } catch (Exception e) {
-            LOG.error("[ContextHandler] Failed to get Grok reasoning supports", e);
-            JsonObject err = new JsonObject();
-            err.addProperty("success", false);
-            err.addProperty("error", e.getMessage());
-            callJavaScript("updateGrokReasoningSupports", escapeJs(this.gson.toJson(err)));
-        }
     }
 }

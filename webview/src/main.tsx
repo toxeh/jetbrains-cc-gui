@@ -627,30 +627,6 @@ if (typeof window !== 'undefined' && !window.updatePermissionDialogTimeout) {
   };
 }
 
-// Pre-register updateUsageStatistics to handle backend status responses that arrive before Settings/UsageStatisticsSection initializes
-if (typeof window !== 'undefined' && !window.updateUsageStatistics) {
-  debugLog('[Main] Pre-registering updateUsageStatistics placeholder');
-  window.updateUsageStatistics = (json: string) => {
-    debugLog('[Main] Storing pending usage statistics, length=' + (json ? json.length : 0));
-    window.__pendingUsageStatistics = json;
-  };
-}
-
-// Pre-register updateGrokReasoningSupports for dynamic reasoning effort support lookup from models_cache
-if (typeof window !== 'undefined' && !window.updateGrokReasoningSupports) {
-  debugLog('[Main] Pre-registering updateGrokReasoningSupports placeholder');
-  window.updateGrokReasoningSupports = (json: string) => {
-    debugLog('[Main] Received Grok reasoning supports');
-    try {
-      const data = JSON.parse(json || '{}');
-      const list = Array.isArray(data.supportedModels) ? data.supportedModels : [];
-      window.dispatchEvent(new CustomEvent('grok-reasoning-supports-updated', { detail: list }));
-    } catch (e) {
-      debugLog('[Main] Failed to parse Grok reasoning supports', String(e));
-    }
-  };
-}
-
 // Pre-register onModeReceived to avoid losing early backend push before React callbacks are ready.
 if (typeof window !== 'undefined' && !window.onModeReceived) {
   debugLog('[Main] Pre-registering onModeReceived placeholder');
@@ -739,7 +715,6 @@ ReactDOM.createRoot(document.getElementById('app') as HTMLElement).render(
  * Wait for the sendToJava bridge function to become available
  */
 setupScaleRecovery();
-
 
 // Once the bridge is available, initialize slash commands
 waitForBridge(() => {

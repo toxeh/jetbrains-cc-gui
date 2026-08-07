@@ -133,13 +133,6 @@ public enum SdkDefinition {
     }
 
     /**
-     * Whether this entry is a local CLI binary rather than an npm SDK package.
-     */
-    public boolean isCliBinary() {
-        return this == GROK_CLI || this == GEMINI_CLI;
-    }
-
-    /**
      * Finds an SDK definition by its ID.
      */
     public static SdkDefinition fromId(String id) {

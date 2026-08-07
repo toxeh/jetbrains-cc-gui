@@ -6,7 +6,6 @@ import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.provider.gemini.GeminiPlanUsageService;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.action.SendShortcutSync;
-import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.util.FontConfigService;
 import com.github.claudecodegui.util.ThemeConfigService;
 import com.google.gson.Gson;

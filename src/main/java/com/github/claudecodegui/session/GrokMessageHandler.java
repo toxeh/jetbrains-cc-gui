@@ -173,11 +173,20 @@ public class GrokMessageHandler implements MessageCallback {
             }
 
             Message target = resolveAssistantMessageForStream();
+            // Preserve any usage already stamped by [USAGE] — final [MESSAGE] from the
+            // normalizer historically had no usage and wiped the context-ring snapshot.
+            JsonObject priorUsage = extractUsageFromAssistantRaw(target.raw);
             // Merge raw when possible
             if (hasToolUse && target.raw != null) {
                 target.raw = mergeAssistantRaw(target.raw, msgJson);
             } else {
                 target.raw = parsed.raw;
+            }
+            // Prefer usage from the incoming message (finishSuccess now attaches it);
+            // otherwise restore prior snapshot so pushUsageUpdateFromMessages still works.
+            JsonObject incomingUsage = extractUsageFromAssistantRaw(target.raw);
+            if (incomingUsage == null && priorUsage != null) {
+                restoreUsageOnAssistantRaw(target.raw, priorUsage);
             }
             if (parsed.content != null && !parsed.content.isEmpty()) {
                 if (!isStreaming || parsed.content.length() >= assistantContent.length()) {
@@ -280,6 +289,9 @@ public class GrokMessageHandler implements MessageCallback {
             isThinking = false;
             callbackHandler.notifyThinkingStatusChanged(false);
         }
+        // Re-push context usage at end of turn so the ring is not left at 0% when
+        // mid-turn [USAGE] raced with MESSAGE overwrite or coalesced updateMessages.
+        pushContextUsageFromCurrentAssistant();
         callbackHandler.notifyMessageUpdate(state.getMessages());
         callbackHandler.notifyStreamEnd();
         state.setBusy(false);
@@ -381,31 +393,26 @@ public class GrokMessageHandler implements MessageCallback {
                 return;
             }
             ensureAssistantRaw();
+            // Prefer snake_case for stored message.usage (OpenAI shape); camelCase ACP is fallback input.
+            JsonObject canonical = com.github.claudecodegui.provider.grok.GrokContextUsageBuilder
+                    .normalizeUsageToSnakeCase(usage);
+            JsonObject storedUsage = canonical != null ? canonical : usage;
             JsonObject message = currentAssistantMessage.raw.has("message")
                     && currentAssistantMessage.raw.get("message").isJsonObject()
                     ? currentAssistantMessage.raw.getAsJsonObject("message")
                     : new JsonObject();
-            message.add("usage", usage);
+            message.add("usage", storedUsage);
             currentAssistantMessage.raw.add("message", message);
 
-            int used = 0;
-            if (usage.has("total_tokens") && !usage.get("total_tokens").isJsonNull()) {
-                used = usage.get("total_tokens").getAsInt();
-            } else {
-                if (usage.has("input_tokens") && !usage.get("input_tokens").isJsonNull()) {
-                    used += usage.get("input_tokens").getAsInt();
-                }
-                if (usage.has("output_tokens") && !usage.get("output_tokens").isJsonNull()) {
-                    used += usage.get("output_tokens").getAsInt();
-                }
-                if (usage.has("prompt_tokens") && !usage.get("prompt_tokens").isJsonNull()) {
-                    used += usage.get("prompt_tokens").getAsInt();
-                }
-            }
+            int used = com.github.claudecodegui.provider.grok.GrokContextUsageBuilder.extractUsedTokens(storedUsage);
             if (used > 0) {
                 int maxTokens = com.github.claudecodegui.handler.provider.ModelProviderHandler
                         .getModelContextLimit(state.getModel());
+                LOG.info("Grok [USAGE] context ring: used=" + used + " max=" + maxTokens
+                        + " model=" + state.getModel());
                 callbackHandler.notifyUsageUpdate(used, maxTokens);
+            } else {
+                LOG.warn("Grok [USAGE] received but extractUsedTokens=0 payload=" + content);
             }
             // C: plugin ACP usage ledger for Usage Statistics token totals
             try {
@@ -415,7 +422,7 @@ public class GrokMessageHandler implements MessageCallback {
                             sid,
                             state.getModel(),
                             null,
-                            usage
+                            storedUsage
                     );
                 }
             } catch (Exception ledgerEx) {
@@ -548,6 +555,59 @@ public class GrokMessageHandler implements MessageCallback {
             raw.add("message", messageObj);
             target.raw = raw;
         }
+    }
+
+    /** usage object from assistant raw.message.usage, or null. */
+    private static JsonObject extractUsageFromAssistantRaw(JsonObject raw) {
+        if (raw == null) {
+            return null;
+        }
+        try {
+            if (raw.has("message") && raw.get("message").isJsonObject()) {
+                JsonObject message = raw.getAsJsonObject("message");
+                if (message.has("usage") && message.get("usage").isJsonObject()) {
+                    return message.getAsJsonObject("usage");
+                }
+            }
+            if (raw.has("usage") && raw.get("usage").isJsonObject()) {
+                return raw.getAsJsonObject("usage");
+            }
+        } catch (Exception ignored) {
+            // ignore
+        }
+        return null;
+    }
+
+    private static void restoreUsageOnAssistantRaw(JsonObject raw, JsonObject usage) {
+        if (raw == null || usage == null) {
+            return;
+        }
+        JsonObject message = raw.has("message") && raw.get("message").isJsonObject()
+                ? raw.getAsJsonObject("message")
+                : new JsonObject();
+        message.add("usage", usage.deepCopy());
+        raw.add("message", message);
+    }
+
+    private void pushContextUsageFromCurrentAssistant() {
+        Message target = assistantMessageForCurrentStream != null
+                ? assistantMessageForCurrentStream
+                : currentAssistantMessage;
+        if (target == null) {
+            return;
+        }
+        JsonObject usage = extractUsageFromAssistantRaw(target.raw);
+        if (usage == null) {
+            return;
+        }
+        int used = com.github.claudecodegui.provider.grok.GrokContextUsageBuilder.extractUsedTokens(usage);
+        if (used <= 0) {
+            return;
+        }
+        int maxTokens = com.github.claudecodegui.handler.provider.ModelProviderHandler
+                .getModelContextLimit(state.getModel());
+        LOG.info("Grok stream_end context ring push: used=" + used + " max=" + maxTokens);
+        callbackHandler.notifyUsageUpdate(used, maxTokens);
     }
 
     /**
