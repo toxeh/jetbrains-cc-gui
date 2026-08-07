@@ -5,7 +5,7 @@
 
 import { existsSync, accessSync, constants as fsConstants } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, delimiter } from 'node:path';
+import { join, delimiter, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const DEFAULT_MAX_TOKENS = 200_000;
@@ -182,10 +182,39 @@ export function buildAgyEnv(baseEnv = process.env) {
   env.CI = env.CI || '1';
   env.NO_COLOR = env.NO_COLOR || '1';
   env.TERM = env.TERM || 'dumb';
-  if (!env.AGY_PATH) {
-    const resolved = resolveAgyBinary();
-    if (resolved) env.AGY_PATH = resolved;
+
+  const resolved = resolveAgyBinary();
+  if (!env.AGY_PATH && resolved) {
+    env.AGY_PATH = resolved;
   }
+
+  // Ensure PATH contains all standard binary directories (homebrew, local/bin, node, agy)
+  const home = homedir();
+  const agyHome = getAgyHome();
+  const extraPaths = [
+    join(home, '.local', 'bin'),
+    join(agyHome, 'bin'),
+    join(agyHome, 'bin', 'sys'),
+    join(home, 'bin'),
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+  ];
+  if (resolved) {
+    extraPaths.push(dirname(resolved));
+  }
+  if (process.execPath) {
+    extraPaths.push(dirname(process.execPath));
+  }
+
+  const currentPath = env.PATH || '';
+  const currentDirs = new Set(currentPath.split(delimiter).filter(Boolean));
+  for (const p of extraPaths) {
+    if (p && !currentDirs.has(p) && existsSync(p)) {
+      currentDirs.add(p);
+    }
+  }
+  env.PATH = Array.from(currentDirs).join(delimiter);
+
   return env;
 }
 
