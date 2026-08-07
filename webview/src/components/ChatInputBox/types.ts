@@ -579,7 +579,7 @@ export interface ProviderInfo {
 export const AVAILABLE_PROVIDERS: ProviderInfo[] = [
   { id: 'claude', label: 'Claude Code', icon: 'codicon-terminal', enabled: true },
   { id: 'codex', label: 'Codex', icon: 'codicon-terminal', enabled: true },
-  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: true },
+  { id: 'gemini', label: 'Gemini Cli', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'grok', label: 'Grok CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'kimi', label: 'Kimi CLI', icon: 'codicon-terminal', enabled: true, beta: true },
   { id: 'opencode', label: 'OpenCode', icon: 'codicon-terminal', enabled: true, beta: true },

@@ -477,6 +477,32 @@ public class EnvironmentConfigurator {
     }
 
     /**
+     * Configures environment variables defined in ~/.claude/settings.json "env" block
+     * (e.g. custom proxies SOCKS_PROXY, HTTPS_PROXY, HTTP_PROXY, TELEMETRY flags, etc.).
+     */
+    public void configureClaudeSettingsEnv(Map<String, String> env) {
+        if (env == null) {
+            return;
+        }
+        try {
+            com.google.gson.JsonObject settings = settingsService.readClaudeSettings();
+            if (settings != null && settings.has("env") && settings.get("env").isJsonObject()) {
+                com.google.gson.JsonObject envObj = settings.getAsJsonObject("env");
+                for (String key : envObj.keySet()) {
+                    if (key != null && !key.trim().isEmpty() && !env.containsKey(key)) {
+                        com.google.gson.JsonElement val = envObj.get(key);
+                        if (val != null && !val.isJsonNull() && val.isJsonPrimitive()) {
+                            env.put(key, val.getAsString());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("[EnvironmentConfigurator] Could not read env from ~/.claude/settings.json: " + e.getMessage());
+        }
+    }
+
+    /**
      * Clears all cached values.
      */
     public void clearCache() {

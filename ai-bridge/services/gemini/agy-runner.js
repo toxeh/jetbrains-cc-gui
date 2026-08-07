@@ -10,7 +10,7 @@ import {
   buildAgyEnv,
   resolveAgySpawnModel,
 } from './agy-utils.js';
-import { selectWorkingDirectory } from '../../utils/path-utils.js';
+import { selectWorkingDirectory, isUnsafeWorkingDirectory } from '../../utils/path-utils.js';
 
 /**
  * Run one agy headless turn.
@@ -49,6 +49,14 @@ export function runAgyTurn(options = {}) {
   // and effort-required families are selected via the full --model slug.
   const resolved = resolveAgySpawnModel(model, reasoningEffort);
   const modelStr = resolved.model;
+  // Guard against plugin/ai-bridge/~/.gemini paths becoming workspaceDirs.
+  const workCwd = selectWorkingDirectory(cwd);
+
+  const effectiveAddDirs = Array.isArray(addDirs) ? [...addDirs] : [];
+  if (workCwd && !isUnsafeWorkingDirectory(workCwd) && !effectiveAddDirs.includes(workCwd)) {
+    effectiveAddDirs.push(workCwd);
+  }
+
   const args = buildAgyArgs({
     message,
     conversationId: sessionId,
@@ -57,12 +65,10 @@ export function runAgyTurn(options = {}) {
     agent,
     permissionMode,
     printTimeout,
-    addDirs,
+    addDirs: effectiveAddDirs,
   });
 
   const env = buildAgyEnv(envOverride || process.env);
-  // Guard against plugin/ai-bridge/~/.gemini paths becoming workspaceDirs.
-  const workCwd = selectWorkingDirectory(cwd);
 
   // Avoid logging full prompt body (-p value)
   const safeArgs = args.map((a, i) => (i > 0 && args[i - 1] === '-p' ? '<prompt>' : a));

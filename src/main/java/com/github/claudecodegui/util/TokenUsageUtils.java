@@ -130,7 +130,7 @@ public final class TokenUsageUtils {
     }
 
     public static JsonObject findLastUsageFromRawMessages(List<JsonObject> messages, String provider) {
-        boolean preferRootUsage = "codex".equals(provider);
+        boolean preferRootUsage = "codex".equals(provider) || "gemini".equals(provider);
         for (int i = messages.size() - 1; i >= 0; i--) {
             JsonObject msg = messages.get(i);
             if (!msg.has("type") || !"assistant".equals(msg.get("type").getAsString())) { continue; }
@@ -164,7 +164,7 @@ public final class TokenUsageUtils {
             List<ClaudeSession.Message> messages,
             String provider
     ) {
-        boolean preferRootUsage = "codex".equals(provider);
+        boolean preferRootUsage = "codex".equals(provider) || "gemini".equals(provider);
         for (int i = messages.size() - 1; i >= 0; i--) {
             ClaudeSession.Message msg = messages.get(i);
             if (msg.type != ClaudeSession.Message.Type.ASSISTANT || msg.raw == null) { continue; }

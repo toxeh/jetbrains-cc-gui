@@ -424,9 +424,18 @@ public class SessionSendService {
         );
         String modelForCli = normalizeCliModelForProvider(provider, state.getModel());
 
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                state.getCwd(), projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = state.getCwd();
+        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            state.setCwd(guardedCwd);
+        }
+
         LOG.info("[Lifecycle] sendToCli provider=" + provider
                 + " sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
-                + ", cwd=" + state.getCwd()
+                + ", cwd=" + guardedCwd
                 + ", modelRaw=" + state.getModel()
                 + ", modelCli=" + (modelForCli != null ? modelForCli : "(config-default)")
                 + ", effort=" + effort);
@@ -435,7 +444,7 @@ public class SessionSendService {
                 channelId,
                 finalInput,
                 state.getSessionId(),
-                state.getCwd(),
+                guardedCwd,
                 modelForCli != null ? modelForCli : "",
                 effort,
                 handler

@@ -402,6 +402,7 @@ public class GeminiSDKBridge extends BaseSDKBridge {
                 pb.directory(bridgeDir);
                 Map<String, String> env = pb.environment();
                 envConfigurator.configureTempDir(env, processManager.prepareClaudeTempDir());
+                envConfigurator.configureClaudeSettingsEnv(env);
                 configureProviderEnv(env, "{}");
                 String node = nodeDetector.findNodeExecutable();
                 envConfigurator.updateProcessEnvironment(pb, node);
@@ -488,9 +489,14 @@ public class GeminiSDKBridge extends BaseSDKBridge {
     }
 
     /**
-     * No on-disk history reader yet — return empty list (UI shows live session only).
+     * Reads persisted session messages from Gemini/Antigravity CLI transcript.
      */
     public List<JsonObject> getSessionMessages(String sessionId, String cwd) {
-        return new ArrayList<>();
+        try {
+            return new GeminiHistoryReader().getSessionMessages(sessionId, cwd);
+        } catch (Exception e) {
+            LOG.warn("[GeminiSDKBridge] Failed to get session messages for " + sessionId + ": " + e.getMessage());
+            return new ArrayList<>();
+        }
     }
 }

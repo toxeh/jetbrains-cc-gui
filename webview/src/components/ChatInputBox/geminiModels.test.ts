@@ -13,6 +13,7 @@ describe('Gemini provider catalog', () => {
     const gemini = AVAILABLE_PROVIDERS.find((p) => p.id === 'gemini');
     expect(gemini).toBeDefined();
     expect(gemini?.enabled).toBe(true);
+    expect(gemini?.beta).toBe(true);
   });
 
   it('lists family base ids including Claude/GPT via Antigravity', () => {

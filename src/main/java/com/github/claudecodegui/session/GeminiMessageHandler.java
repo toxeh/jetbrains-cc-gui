@@ -448,10 +448,11 @@ public class GeminiMessageHandler implements MessageCallback {
             peakContextTokens = used;
         }
         int maxTokens = SettingsHandler.getModelContextLimit(state.getProvider(), state.getModel());
+        int effectiveUsed = maxTokens > 0 ? Math.min(used, maxTokens) : used;
         if (project != null) {
-            ClaudeNotifier.setTokenUsage(project, used, maxTokens);
+            ClaudeNotifier.setTokenUsage(project, effectiveUsed, maxTokens);
         }
-        callbackHandler.notifyUsageUpdate(used, maxTokens);
+        callbackHandler.notifyUsageUpdate(effectiveUsed, maxTokens);
         return true;
     }
 

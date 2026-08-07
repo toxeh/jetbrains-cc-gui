@@ -653,19 +653,7 @@ public class ClaudeChatWindow {
             session.setReasoningEffort(savedState.reasoningEffort);
         }
 
-        // Gemini/agy has no on-disk history loader yet (getSessionMessages is empty).
-        // Restoring a persisted conversation id with an empty UI still passes
-        // --conversation and resumes a fat multi-model blob (~2M context). Skip
-        // resume-id restore for gemini until history import exists; keep model/cwd.
-        String restoredSessionId = null;
-        if (isNonEmpty(savedState.sessionId)
-                && !"gemini".equalsIgnoreCase(savedState.provider)) {
-            restoredSessionId = savedState.sessionId;
-        } else if (isNonEmpty(savedState.sessionId)
-                && "gemini".equalsIgnoreCase(savedState.provider)) {
-            LOG.info("[TabRestore] Skipping Gemini conversation resume id (no history import): "
-                    + savedState.sessionId);
-        }
+        String restoredSessionId = isNonEmpty(savedState.sessionId) ? savedState.sessionId : null;
         String restoredCwd = isNonEmpty(savedState.cwd) ? savedState.cwd : session.getCwd();
         String projectBase = project != null ? project.getBasePath() : null;
         String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(

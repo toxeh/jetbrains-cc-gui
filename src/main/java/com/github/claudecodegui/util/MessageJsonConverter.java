@@ -343,15 +343,16 @@ public class MessageJsonConverter {
             int fallbackMaxTokens = SettingsHandler.getModelContextLimit(
                     currentProvider, handlerContext.getCurrentModel());
             int maxTokens = TokenUsageUtils.extractMaxTokens(lastUsage, fallbackMaxTokens);
-            int percentage = Math.min(100, maxTokens > 0 ? (int) ((usedTokens * 100.0) / maxTokens) : 0);
+            int effectiveUsed = maxTokens > 0 ? Math.min(usedTokens, maxTokens) : usedTokens;
+            int percentage = Math.min(100, maxTokens > 0 ? (int) ((effectiveUsed * 100.0) / maxTokens) : 0);
 
-            LOG.debug("Pushing usage update: provider=" + currentProvider + ", usedTokens=" + usedTokens + ", max=" + maxTokens + ", percentage=" + percentage + "%");
+            LOG.debug("Pushing usage update: provider=" + currentProvider + ", usedTokens=" + usedTokens + " (effective=" + effectiveUsed + "), max=" + maxTokens + ", percentage=" + percentage + "%");
 
             JsonObject usageUpdate = new JsonObject();
             usageUpdate.addProperty("percentage", percentage);
-            usageUpdate.addProperty("totalTokens", usedTokens);
+            usageUpdate.addProperty("totalTokens", effectiveUsed);
             usageUpdate.addProperty("limit", maxTokens);
-            usageUpdate.addProperty("usedTokens", usedTokens);
+            usageUpdate.addProperty("usedTokens", effectiveUsed);
             usageUpdate.addProperty("maxTokens", maxTokens);
 
             String usageJson = new Gson().toJson(usageUpdate);

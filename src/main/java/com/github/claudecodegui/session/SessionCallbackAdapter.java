@@ -366,11 +366,12 @@ public class SessionCallbackAdapter implements ClaudeSession.SessionCallback {
             }
             int safeUsedTokens = normalizeUsageValue(usedTokens);
             int safeMaxTokens = normalizeUsageValue(maxTokens);
-            double percentage = calculateUsagePercentage(safeUsedTokens, safeMaxTokens);
+            int effectiveUsed = safeMaxTokens > 0 ? Math.min(safeUsedTokens, safeMaxTokens) : safeUsedTokens;
+            double percentage = calculateUsagePercentage(effectiveUsed, safeMaxTokens);
             String json = String.format("{\"percentage\":%.2f,\"usedTokens\":%d,\"maxTokens\":%d}",
-                    percentage, safeUsedTokens, safeMaxTokens);
+                    percentage, effectiveUsed, safeMaxTokens);
             jsTarget.callJavaScript("onUsageUpdate", JsUtils.escapeJs(json));
-            LOG.debug("Usage update sent to frontend: " + safeUsedTokens + "/" + safeMaxTokens);
+            LOG.debug("Usage update sent to frontend: " + effectiveUsed + "/" + safeMaxTokens);
         });
     }
 

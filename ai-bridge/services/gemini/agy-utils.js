@@ -178,7 +178,7 @@ export function buildAgyArgs(options = {}) {
 }
 
 export function buildAgyEnv(baseEnv = process.env) {
-  const env = { ...baseEnv };
+  const env = { ...process.env, ...baseEnv };
   env.CI = env.CI || '1';
   env.NO_COLOR = env.NO_COLOR || '1';
   env.TERM = env.TERM || 'dumb';
@@ -543,7 +543,12 @@ export function extractAgyContextTokens(usage) {
     normalized.cache_creation_input_tokens
     ?? normalized.cacheCreationInputTokens,
   );
-  return input + cacheRead + cacheCreation;
+  const total = num(normalized.total_tokens ?? normalized.totalTokens);
+  const sum = input + cacheRead + cacheCreation;
+  if (total > 0 && sum > total) {
+    return Math.max(input, cacheRead + cacheCreation);
+  }
+  return sum;
 }
 
 function num(v) {
