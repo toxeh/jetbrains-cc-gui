@@ -10,6 +10,7 @@ public class CliToolIdTest {
 
     @Test
     public void fromId_acceptsKnownTools() {
+        assertEquals(CliToolId.AGY, CliToolId.fromId("agy"));
         assertEquals(CliToolId.GROK, CliToolId.fromId("grok"));
         assertEquals(CliToolId.KIMI, CliToolId.fromId("KIMI"));
         assertEquals(CliToolId.OPENCODE, CliToolId.fromId(" opencode "));
@@ -25,6 +26,7 @@ public class CliToolIdTest {
 
     @Test
     public void binaryNames_matchExpected() {
+        assertEquals("agy", CliToolId.AGY.getBinaryName());
         assertEquals("grok", CliToolId.GROK.getBinaryName());
         assertEquals("kimi", CliToolId.KIMI.getBinaryName());
         assertEquals("opencode", CliToolId.OPENCODE.getBinaryName());

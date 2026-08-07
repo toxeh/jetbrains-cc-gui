@@ -4,6 +4,7 @@ package com.github.claudecodegui.cli;
  * Supported headless CLI tools shown in Settings → Provider Management → CLI.
  */
 public enum CliToolId {
+    AGY("agy", "Antigravity CLI (Gemini)", "agy"),
     GROK("grok", "Grok CLI", "grok"),
     KIMI("kimi", "Kimi CLI", "kimi"),
     OPENCODE("opencode", "OpenCode", "opencode"),
