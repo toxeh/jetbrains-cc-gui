@@ -28,15 +28,55 @@ public final class TokenUsageUtils {
         if (usage == null) {
             return 0;
         }
-        int input = usage.has("input_tokens") ? usage.get("input_tokens").getAsInt() : 0;
+        int input = readNonNegativeInt(usage, "input_tokens");
         if ("codex".equals(provider)) {
             return input;
         }
-        int cacheCreation = usage.has("cache_creation_input_tokens")
-                ? usage.get("cache_creation_input_tokens").getAsInt() : 0;
-        int cacheRead = usage.has("cache_read_input_tokens")
-                ? usage.get("cache_read_input_tokens").getAsInt() : 0;
+        // Context window occupancy = prompt/input side only (not output / total_tokens).
+        // agy emits cache_read_tokens; Claude uses cache_read_input_tokens.
+        int cacheCreation = firstNonNegativeInt(usage,
+                "cache_creation_input_tokens", "cache_write_tokens");
+        int cacheRead = firstNonNegativeInt(usage,
+                "cache_read_input_tokens", "cache_read_tokens", "cached_input_tokens");
+
+        // Gemini/agy: input_tokens is already the prompt occupancy. Cache fields are
+        // informational; adding them when input already includes cached tokens
+        // double-counts and can show multi-million "context" on small turns.
+        if ("gemini".equals(provider)) {
+            if (input > 0) {
+                // If cache is reported separately and is larger than bare input, prefer
+                // the larger single value rather than summing (agy usually reports cache=0).
+                return Math.max(input, cacheRead);
+            }
+            return cacheRead + cacheCreation;
+        }
+
+        // Claude: input excludes cache; sum the parts.
         return input + cacheCreation + cacheRead;
+    }
+
+    private static int readNonNegativeInt(JsonObject usage, String key) {
+        if (usage == null || key == null || !usage.has(key) || usage.get(key).isJsonNull()) {
+            return 0;
+        }
+        try {
+            return Math.max(0, usage.get(key).getAsInt());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static int firstNonNegativeInt(JsonObject usage, String... keys) {
+        if (usage == null || keys == null) {
+            return 0;
+        }
+        for (String key : keys) {
+            int value = readNonNegativeInt(usage, key);
+            if (value > 0) {
+                return value;
+            }
+        }
+        return 0;
     }
 
     /**
@@ -90,7 +130,7 @@ public final class TokenUsageUtils {
     }
 
     public static JsonObject findLastUsageFromRawMessages(List<JsonObject> messages, String provider) {
-        boolean preferRootUsage = "codex".equals(provider);
+        boolean preferRootUsage = "codex".equals(provider) || "gemini".equals(provider);
         for (int i = messages.size() - 1; i >= 0; i--) {
             JsonObject msg = messages.get(i);
             if (!msg.has("type") || !"assistant".equals(msg.get("type").getAsString())) { continue; }
@@ -124,7 +164,7 @@ public final class TokenUsageUtils {
             List<ClaudeSession.Message> messages,
             String provider
     ) {
-        boolean preferRootUsage = "codex".equals(provider);
+        boolean preferRootUsage = "codex".equals(provider) || "gemini".equals(provider);
         for (int i = messages.size() - 1; i >= 0; i--) {
             ClaudeSession.Message msg = messages.get(i);
             if (msg.type != ClaudeSession.Message.Type.ASSISTANT || msg.raw == null) { continue; }

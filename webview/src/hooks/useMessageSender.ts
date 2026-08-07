@@ -28,6 +28,12 @@ function createContextUsageRequestId(): string {
 }
 
 function shouldSendReasoningEffort(provider: string, model: string): boolean {
+  // Gemini/agy: runner resolves family+effort → full slug and never passes
+  // --effort to agy. Still send reasoningEffort so a bare family id left in
+  // session state (e.g. gemini-3.6-flash) can be upgraded on spawn.
+  if (provider === 'gemini') {
+    return true;
+  }
   if (provider !== 'claude') {
     return true;
   }
@@ -324,7 +330,13 @@ export function useMessageSender({
     }
     if (!currentSdkInstalled) {
       addToast(
-        t('chat.sdkNotInstalled', { provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code' }) + ' ' + t('chat.goInstallSdk'),
+        t('chat.sdkNotInstalled', {
+          provider: currentProvider === 'codex'
+            ? 'Codex'
+            : currentProvider === 'gemini'
+              ? 'Antigravity CLI (agy)'
+              : 'Claude Code',
+        }) + ' ' + t('chat.goInstallSdk'),
         'warning'
       );
       setSettingsInitialTab('dependencies');

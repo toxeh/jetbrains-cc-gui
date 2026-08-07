@@ -42,4 +42,16 @@ public class TabSessionRestorePolicyTest {
         assertFalse(TabSessionRestorePolicy.shouldStartHistoryLoad(savedState, false));
         assertTrue(TabSessionRestorePolicy.shouldStartHistoryLoad(savedState, true));
     }
+
+    @Test
+    public void shouldNotLoadHistoryForGeminiUntilImportExists() {
+        TabStateService.TabSessionState savedState = new TabStateService.TabSessionState();
+        savedState.sessionId = "756d5a80-ee22-4eed-8982-4e4762c2e9e6";
+        savedState.provider = "gemini";
+        savedState.cwd = "/workspace";
+
+        assertFalse(TabSessionRestorePolicy.shouldLoadHistory(savedState));
+        assertFalse(TabSessionRestorePolicy.shouldLoadImmediately(savedState, true));
+        assertFalse(TabSessionRestorePolicy.shouldStartHistoryLoad(savedState, true));
+    }
 }

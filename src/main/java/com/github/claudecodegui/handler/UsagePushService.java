@@ -103,16 +103,17 @@ public class UsagePushService {
      * Send usage update to the frontend.
      */
     public void sendUsageUpdate(int usedTokens, int maxTokens) {
-        int percentage = Math.min(100, maxTokens > 0 ? (int) ((usedTokens * 100.0) / maxTokens) : 0);
+        int effectiveUsed = maxTokens > 0 ? Math.min(usedTokens, maxTokens) : usedTokens;
+        int percentage = Math.min(100, maxTokens > 0 ? (int) ((effectiveUsed * 100.0) / maxTokens) : 0);
 
-        LOG.info("[UsagePushService] Sending usage update: usedTokens=" + usedTokens + ", maxTokens=" + maxTokens + ", percentage=" + percentage + "%");
+        LOG.info("[UsagePushService] Sending usage update: usedTokens=" + usedTokens + " (effective=" + effectiveUsed + "), maxTokens=" + maxTokens + ", percentage=" + percentage + "%");
 
         // Build usage update data
         JsonObject usageUpdate = new JsonObject();
         usageUpdate.addProperty("percentage", percentage);
-        usageUpdate.addProperty("totalTokens", usedTokens);
+        usageUpdate.addProperty("totalTokens", effectiveUsed);
         usageUpdate.addProperty("limit", maxTokens);
-        usageUpdate.addProperty("usedTokens", usedTokens);
+        usageUpdate.addProperty("usedTokens", effectiveUsed);
         usageUpdate.addProperty("maxTokens", maxTokens);
 
         sendUsagePayload(usageUpdate);

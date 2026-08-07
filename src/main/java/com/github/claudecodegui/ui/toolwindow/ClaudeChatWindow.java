@@ -9,6 +9,7 @@ import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.grok.GrokCliBridge;
 import com.github.claudecodegui.provider.kimi.KimiCliBridge;
 import com.github.claudecodegui.provider.opencode.OpenCodeCliBridge;
@@ -72,6 +73,7 @@ public class ClaudeChatWindow {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final GrokCliBridge grokCliBridge;
     private final KimiCliBridge kimiCliBridge;
     private final OpenCodeCliBridge openCodeCliBridge;
@@ -216,6 +218,7 @@ public class ClaudeChatWindow {
         this.piCliBridge = new PiCliBridge();
         this.cliBridges = SessionProviderRouter.registerCliBridges(
                 this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge);
+        this.geminiSDKBridge = new GeminiSDKBridge();
         this.settingsService = new CodemossSettingsService();
         this.htmlLoader = new HtmlLoader(getClass());
         this.mainPanel = new JPanel(new BorderLayout());
@@ -271,7 +274,7 @@ public class ClaudeChatWindow {
                 () -> frontendReady
         );
 
-        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges);
+        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, geminiSDKBridge);
 
         this.chatWindowDelegate = new ChatWindowDelegate(createDelegateHost());
         chatWindowDelegate.loadPermissionModeFromSettings();
@@ -300,6 +303,11 @@ public class ClaudeChatWindow {
             @Override
             public Map<String, MarkerCliBridge> getCliBridges() {
                 return cliBridges;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override
@@ -1339,6 +1347,10 @@ public class ClaudeChatWindow {
         return cliBridges;
     }
 
+    public GeminiSDKBridge getGeminiSDKBridge() {
+        return geminiSDKBridge;
+    }
+
     public GrokCliBridge getGrokCliBridge() {
         return grokCliBridge;
     }
@@ -1451,11 +1463,20 @@ public class ClaudeChatWindow {
 
         String restoredSessionId = isNonEmpty(savedState.sessionId) ? savedState.sessionId : null;
         String restoredCwd = isNonEmpty(savedState.cwd) ? savedState.cwd : session.getCwd();
-        session.setSessionInfo(restoredSessionId, restoredCwd);
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                restoredCwd, projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = restoredCwd;
+        } else if (restoredCwd != null && !guardedCwd.equals(restoredCwd)) {
+            LOG.warn("[TabRestore] Rejected unsafe restored cwd=" + restoredCwd
+                    + ", using=" + guardedCwd);
+        }
+        session.setSessionInfo(restoredSessionId, guardedCwd);
         persistTabSessionState();
 
         LOG.info("[TabRestore] Restored tab session state: provider=" + savedState.provider
-                + ", sessionId=" + savedState.sessionId + ", cwd=" + savedState.cwd + ")");
+                + ", sessionId=" + restoredSessionId + ", cwd=" + guardedCwd + ")");
     }
 
     public void restorePersistedTabSessionState(TabStateService.TabSessionState savedState, boolean loadImmediately) {
@@ -2213,7 +2234,9 @@ public class ClaudeChatWindow {
             @Override
             public void onSessionIdReceived(String newSessionId) {
                 super.onSessionIdReceived(newSessionId);
-                sessionId = newSessionId;
+                // Empty string = clear resume id (model/provider switch). Keep
+                // permissionServiceKey as the exposed id for detach/routing.
+                sessionId = resolveExposedSessionId(newSessionId, permissionServiceKey);
                 persistTabSessionState();
             }
         };
@@ -2824,6 +2847,11 @@ public class ClaudeChatWindow {
             }
 
             @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
+            }
+
+            @Override
             public JPanel getMainPanel() {
                 return mainPanel;
             }
@@ -2953,6 +2981,11 @@ public class ClaudeChatWindow {
             @Override
             public Map<String, MarkerCliBridge> getCliBridges() {
                 return cliBridges;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override

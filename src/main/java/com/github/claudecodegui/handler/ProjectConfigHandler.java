@@ -3,6 +3,7 @@ package com.github.claudecodegui.handler;
 import com.github.claudecodegui.handler.core.HandlerContext;
 
 import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
+import com.github.claudecodegui.provider.gemini.GeminiPlanUsageService;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.action.SendShortcutSync;
 import com.github.claudecodegui.util.FontConfigService;
@@ -17,6 +18,12 @@ import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 
 /**
  * Handles project-level configuration: working directory, streaming, sandbox mode,
@@ -769,5 +776,141 @@ public class ProjectConfigHandler {
         } catch (Exception e) {
             LOG.error("[ProjectConfigHandler] Failed to dispatch code font config: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * ContextBar plan-usage for Gemini: temporary agy statusline hook (no token parsing).
+     * Pushes {@code window.updateGeminiPlanUsage}.
+     */
+    public void handleGetGeminiPlanUsage() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            JsonObject payload = GeminiPlanUsageService.resolvePlanUsagePayload();
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    context.callJavaScript(
+                            "window.updateGeminiPlanUsage",
+                            context.escapeJs(gson.toJson(payload)));
+                } catch (Exception e) {
+                    LOG.debug("[ProjectConfigHandler] updateGeminiPlanUsage failed: " + e.getMessage());
+                }
+            });
+        });
+    }
+
+    /**
+     * ContextBar plan-usage for Claude: local-agent {@code GET /capacity} from
+     * {@code ANTHROPIC_BASE_URL} when configured. Pushes {@code window.updateClaudePlanUsage}.
+     */
+    public void handleGetClaudePlanUsage() {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            JsonObject payload = resolveClaudePlanUsagePayload();
+            ApplicationManager.getApplication().invokeLater(() -> {
+                try {
+                    context.callJavaScript(
+                            "window.updateClaudePlanUsage",
+                            context.escapeJs(gson.toJson(payload)));
+                } catch (Exception e) {
+                    LOG.debug("[ProjectConfigHandler] updateClaudePlanUsage failed: " + e.getMessage());
+                }
+            });
+        });
+    }
+
+    /** Package-visible for tests. */
+    JsonObject resolveClaudePlanUsagePayload() {
+        String base = "";
+        try {
+            JsonObject claudeSettings = settingsService.readClaudeSettings();
+            if (claudeSettings != null && claudeSettings.has("env")) {
+                JsonObject env = claudeSettings.getAsJsonObject("env");
+                if (env.has("ANTHROPIC_BASE_URL") && env.get("ANTHROPIC_BASE_URL").isJsonPrimitive()) {
+                    base = env.get("ANTHROPIC_BASE_URL").getAsString();
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("[ProjectConfigHandler] readClaudeSettings for capacity: " + e.getMessage());
+        }
+
+        String capacityUrl = capacityUrlFromBase(base);
+        if (capacityUrl != null) {
+            JsonObject fromCapacity = fetchCapacityJson(capacityUrl);
+            if (fromCapacity != null && isPresentCapacity(fromCapacity)) {
+                fromCapacity.addProperty("ok", true);
+                if (!fromCapacity.has("source")) {
+                    fromCapacity.addProperty("source", "local-agent");
+                }
+                if (!fromCapacity.has("provider")) {
+                    fromCapacity.addProperty("provider", "claude");
+                }
+                return fromCapacity;
+            }
+        }
+
+        JsonObject unavailable = new JsonObject();
+        unavailable.addProperty("ok", true);
+        unavailable.addProperty("present", false);
+        unavailable.addProperty("message", "Usage unavailable");
+        unavailable.addProperty("source", "plugin");
+        unavailable.addProperty("provider", "claude");
+        return unavailable;
+    }
+
+    /** http://127.0.0.1:18790/v1 → http://127.0.0.1:18790/capacity */
+    static String capacityUrlFromBase(String baseUrl) {
+        if (baseUrl == null) {
+            return null;
+        }
+        String raw = baseUrl.trim();
+        if (raw.isEmpty()) {
+            return null;
+        }
+        try {
+            URI u = URI.create(raw);
+            if (u.getScheme() == null || u.getHost() == null) {
+                return null;
+            }
+            if (!u.getScheme().startsWith("http")) {
+                return null;
+            }
+            int port = u.getPort();
+            String authority = port > 0 ? u.getHost() + ":" + port : u.getHost();
+            return u.getScheme() + "://" + authority + "/capacity";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private JsonObject fetchCapacityJson(String url) {
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(3))
+                    .build();
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                    .timeout(Duration.ofSeconds(8))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200 || resp.body() == null || resp.body().isBlank()) {
+                return null;
+            }
+            return gson.fromJson(resp.body(), JsonObject.class);
+        } catch (Exception e) {
+            LOG.debug("[ProjectConfigHandler] capacity fetch " + url + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean isPresentCapacity(JsonObject o) {
+        if (o == null) {
+            return false;
+        }
+        if (o.has("present") && o.get("present").isJsonPrimitive()
+                && o.get("present").getAsJsonPrimitive().isBoolean()
+                && !o.get("present").getAsBoolean()) {
+            return false;
+        }
+        return o.has("capacity_pct") || o.has("used_pct") || o.has("capacityPct")
+                || (o.has("windows") && o.get("windows").isJsonArray()
+                && o.getAsJsonArray("windows").size() > 0);
     }
 }

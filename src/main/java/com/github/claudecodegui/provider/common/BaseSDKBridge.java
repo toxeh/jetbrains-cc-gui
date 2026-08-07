@@ -282,6 +282,8 @@ public abstract class BaseSDKBridge {
                 // Configure environment
                 Map<String, String> env = pb.environment();
                 envConfigurator.configureTempDir(env, processTempDir);
+                envConfigurator.configureClaudeSettingsEnv(env);
+                envConfigurator.configureProjectPath(env, cwd);
                 configureProviderEnv(env, stdinJson);
 
                 pb.redirectErrorStream(true);

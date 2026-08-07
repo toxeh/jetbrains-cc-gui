@@ -19,6 +19,8 @@ const translations: Record<string, string> = {
   'settings.cli.copyPath': 'Copy path',
   'settings.cli.copied': 'Copied',
   'settings.cli.copyFailed': 'Copy failed',
+  'settings.cli.tools.agy.name': 'Antigravity CLI',
+  'settings.cli.tools.agy.description': 'AGY desc',
   'settings.cli.tools.grok.name': 'Grok CLI',
   'settings.cli.tools.grok.description': 'Grok desc',
   'settings.cli.tools.kimi.name': 'Kimi CLI',
@@ -127,6 +129,7 @@ describe('CliSection', () => {
 
     await act(async () => {
       window.updateCliStatus?.(JSON.stringify({
+        agy: { id: 'agy', name: 'Antigravity CLI', binaryName: 'agy', installed: false },
         grok: { id: 'grok', name: 'Grok CLI', binaryName: 'grok', installed: false },
         kimi: { id: 'kimi', name: 'Kimi CLI', binaryName: 'kimi', installed: false },
         opencode: { id: 'opencode', name: 'OpenCode', binaryName: 'opencode', installed: false },
@@ -138,7 +141,7 @@ describe('CliSection', () => {
     fireEvent.click(guideButtons[0]);
 
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(screen.getByText(/curl -fsSL https:\/\/x\.ai\/cli\/install\.sh \| bash/)).toBeTruthy();
+    expect(screen.getByText(/curl -fsSL https:\/\/antigravity\.google\/docs\/cli\/install \| bash/)).toBeTruthy();
     // Never triggers install via Java bridge
     const calls = (window.sendToJava as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
     expect(calls.every((c) => !c.includes('install'))).toBe(true);

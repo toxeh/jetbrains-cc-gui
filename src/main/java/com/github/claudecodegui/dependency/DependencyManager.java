@@ -108,6 +108,11 @@ public class DependencyManager {
             return false;
         }
 
+        // External CLI providers (not npm packages under ~/.codemoss/dependencies)
+        if (sdk == SdkDefinition.GEMINI_CLI) {
+            return resolveAgyBinary() != null;
+        }
+
         // Check if the main package exists in node_modules
         Path packageDir = getPackageDir(sdkId, sdk.getNpmPackage());
         if (!Files.exists(packageDir)) {
@@ -173,6 +178,10 @@ public class DependencyManager {
         SdkDefinition sdk = SdkDefinition.fromId(sdkId);
         if (sdk == null || !isInstalled(sdkId)) {
             return null;
+        }
+        if (sdk == SdkDefinition.GEMINI_CLI) {
+            String bin = resolveAgyBinary();
+            return bin != null ? bin : "agy";
         }
 
         return getInstalledVersionFromPackage(sdkId, sdk.getNpmPackage());
@@ -575,18 +584,25 @@ public class DependencyManager {
             status.addProperty("status", installed ? "installed" : "not_installed");
 
             if (installed) {
-                String version = getInstalledVersion(sdk.getId());
-                status.addProperty("installedVersion", version);
-                status.addProperty("version", version); // Also add the version field
+                if (sdk == SdkDefinition.GEMINI_CLI) {
+                    String bin = resolveAgyBinary();
+                    status.addProperty("installedVersion", bin != null ? bin : "agy");
+                    status.addProperty("version", "cli");
+                    status.addProperty("binary", bin != null ? bin : "");
+                } else {
+                    String version = getInstalledVersion(sdk.getId());
+                    status.addProperty("installedVersion", version);
+                    status.addProperty("version", version); // Also add the version field
 
-                // Surface whether the installed version meets the SDK's minimum required
-                // version (e.g. Claude SDK >= 0.3.182 for the Fable tier). The frontend uses
-                // this to warn users before they hit a "model fable" 401 on old CLIs that
-                // don't recognize the alias.
-                String minRequired = sdk.getMinRequiredVersion();
-                if (minRequired != null && version != null && !version.isEmpty()) {
-                    status.addProperty("minimumVersion", minRequired);
-                    status.addProperty("meetsMinimumVersion", compareVersions(version, minRequired) >= 0);
+                    // Surface whether the installed version meets the SDK's minimum required
+                    // version (e.g. Claude SDK >= 0.3.182 for the Fable tier). The frontend uses
+                    // this to warn users before they hit a "model fable" 401 on old CLIs that
+                    // don't recognize the alias.
+                    String minRequired = sdk.getMinRequiredVersion();
+                    if (minRequired != null && version != null && !version.isEmpty()) {
+                        status.addProperty("minimumVersion", minRequired);
+                        status.addProperty("meetsMinimumVersion", compareVersions(version, minRequired) >= 0);
+                    }
                 }
             }
 
@@ -594,6 +610,82 @@ public class DependencyManager {
         }
 
         return result;
+    }
+
+    /**
+     * Resolve Antigravity CLI ({@code agy}) binary for Gemini provider status.
+     * Mirrors ai-bridge/services/gemini/agy-utils.js resolveAgyBinary().
+     * ONLY {@code agy} is allowed — never {@code agy.real}.
+     */
+    private String resolveAgyBinary() {
+        // Explicit override: accept only if executable and not agy.real.
+        String[] envKeys = {"AGY_PATH", "GEMINI_CLI_PATH", "AGY_CLI_PATH"};
+        for (String key : envKeys) {
+            String v = System.getenv(key);
+            if (v != null && !v.trim().isEmpty()) {
+                String path = v.trim();
+                if (isForbiddenAgyBinaryName(path)) {
+                    break; // fall through to discover real `agy`
+                }
+                Path p = Paths.get(path);
+                if (Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+                return null;
+            }
+        }
+        String home = PlatformUtils.getHomeDirectory();
+        // User-facing `agy` only — never agy.real.
+        String[] candidates = {
+                home + "/.local/bin/agy",
+                home + "/.gemini/antigravity-cli/bin/agy",
+                home + "/bin/agy",
+                "/usr/local/bin/agy",
+                "/opt/homebrew/bin/agy",
+        };
+        for (String c : candidates) {
+            try {
+                if (isForbiddenAgyBinaryName(c)) {
+                    continue;
+                }
+                Path p = Paths.get(c);
+                if (Files.isExecutable(p)) {
+                    return p.toAbsolutePath().toString();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        // PATH lookup — only `agy`
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv != null) {
+            for (String dir : pathEnv.split(Pattern.quote(File.pathSeparator))) {
+                if (dir == null || dir.isEmpty()) {
+                    continue;
+                }
+                try {
+                    Path p = Paths.get(dir, "agy");
+                    if (isForbiddenAgyBinaryName(p.toString())) {
+                        continue;
+                    }
+                    if (Files.isExecutable(p)) {
+                        return p.toAbsolutePath().toString();
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    /** {@code agy.real} is an internal install artifact and must never be invoked. */
+    private static boolean isForbiddenAgyBinaryName(String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        String norm = path.replace('\\', '/');
+        int slash = norm.lastIndexOf('/');
+        String base = slash >= 0 ? norm.substring(slash + 1) : norm;
+        return "agy.real".equalsIgnoreCase(base);
     }
 
     /**

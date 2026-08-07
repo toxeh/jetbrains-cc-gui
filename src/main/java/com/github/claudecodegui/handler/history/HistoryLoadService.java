@@ -8,6 +8,7 @@ import com.github.claudecodegui.cache.SessionIndexCache;
 import com.github.claudecodegui.cache.SessionIndexManager;
 import com.github.claudecodegui.provider.claude.ClaudeHistoryReader;
 import com.github.claudecodegui.provider.codex.CodexHistoryReader;
+import com.github.claudecodegui.provider.gemini.GeminiHistoryReader;
 import com.github.claudecodegui.provider.grok.GrokHistoryReader;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -69,6 +70,11 @@ class HistoryLoadService {
                     GrokHistoryReader grokReader = new GrokHistoryReader();
                     historyJson = grokReader.getSessionsForProjectAsJson(projectPath);
                     LOG.info("[HistoryHandler] GrokHistoryReader 返回的 JSON 长度: " + historyJson.length());
+                } else if ("gemini".equals(provider)) {
+                    LOG.info("[HistoryHandler] 使用 GeminiHistoryReader 读取 Gemini 会话 (项目: " + projectPath + ")");
+                    GeminiHistoryReader geminiReader = new GeminiHistoryReader();
+                    historyJson = geminiReader.getSessionsForProjectAsJson(projectPath);
+                    LOG.info("[HistoryHandler] GeminiHistoryReader 返回的 JSON 长度: " + historyJson.length());
                 } else if ("kimi".equals(provider) || "opencode".equals(provider) || "pi".equals(provider)) {
                     // History disk readers are deferred; live multi-turn uses sessionId resume.
                     LOG.info("[HistoryHandler] " + provider + " history list not implemented yet; returning empty");
