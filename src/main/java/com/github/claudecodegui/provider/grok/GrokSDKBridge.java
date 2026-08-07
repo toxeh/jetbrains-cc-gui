@@ -630,12 +630,8 @@ public class GrokSDKBridge extends BaseSDKBridge {
         }
         String authMethod = resolveAuthMethod();
         params.addProperty("authMethod", authMethod != null ? authMethod : "");
-        String effectiveKey = "";
-        if (!CodemossSettingsService.GROK_AUTH_METHOD_OAUTH.equals(authMethod)) {
-            String k = resolveApiKeyForAuth(authMethod);
-            effectiveKey = k != null ? k : "";
-        }
-        params.addProperty("apiKey", effectiveKey);
+        String effectiveKey = resolveApiKeyForAuth(authMethod);
+        params.addProperty("apiKey", effectiveKey != null ? effectiveKey : "");
         String effectiveBase = resolveEffectiveBaseUrl(authMethod);
         params.addProperty("baseUrl", effectiveBase != null ? effectiveBase : "");
 
@@ -959,12 +955,8 @@ public class GrokSDKBridge extends BaseSDKBridge {
         String effectiveBase = resolveEffectiveBaseUrl(authMethod);
         stdinInput.addProperty("baseUrl", effectiveBase != null ? effectiveBase : "");
         stdinInput.addProperty("authMethod", authMethod);
-        String effectiveKey = "";
-        if (!CodemossSettingsService.GROK_AUTH_METHOD_OAUTH.equals(authMethod)) {
-            String k = resolveApiKeyForAuth(authMethod);
-            effectiveKey = k != null ? k : "";
-        }
-        stdinInput.addProperty("apiKey", effectiveKey);
+        String effectiveKey = resolveApiKeyForAuth(authMethod);
+        stdinInput.addProperty("apiKey", effectiveKey != null ? effectiveKey : "");
         stdinInput.addProperty("agentPrompt", agentPrompt != null ? agentPrompt : "");
         stdinInput.addProperty("streaming", streaming == null || streaming);
         stdinInput.addProperty("disableThinking", disableThinking);
