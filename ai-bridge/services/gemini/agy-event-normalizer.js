@@ -25,6 +25,8 @@ export class AgyEventNormalizer {
     /** Peak context tokens seen this turn (ignore tiny checkpoint regressions). */
     this.peakContextTokens = 0;
     this.emittedToolKeys = new Set();
+    this.emittedToolUses = new Set();
+    this.emittedToolResults = new Set();
     this._terminalError = null;
     this._terminalStatus = null;
   }
@@ -34,6 +36,8 @@ export class AgyEventNormalizer {
     this.peakContextTokens = 0;
     this.assistantText = '';
     this.emittedToolKeys = new Set();
+    this.emittedToolUses = new Set();
+    this.emittedToolResults = new Set();
     this._terminalError = null;
     this._terminalStatus = null;
     this.streamEnded = false;
@@ -103,6 +107,16 @@ export class AgyEventNormalizer {
       }
     }
 
+    // Handle planner_response / agent_response tool_calls array if present
+    if (Array.isArray(step.tool_calls) && step.tool_calls.length > 0) {
+      step.tool_calls.forEach((call, idx) => {
+        const toolName = call.name || 'tool';
+        const params = call.args || call.parameters || {};
+        const callId = `agy-tool-${step.step_index ?? 'x'}-${idx}`;
+        this._emitToolUse(callId, toolName, params);
+      });
+    }
+
     if (stepType === 'tool' || step.tool_info || step.tool_name) {
       this._emitTool(step);
     }
@@ -126,43 +140,73 @@ export class AgyEventNormalizer {
     }
   }
 
+  _emitToolUse(toolCallId, name, params) {
+    if (this.emittedToolUses.has(toolCallId)) return;
+    this.emittedToolUses.add(toolCallId);
+
+    const toolUseMsg = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: toolCallId,
+            name: name || 'tool',
+            input: typeof params === 'object' && params !== null ? params : { value: params },
+          },
+        ],
+      },
+    };
+    this._emit(`[MESSAGE] ${JSON.stringify(toolUseMsg)}`);
+    this._emit('[BLOCK_RESET]');
+  }
+
   _emitTool(step) {
     const info = step.tool_info || {};
     const name = info.name || step.tool_name || 'tool';
-    const key = `${step.step_index ?? ''}:${name}:${JSON.stringify(info.parameters || {}).slice(0, 80)}`;
+    const params = info.parameters || step.parameters || {};
     const state = String(step.state || '').toUpperCase();
-    if (state === 'ACTIVE' && this.emittedToolKeys.has(key)) return;
-    this.emittedToolKeys.add(key);
+    const stepIndex = step.step_index ?? 'x';
+    const toolCallId = `agy-tool-${stepIndex}`;
 
-    const params = info.parameters || {};
+    // Always emit tool_use card to UI on first sight / ACTIVE state
+    this._emitToolUse(toolCallId, name, params);
+
     const output = info.output != null ? String(info.output) : '';
     const err = info.error;
     const isError = !!(err && (err.message || err.type));
 
-    let summary = '';
-    try {
-      const cmd = params.CommandLine || params.command || params.path || params.Path || '';
-      summary = cmd ? `${name}: ${cmd}` : name;
-    } catch {
-      summary = name;
+    // Emit tool_result when tool completes or has output/error
+    const isDone = state === 'DONE' || output || isError;
+    if (isDone && !this.emittedToolResults.has(toolCallId)) {
+      this.emittedToolResults.add(toolCallId);
+
+      let summary = '';
+      try {
+        const cmd = params.CommandLine || params.command || params.path || params.Path || '';
+        summary = cmd ? `${name}: ${cmd}` : name;
+      } catch {
+        summary = name;
+      }
+
+      const body = isError
+        ? `${summary}\nError: ${err.message || err.type || 'tool error'}`
+        : (output ? `${summary}\n${output}`.slice(0, 8000) : summary);
+
+      this._emit(`[TOOL_RESULT] ${JSON.stringify({
+        type: 'tool_result',
+        tool_use_id: toolCallId,
+        content: body,
+        is_error: isError,
+        _meta: {
+          tool_name: name,
+          parameters: params,
+          step_index: step.step_index,
+          state,
+        },
+      })}`);
     }
-
-    const body = isError
-      ? `${summary}\nError: ${err.message || err.type || 'tool error'}`
-      : (output ? `${summary}\n${output}`.slice(0, 8000) : summary);
-
-    this._emit(`[TOOL_RESULT] ${JSON.stringify({
-      type: 'tool_result',
-      tool_use_id: `agy-tool-${step.step_index ?? Date.now()}`,
-      content: body,
-      is_error: isError,
-      _meta: {
-        tool_name: name,
-        parameters: params,
-        step_index: step.step_index,
-        state,
-      },
-    })}`);
   }
 
   _handleResult(result) {

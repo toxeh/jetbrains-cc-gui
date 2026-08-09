@@ -208,3 +208,28 @@ test('ignores null/unknown events', () => {
   n.handleStreamEvent({ event: 'unknown_thing' });
   assert.equal(lines.length, before);
 });
+
+test('emits tool_use message and BLOCK_RESET when tool step update arrives', () => {
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 3,
+      state: 'ACTIVE',
+      step_type: 'tool',
+      tool_name: 'view_file',
+      tool_info: {
+        name: 'view_file',
+        parameters: { AbsolutePath: '/foo/bar.txt' },
+      },
+    },
+  });
+
+  const toolUseLine = lines.find((l) => l.startsWith('[MESSAGE]') && l.includes('"tool_use"'));
+  assert.ok(toolUseLine, 'tool_use message should be emitted on ACTIVE tool step');
+  assert.ok(toolUseLine.includes('view_file'));
+  assert.ok(toolUseLine.includes('/foo/bar.txt'));
+  assert.ok(lines.includes('[BLOCK_RESET]'), 'BLOCK_RESET should be emitted for tool step');
+});
+
