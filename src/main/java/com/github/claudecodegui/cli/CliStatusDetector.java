@@ -180,6 +180,7 @@ public final class CliStatusDetector {
             case KIMI -> new String[]{"KIMI_BIN", "KIMI_PATH", "KIMI_CLI_PATH", "KIMI_CODE_BIN"};
             case OPENCODE -> new String[]{"OPENCODE_BIN", "OPENCODE_PATH", "OPENCODE_CLI_PATH"};
             case PI -> new String[]{"PI_BIN", "PI_PATH", "PI_CLI_PATH"};
+            case GEMINI -> new String[]{"AGY_PATH", "AGY_BIN", "GEMINI_CLI_PATH"};
         };
     }
 

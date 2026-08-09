@@ -75,6 +75,29 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("grok-4.5", 500_000);
         MODEL_CONTEXT_LIMITS.put("grok-4", 500_000);
         MODEL_CONTEXT_LIMITS.put("grok-build", 500_000);
+
+        // Gemini / Antigravity models
+        MODEL_CONTEXT_LIMITS.put("gemini", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-2.5-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-2.5-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-medium", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.5-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-medium", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.6-flash-low", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-high", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("gemini-3.1-pro-low", 1_000_000);
+
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-opus-4-6", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-opus-4-6-thinking", 200_000);
+
+        MODEL_CONTEXT_LIMITS.put("gpt-oss-120b", 128_000);
     }
 
     private final HandlerContext context;
@@ -241,6 +264,36 @@ public class ModelProviderHandler {
                 && !previousProvider.isEmpty()
                 && !newProvider.isEmpty()
                 && !previousProvider.equals(newProvider);
+    }
+
+    /**
+     * Gemini/agy only: clear {@code --conversation} resume when the selected model
+     * slug actually changes. Reaffirmations of the same model keep the session.
+     */
+    static boolean shouldResetGeminiSessionOnModelChange(String provider, String previousModel, String newModel) {
+        if (provider == null || !"gemini".equalsIgnoreCase(provider.trim())) {
+            return false;
+        }
+        if (newModel == null || newModel.trim().isEmpty()) {
+            return false;
+        }
+        String prev = previousModel != null ? previousModel.trim() : "";
+        String next = newModel.trim();
+        return !prev.isEmpty() && !prev.equals(next);
+    }
+
+    /**
+     * True when the tab moves between distinct non-empty providers (not a
+     * reaffirmation of the same provider, and not empty init races).
+     */
+    static boolean shouldClearSessionOnProviderSwitch(String previousProvider, String newProvider) {
+        if (previousProvider == null || previousProvider.trim().isEmpty()) {
+            return false;
+        }
+        if (newProvider == null || newProvider.trim().isEmpty()) {
+            return false;
+        }
+        return !previousProvider.trim().equalsIgnoreCase(newProvider.trim());
     }
 
     /**
@@ -452,8 +505,10 @@ public class ModelProviderHandler {
             return 200_000;
         }
 
+        String normalized = stripAgyEffortSuffix(model.trim());
+
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\s*\\[([0-9.]+)([kKmM])\\]\\s*$");
-        java.util.regex.Matcher matcher = pattern.matcher(model);
+        java.util.regex.Matcher matcher = pattern.matcher(normalized);
 
         if (matcher.find()) {
             try {
@@ -470,7 +525,63 @@ public class ModelProviderHandler {
             }
         }
 
-        return MODEL_CONTEXT_LIMITS.getOrDefault(model, 200_000);
+        Integer exact = MODEL_CONTEXT_LIMITS.get(normalized);
+        if (exact != null) {
+            return exact;
+        }
+        // Also try original (in case map has full slug keys)
+        exact = MODEL_CONTEXT_LIMITS.get(model);
+        if (exact != null) {
+            return exact;
+        }
+
+        // Longest-prefix match for family slugs (gemini-3.6-flash-medium → gemini-3.6-flash).
+        // Require key length >= 6 so short keys like "o1" / "gpt-4" cannot steal longer ids.
+        String bestKey = null;
+        for (String key : MODEL_CONTEXT_LIMITS.keySet()) {
+            if (key == null || key.length() < 6) {
+                continue;
+            }
+            if (normalized.equals(key)
+                    || normalized.startsWith(key + "-")
+                    || normalized.startsWith(key + "[")
+                    || model.startsWith(key + "-")
+                    || model.startsWith(key + "[")) {
+                if (bestKey == null || key.length() > bestKey.length()) {
+                    bestKey = key;
+                }
+            }
+        }
+        if (bestKey != null) {
+            return MODEL_CONTEXT_LIMITS.get(bestKey);
+        }
+
+        // Provider-ish defaults by id prefix (agy multi-model catalog)
+        if (normalized.startsWith("gemini")) {
+            return 1_000_000;
+        }
+        if (normalized.startsWith("claude")) {
+            return 200_000;
+        }
+        if (normalized.startsWith("gpt-oss")) {
+            return 128_000;
+        }
+
+        return 200_000;
+    }
+
+    /** Strip trailing agy effort suffix (-low|-medium|-high|-xhigh|-thinking). */
+    static String stripAgyEffortSuffix(String modelId) {
+        if (modelId == null || modelId.isEmpty()) {
+            return modelId;
+        }
+        String[] suffixes = { "-thinking", "-xhigh", "-medium", "-high", "-low" };
+        for (String suffix : suffixes) {
+            if (modelId.endsWith(suffix) && modelId.length() > suffix.length()) {
+                return modelId.substring(0, modelId.length() - suffix.length());
+            }
+        }
+        return modelId;
     }
 
     public static int getModelContextLimit(String provider, String model) {
