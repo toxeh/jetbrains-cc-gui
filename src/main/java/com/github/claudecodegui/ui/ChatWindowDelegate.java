@@ -82,6 +82,7 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
@@ -316,6 +317,7 @@ public class ChatWindowDelegate {
                 project,
                 claudeSDKBridge,
                 codexSDKBridge,
+                host.getGeminiSDKBridge(),
                 settingsService,
                 jsCallback,
                 host::isActiveContent,

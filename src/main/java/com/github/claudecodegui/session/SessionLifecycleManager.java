@@ -41,6 +41,8 @@ public class SessionLifecycleManager {
 
         CodexSDKBridge getCodexSDKBridge();
 
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge();
+
         Map<String, MarkerCliBridge> getCliBridges();
 
         ClaudeSession getSession();
@@ -248,7 +250,8 @@ public class SessionLifecycleManager {
                     host.getProject(),
                     host.getClaudeSDKBridge(),
                     host.getCodexSDKBridge(),
-                    host.getCliBridges());
+                    host.getCliBridges(),
+                    host.getGeminiSDKBridge());
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
             newSession.setModel(previousModel);
@@ -414,7 +417,8 @@ public class SessionLifecycleManager {
                 host.getProject(),
                 host.getClaudeSDKBridge(),
                 host.getCodexSDKBridge(),
-                host.getCliBridges());
+                host.getCliBridges(),
+                host.getGeminiSDKBridge());
     }
 
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {

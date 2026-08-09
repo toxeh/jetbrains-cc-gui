@@ -61,6 +61,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+
 /**
  * Chat window instance. Coordinates UI components, session management,
  * and message dispatching. One instance per tab.
@@ -71,6 +73,7 @@ public class ClaudeChatWindow {
     private final JPanel mainPanel;
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
     private final GrokCliBridge grokCliBridge;
     private final KimiCliBridge kimiCliBridge;
@@ -210,6 +213,7 @@ public class ClaudeChatWindow {
         this.project = project;
         this.claudeSDKBridge = new ClaudeSDKBridge();
         this.codexSDKBridge = new CodexSDKBridge();
+        this.geminiSDKBridge = new GeminiSDKBridge();
         this.grokCliBridge = new GrokCliBridge();
         this.kimiCliBridge = new KimiCliBridge();
         this.openCodeCliBridge = new OpenCodeCliBridge();
@@ -271,7 +275,7 @@ public class ClaudeChatWindow {
                 () -> frontendReady
         );
 
-        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges);
+        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, geminiSDKBridge);
 
         this.chatWindowDelegate = new ChatWindowDelegate(createDelegateHost());
         chatWindowDelegate.loadPermissionModeFromSettings();
@@ -295,6 +299,11 @@ public class ClaudeChatWindow {
             @Override
             public CodexSDKBridge getCodexSDKBridge() {
                 return codexSDKBridge;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override
@@ -2948,6 +2957,11 @@ public class ClaudeChatWindow {
             @Override
             public CodexSDKBridge getCodexSDKBridge() {
                 return codexSDKBridge;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override
