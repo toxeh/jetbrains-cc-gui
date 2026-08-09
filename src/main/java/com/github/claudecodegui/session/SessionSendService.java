@@ -7,7 +7,6 @@ import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
-import com.github.claudecodegui.session.GeminiMessageHandler;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
