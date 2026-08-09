@@ -178,10 +178,10 @@ export function buildAgyArgs(options = {}) {
 }
 
 export function buildAgyEnv(baseEnv = process.env) {
-  const env = { ...process.env, ...baseEnv };
-  env.CI = env.CI || '1';
-  env.NO_COLOR = env.NO_COLOR || '1';
-  env.TERM = env.TERM || 'dumb';
+  const env = { ...(baseEnv || process.env) };
+  env.CI = '1';
+  env.NO_COLOR = '1';
+  env.TERM = 'dumb';
 
   const resolved = resolveAgyBinary();
   if (!env.AGY_PATH && resolved) {
