@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
-import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
+import { CLAUDE_MODELS, CODEX_MODELS, GEMINI_MODELS, GROK_MODELS } from './types';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
@@ -209,33 +209,19 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-<<<<<<< HEAD
-  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels]);
-=======
   }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, geminiModels]);
->>>>>>> 72338fa6 (feat(gemini): plan usage bar with 5h/7d windows by model family)
 
   // When CLI model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-<<<<<<< HEAD
     const isDynamicProvider = currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode'
-      || currentProvider === 'pi';
+      || currentProvider === 'pi' || currentProvider === 'grok';
     if (!isDynamicProvider) return;
     if (!availableModels.length || !onModelSelect) return;
-    const exists = availableModels.some((model) => model.id === selectedModel);
+    const exists = availableModels.some((model: ModelInfo) => model.id === selectedModel);
     if (!exists) {
       onModelSelect(availableModels[0].id);
     }
   }, [availableModels, currentProvider, onModelSelect, selectedModel]);
-=======
-    if (currentProvider !== 'kimi' && currentProvider !== 'opencode' && currentProvider !== 'pi') return;
-    if (!cliModels.length || !onModelSelect) return;
-    const exists = cliModels.some((model) => model.id === selectedModel);
-    if (!exists) {
-      onModelSelect(cliModels[0].id);
-    }
-  }, [cliModels, currentProvider, onModelSelect, selectedModel]);
->>>>>>> 72338fa6 (feat(gemini): plan usage bar with 5h/7d windows by model family)
 
   /**
    * Handle submit button click

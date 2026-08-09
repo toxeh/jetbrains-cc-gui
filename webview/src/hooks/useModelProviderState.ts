@@ -12,7 +12,6 @@ import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
 import { useGeminiProvider } from './providers/useGeminiProvider';
 import { useGrokProvider } from './providers/useGrokProvider';
-import { useGeminiProvider } from './providers/useGeminiProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
 import { usePiProvider } from './providers/usePiProvider';
@@ -61,7 +60,6 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const kimi = useKimiProvider();
   const openCode = useOpenCodeProvider();
   const pi = usePiProvider();
-  const gemini = useGeminiProvider();
   const { isSdkInstalled, isSdkStatusKnown, sdkStatus, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -86,6 +84,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const {
     selectedGeminiModel, setSelectedGeminiModel,
     geminiPermissionMode, setGeminiPermissionMode,
+    geminiFamilies,
+    geminiModels,
+    geminiCatalogLoaded,
+    fetchGeminiModels,
+    resolveGeminiAgyModelId,
+    resolveDefaultEffortForFamily,
   } = gemini;
   const {
     selectedKimiModel, setSelectedKimiModel,
@@ -99,17 +103,6 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     selectedPiModel, setSelectedPiModel,
     piPermissionMode, setPiPermissionMode,
   } = pi;
-
-  const {
-    selectedGeminiModel, setSelectedGeminiModel,
-    geminiPermissionMode, setGeminiPermissionMode,
-    geminiFamilies,
-    geminiModels,
-    geminiCatalogLoaded,
-    fetchGeminiModels,
-    resolveGeminiAgyModelId,
-    resolveDefaultEffortForFamily,
-  } = gemini;
 
   // Pull live agy catalog when Gemini is active (new tab / provider switch).
   useEffect(() => {
@@ -166,12 +159,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setCodexPermissionMode,
     setGeminiPermissionMode,
     setSelectedGrokModel,
-    setSelectedGeminiModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
     setGrokPermissionMode,
-    setGeminiPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
@@ -187,12 +178,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     codexPermissionMode,
     geminiPermissionMode,
     selectedGrokModel,
-    selectedGeminiModel,
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
     grokPermissionMode,
-    geminiPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
