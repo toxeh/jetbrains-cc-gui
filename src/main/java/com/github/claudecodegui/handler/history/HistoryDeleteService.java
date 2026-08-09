@@ -233,6 +233,9 @@ class HistoryDeleteService {
         if ("grok".equals(currentProvider)) {
             return new DeleteResult(deleteGrokSession(sessionId), 0);
         }
+        if ("gemini".equals(currentProvider)) {
+            return new DeleteResult(deleteGeminiSession(sessionId), 0);
+        }
 
         String rawPath = context.resolveEffectiveWorkingDirectory();
         String nodePath = NodeDetector.getInstance().getCachedNodePath();
@@ -254,6 +257,14 @@ class HistoryDeleteService {
                 new com.github.claudecodegui.provider.grok.GrokHistoryReader();
         boolean deleted = reader.deleteSession(sessionId, projectPath);
         LOG.info("[HistoryHandler] Delete Grok session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
+    }
+
+    private boolean deleteGeminiSession(String sessionId) throws java.io.IOException {
+        com.github.claudecodegui.provider.gemini.GeminiHistoryReader reader =
+                new com.github.claudecodegui.provider.gemini.GeminiHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId);
+        LOG.info("[HistoryHandler] Delete Gemini session " + sessionId + ": " + (deleted ? "ok" : "not found"));
         return deleted;
     }
 

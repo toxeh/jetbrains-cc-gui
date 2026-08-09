@@ -422,7 +422,6 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...codex,
     ...gemini,
     ...grok,
-    ...gemini,
     ...kimi,
     ...openCode,
     ...pi,

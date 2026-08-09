@@ -123,6 +123,7 @@ public class ModelProviderHandler {
                 }
             }
 
+            String provider = context.getCurrentProvider();
             String previousModel = resolveCurrentSessionModel(context);
             boolean modelChanged = isActualModelSwitch(previousModel, model);
             LOG.info("[ModelProviderHandler] Setting model to: " + model
@@ -135,6 +136,14 @@ public class ModelProviderHandler {
                     TokenUsageUtils.clearContextUsageFromSessionMessages(
                             context.getSession().getMessages());
                 }
+                // agy resumes the full conversation blob via --conversation. Switching
+                // models (or effort slugs) inside one fat multi-model history is what
+                // blew context to ~2M tokens. Start a fresh conversation instead.
+                if (shouldResetGeminiSessionOnModelChange(provider, previousModel, model)) {
+                    context.getSession().clearSessionId();
+                    LOG.info("[ModelProviderHandler] Cleared Gemini conversation id after model change: "
+                            + previousModel + " -> " + model);
+                }
                 LOG.info("[ModelProviderHandler] Updated session model to canonical ID: " + model);
             }
 
@@ -146,10 +155,12 @@ public class ModelProviderHandler {
                 com.github.claudecodegui.notifications.ClaudeNotifier.setModel(context.getProject(), model);
             }
 
-            String provider = context.getCurrentProvider();
             boolean isCodex = "codex".equalsIgnoreCase(provider);
-            String resolvedModelForUsage = isCodex ? model : resolveConfiguredClaudeModelFromSettings(model);
-            int newMaxTokens = isCodex
+            boolean isGemini = "gemini".equalsIgnoreCase(provider);
+            String resolvedModelForUsage = isCodex || isGemini
+                    ? model
+                    : resolveConfiguredClaudeModelFromSettings(model);
+            int newMaxTokens = (isCodex || isGemini)
                     ? getModelContextLimit(provider, model)
                     : getModelContextLimit(resolvedModelForUsage);
             LOG.info("[ModelProviderHandler] Model context limit: " + newMaxTokens
@@ -203,6 +214,14 @@ public class ModelProviderHandler {
                 if (providerChanged) {
                     TokenUsageUtils.clearContextUsageFromSessionMessages(
                             context.getSession().getMessages());
+                }
+                // Provider session ids are not interchangeable (Claude UUID vs Codex
+                // thread vs agy conversation). Drop the previous id on a real switch
+                // so the next send cannot resume a foreign conversation.
+                if (shouldClearSessionOnProviderSwitch(previousProvider, provider)) {
+                    context.getSession().clearSessionId();
+                    LOG.info("[ModelProviderHandler] Cleared session id after provider switch: "
+                            + previousProvider + " -> " + provider);
                 }
             }
 
@@ -397,6 +416,55 @@ public class ModelProviderHandler {
             }
         } catch (Exception e) {
             LOG.error("[ModelProviderHandler] Failed to set Codex fast mode: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Fetch live Gemini/agy model catalog and push to webview via
+     * {@code window.updateGeminiModels}.
+     */
+    public void handleGetGeminiModels(String content) {
+        try {
+            if (context.getGeminiSDKBridge() == null) {
+                LOG.warn("[ModelProviderHandler] get_gemini_models: GeminiSDKBridge unavailable");
+                pushGeminiModelsError("Gemini bridge unavailable");
+                return;
+            }
+            context.getGeminiSDKBridge().listModels()
+                    .thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
+                        try {
+                            if (result == null) {
+                                pushGeminiModelsError("Empty listModels response");
+                                return;
+                            }
+                            String json = gson.toJson(result);
+                            context.callJavaScript("window.updateGeminiModels", context.escapeJs(json));
+                        } catch (Exception e) {
+                            LOG.error("[ModelProviderHandler] Failed to push gemini models: " + e.getMessage(), e);
+                            pushGeminiModelsError(e.getMessage());
+                        }
+                    }))
+                    .exceptionally(ex -> {
+                        LOG.error("[ModelProviderHandler] listModels failed: " + ex.getMessage(), ex);
+                        ApplicationManager.getApplication().invokeLater(() ->
+                                pushGeminiModelsError(ex.getMessage()));
+                        return null;
+                    });
+        } catch (Exception e) {
+            LOG.error("[ModelProviderHandler] get_gemini_models failed: " + e.getMessage(), e);
+            pushGeminiModelsError(e.getMessage());
+        }
+    }
+
+    private void pushGeminiModelsError(String message) {
+        try {
+            JsonObject err = new JsonObject();
+            err.addProperty("success", false);
+            err.add("models", new com.google.gson.JsonArray());
+            err.add("families", new com.google.gson.JsonArray());
+            err.addProperty("error", message != null ? message : "unknown");
+            context.callJavaScript("window.updateGeminiModels", context.escapeJs(gson.toJson(err)));
+        } catch (Exception ignored) {
         }
     }
 

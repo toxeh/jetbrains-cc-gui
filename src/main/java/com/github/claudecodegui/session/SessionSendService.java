@@ -347,40 +347,46 @@ public class SessionSendService {
             String effectivePermissionMode,
             String requestedReasoningEffort
     ) {
+        if (geminiSDKBridge == null) {
+            LOG.error("[Lifecycle] sendToGemini called but GeminiSDKBridge is null");
+            callbackFacade.notifyStateChange(false, false, "Gemini bridge not available");
+            return CompletableFuture.completedFuture(null);
+        }
         GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler(), project);
-
-        String contextAppend = contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
-        String finalInput = (input != null ? input : "") + contextAppend;
         Boolean streaming = readStreamingEnabled();
+        final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
+        final String currentModel = state.getModel();
+        String effort = requestedReasoningEffort;
+        if (effort == null) {
+            effort = state.getReasoningEffort();
+        }
         String projectBase = project != null ? project.getBasePath() : null;
         String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
                 state.getCwd(), projectBase);
         if (guardedCwd == null) {
             guardedCwd = state.getCwd();
         } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            LOG.warn("[Lifecycle] sendToGemini cwd guard: " + state.getCwd() + " -> " + guardedCwd);
             state.setCwd(guardedCwd);
         }
-
-        final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
-
-        LOG.info("[Lifecycle] sendToGemini sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
-                + ", cwd=" + guardedCwd
-                + ", model=" + state.getModel());
+        LOG.info("[Lifecycle] sendToGemini model=" + currentModel
+                + ", sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", cwd=" + guardedCwd);
 
         return geminiSDKBridge.sendMessage(
                 channelId,
-                finalInput,
+                input,
                 state.getSessionId(),
                 runtimeSessionEpoch,
                 guardedCwd,
                 attachments,
                 effectivePermissionMode,
-                state.getModel(),
+                currentModel,
                 openedFilesJson,
                 agentPrompt,
                 streaming,
                 false,
-                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
+                effort,
                 handler
         ).thenApply(result -> null);
     }
@@ -417,9 +423,18 @@ public class SessionSendService {
         );
         String modelForCli = normalizeCliModelForProvider(provider, state.getModel());
 
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                state.getCwd(), projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = state.getCwd();
+        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            state.setCwd(guardedCwd);
+        }
+
         LOG.info("[Lifecycle] sendToCli provider=" + provider
                 + " sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
-                + ", cwd=" + state.getCwd()
+                + ", cwd=" + guardedCwd
                 + ", modelRaw=" + state.getModel()
                 + ", modelCli=" + (modelForCli != null ? modelForCli : "(config-default)")
                 + ", effort=" + effort);
@@ -428,7 +443,7 @@ public class SessionSendService {
                 channelId,
                 finalInput,
                 state.getSessionId(),
-                state.getCwd(),
+                guardedCwd,
                 modelForCli != null ? modelForCli : "",
                 effort,
                 handler

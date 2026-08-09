@@ -268,6 +268,10 @@ public class ClaudeSession {
         }
     }
 
+    public void clearSessionId() {
+        setSessionInfo(null, getCwd());
+    }
+
     /**
      * Get the current working directory.
      */

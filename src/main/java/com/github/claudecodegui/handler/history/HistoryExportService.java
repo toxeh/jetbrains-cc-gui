@@ -60,6 +60,11 @@ class HistoryExportService {
                     LOG.info("[HistoryHandler] 使用 CodexHistoryReader 读取 Codex 会话消息");
                     CodexHistoryReader codexReader = new CodexHistoryReader();
                     messagesJson = codexReader.getSessionMessagesAsJson(sessionId);
+                } else if ("gemini".equals(currentProvider)) {
+                    LOG.info("[HistoryHandler] 使用 GeminiHistoryReader 读取 Gemini 会话消息");
+                    com.github.claudecodegui.provider.gemini.GeminiHistoryReader geminiReader =
+                            new com.github.claudecodegui.provider.gemini.GeminiHistoryReader();
+                    messagesJson = geminiReader.getSessionMessagesAsJson(sessionId);
                 } else {
                     LOG.info("[HistoryHandler] 使用 ClaudeHistoryReader 读取 Claude 会话消息");
                     ClaudeHistoryReader historyReader = new ClaudeHistoryReader();
