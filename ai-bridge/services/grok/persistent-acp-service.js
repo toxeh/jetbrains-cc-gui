@@ -243,10 +243,7 @@ async function createRuntime(params, { log } = {}) {
       model: params.model || '',
     });
 
-    // Sync CLI always-approve with mode (default → off so agent keeps requesting).
-    if (client.activeSessionId) {
-      await applyPermissionModeToSession(client, client.activeSessionId, live.permissionMode);
-    }
+    // Permission mode is enforced natively via onServerRequest and authorizeCreate handlers.
 
     const runtime = {
       key,

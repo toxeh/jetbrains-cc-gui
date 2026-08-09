@@ -717,9 +717,7 @@ export async function runAcpTurn({
     emit('session_id', activeSessionId);
     emit('session_new', sessionInfo.sessionMeta || {});
 
-    // Always sync always-approve with mode (default must turn it OFF so the agent
-    // keeps requesting session/request_permission instead of silent auto-run).
-    await applyPermissionModeToSession(client, activeSessionId, effectiveMode);
+    // Permission mode is enforced natively via onServerRequest and authorizeCreate handlers.
 
     const promptBlocks = buildPromptBlocks({
       message,
