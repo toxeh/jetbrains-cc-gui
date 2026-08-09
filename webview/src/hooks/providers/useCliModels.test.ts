@@ -32,9 +32,13 @@ describe('useCliModels', () => {
     expect(sendBridgeEventMock).toHaveBeenCalledWith('get_cli_models', 'kimi');
   });
 
-  it('does not fetch for claude or codex', () => {
+  it('fetches the grok catalog when the grok provider is active', () => {
+    renderHook(() => useCliModels('grok'));
+    expect(sendBridgeEventMock).toHaveBeenCalledWith('get_cli_models', 'grok');
+  });
+
+  it('does not fetch for claude', () => {
     renderHook(() => useCliModels('claude'));
-    renderHook(() => useCliModels('codex'));
     expect(sendBridgeEventMock).not.toHaveBeenCalled();
   });
 
