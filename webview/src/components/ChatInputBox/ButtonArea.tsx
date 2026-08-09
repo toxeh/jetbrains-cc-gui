@@ -68,6 +68,8 @@ function getCustomClaudeModels(): ModelInfo[] {
  * Contains mode selector, model selector, attachment button, prompt enhancer button, send/stop button
  */
 export const ButtonArea = ({
+  geminiFamilies,
+  geminiModels,
   disabled = false,
   hasInputContent = false,
   isLoading = false,
@@ -159,6 +161,7 @@ export const ButtonArea = ({
   // customModelsVersion triggers recalculation when localStorage changes
   const availableModels = useMemo(() => {
     if (currentProvider === 'codex') {
+      // Merge built-in models and custom models
       const customModels = getCustomCodexModels();
       if (customModels.length === 0) {
         return CODEX_MODELS;
@@ -168,6 +171,13 @@ export const ButtonArea = ({
       const customIds = new Set(customModels.map(m => m.id));
       const filteredBuiltIn = CODEX_MODELS.filter(m => !customIds.has(m.id));
       return [...customModels, ...filteredBuiltIn];
+    }
+    if (currentProvider === 'gemini') {
+      // Prefer live catalog rows when parent passes geminiModels; else static fallback.
+      if (geminiModels && geminiModels.length > 0) {
+        return geminiModels;
+      }
+      return GEMINI_MODELS;
     }
     if (currentProvider === 'grok') {
       return GROK_MODELS;
@@ -199,10 +209,15 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
+<<<<<<< HEAD
   }, [currentProvider, applyModelMapping, customModelsVersion, cliModels]);
+=======
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, geminiModels]);
+>>>>>>> 72338fa6 (feat(gemini): plan usage bar with 5h/7d windows by model family)
 
-  // When a dynamic model catalog arrives, ensure selection is a real entry.
+  // When CLI model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
+<<<<<<< HEAD
     const isDynamicProvider = currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi';
     if (!isDynamicProvider) return;
@@ -212,6 +227,15 @@ export const ButtonArea = ({
       onModelSelect(availableModels[0].id);
     }
   }, [availableModels, currentProvider, onModelSelect, selectedModel]);
+=======
+    if (currentProvider !== 'kimi' && currentProvider !== 'opencode' && currentProvider !== 'pi') return;
+    if (!cliModels.length || !onModelSelect) return;
+    const exists = cliModels.some((model) => model.id === selectedModel);
+    if (!exists) {
+      onModelSelect(cliModels[0].id);
+    }
+  }, [cliModels, currentProvider, onModelSelect, selectedModel]);
+>>>>>>> 72338fa6 (feat(gemini): plan usage bar with 5h/7d windows by model family)
 
   /**
    * Handle submit button click
@@ -304,7 +328,13 @@ export const ButtonArea = ({
           longContextEnabled={longContextEnabled}
           onLongContextChange={onLongContextChange}
         />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
+        <ReasoningSelect
+          value={reasoningEffort}
+          onChange={handleReasoningChange}
+          selectedModel={selectedModel}
+          currentProvider={currentProvider}
+          geminiFamilies={geminiFamilies}
+        />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
         )}
