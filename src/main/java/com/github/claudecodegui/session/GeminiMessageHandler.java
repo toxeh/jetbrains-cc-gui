@@ -185,8 +185,8 @@ public class GeminiMessageHandler implements MessageCallback {
             }
 
             Message target = resolveAssistantMessageForStream();
-            // Merge raw when possible
-            if (hasToolUse && target.raw != null) {
+            // Merge raw when possible (preserve existing tool_use blocks)
+            if (target.raw != null && (hasToolUse || hasToolUseBlocks(target.raw))) {
                 target.raw = mergeAssistantRaw(target.raw, msgJson);
             } else {
                 target.raw = parsed.raw;
@@ -542,7 +542,7 @@ public class GeminiMessageHandler implements MessageCallback {
     }
 
     private JsonObject mergeAssistantRaw(JsonObject previous, JsonObject incoming) {
-        // Minimal merge: append content blocks from incoming into previous
+        // Merge content blocks from incoming into previous without duplicating tool_use blocks
         try {
             JsonObject prevMsg = previous.has("message") && previous.get("message").isJsonObject()
                     ? previous.getAsJsonObject("message")
@@ -555,7 +555,47 @@ public class GeminiMessageHandler implements MessageCallback {
                 JsonObject inMsg = incoming.getAsJsonObject("message");
                 if (inMsg.has("content") && inMsg.get("content").isJsonArray()) {
                     for (com.google.gson.JsonElement el : inMsg.getAsJsonArray("content")) {
-                        prevContent.add(el.deepCopy());
+                        if (!el.isJsonObject()) {
+                            continue;
+                        }
+                        JsonObject incomingBlock = el.getAsJsonObject();
+                        String type = incomingBlock.has("type") ? incomingBlock.get("type").getAsString() : "";
+                        String id = incomingBlock.has("id") ? incomingBlock.get("id").getAsString() : "";
+
+                        if ("tool_use".equals(type)) {
+                            boolean exists = false;
+                            if (!id.isEmpty()) {
+                                for (com.google.gson.JsonElement prevEl : prevContent) {
+                                    if (prevEl.isJsonObject()) {
+                                        JsonObject p = prevEl.getAsJsonObject();
+                                        if ("tool_use".equals(p.has("type") ? p.get("type").getAsString() : "")
+                                                && id.equals(p.has("id") ? p.get("id").getAsString() : "")) {
+                                            exists = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!exists) {
+                                prevContent.add(incomingBlock.deepCopy());
+                            }
+                        } else if ("text".equals(type)) {
+                            boolean textBlockFound = false;
+                            for (com.google.gson.JsonElement prevEl : prevContent) {
+                                if (prevEl.isJsonObject() && "text".equals(prevEl.getAsJsonObject().has("type") ? prevEl.getAsJsonObject().get("type").getAsString() : "")) {
+                                    if (incomingBlock.has("text")) {
+                                        prevEl.getAsJsonObject().addProperty("text", incomingBlock.get("text").getAsString());
+                                    }
+                                    textBlockFound = true;
+                                    break;
+                                }
+                            }
+                            if (!textBlockFound) {
+                                prevContent.add(incomingBlock.deepCopy());
+                            }
+                        } else {
+                            prevContent.add(incomingBlock.deepCopy());
+                        }
                     }
                 }
             }
