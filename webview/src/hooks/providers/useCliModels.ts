@@ -133,15 +133,14 @@ export function useCliModels(currentProvider: string) {
   }, [clearPendingLoad]);
 
   useEffect(() => {
-    if (!isCliOnlyProvider(currentProvider)) return;
-    if (currentProvider === 'grok') return; // Grok uses static profile list for now
+    if (!supportsDynamicModels(currentProvider)) return;
     if (modelsByProvider[currentProvider]?.length) return;
 
     beginLoad(currentProvider);
   }, [currentProvider, modelsByProvider, beginLoad]);
 
   const refreshCliModels = useCallback((providerId: string) => {
-    if (!isCliOnlyProvider(providerId) || providerId === 'grok') return;
+    if (!supportsDynamicModels(providerId)) return;
     beginLoad(providerId);
   }, [beginLoad]);
 
