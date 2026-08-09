@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
 import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
-import { buildCodexModelList } from './codexModelList';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
@@ -99,7 +98,7 @@ export const ButtonArea = ({
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
-  const { cliModels, cliModelsLoading, cliModelsError, cliDefaultModel, cliCatalogHasEntries, refreshCliModels } = useCliModels(currentProvider);
+  const { cliModels, cliModelsLoading, cliModelsError, refreshCliModels } = useCliModels(currentProvider);
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -161,13 +160,6 @@ export const ButtonArea = ({
   const availableModels = useMemo(() => {
     if (currentProvider === 'codex') {
       const customModels = getCustomCodexModels();
-      if (cliCatalogHasEntries) {
-        // Dynamic catalog arrived (config.toml model + model_catalog_json):
-        // show what the codex CLI picker would show, customs appended.
-        return buildCodexModelList(cliModels, customModels);
-      }
-      // No catalog yet (still loading, fetch failed, or official provider):
-      // legacy merge of built-in models and custom models.
       if (customModels.length === 0) {
         return CODEX_MODELS;
       }
@@ -180,7 +172,7 @@ export const ButtonArea = ({
     if (currentProvider === 'grok') {
       return GROK_MODELS;
     }
-    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
+    if (currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
       return cliModels;
     }
     if (typeof window === 'undefined' || !window.localStorage) {
@@ -207,23 +199,19 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, cliCatalogHasEntries]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels]);
 
   // When a dynamic model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-    const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
-      || currentProvider === 'pi' || currentProvider === 'codex';
+    const isDynamicProvider = currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode'
+      || currentProvider === 'pi';
     if (!isDynamicProvider) return;
-    // Codex: only correct the selection once a real catalog arrived. With the
-    // official-provider fallback list (built-in GPT models) the user's explicit
-    // choice must be kept as-is.
-    if (currentProvider === 'codex' && !cliCatalogHasEntries) return;
     if (!availableModels.length || !onModelSelect) return;
     const exists = availableModels.some((model) => model.id === selectedModel);
     if (!exists) {
-      onModelSelect(cliDefaultModel ?? availableModels[0].id);
+      onModelSelect(availableModels[0].id);
     }
-  }, [availableModels, currentProvider, onModelSelect, selectedModel, cliDefaultModel, cliCatalogHasEntries]);
+  }, [availableModels, currentProvider, onModelSelect, selectedModel]);
 
   /**
    * Handle submit button click

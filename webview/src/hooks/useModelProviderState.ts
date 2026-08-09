@@ -11,6 +11,7 @@ import { isSpecialProviderId } from '../types/provider';
 import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
 import { useGrokProvider } from './providers/useGrokProvider';
+import { useGeminiProvider } from './providers/useGeminiProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
 import { usePiProvider } from './providers/usePiProvider';
@@ -55,6 +56,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const claude = useClaudeProvider();
   const codex = useCodexProvider();
   const grok = useGrokProvider();
+  const gemini = useGeminiProvider();
   const kimi = useKimiProvider();
   const openCode = useOpenCodeProvider();
   const pi = usePiProvider();
@@ -78,6 +80,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     grokPermissionMode, setGrokPermissionMode,
   } = grok;
   const {
+    selectedGeminiModel, setSelectedGeminiModel,
+    geminiPermissionMode, setGeminiPermissionMode,
+  } = gemini;
+  const {
     selectedKimiModel, setSelectedKimiModel,
     kimiPermissionMode, setKimiPermissionMode,
   } = kimi;
@@ -98,10 +104,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setClaudePermissionMode,
     setCodexPermissionMode,
     setSelectedGrokModel,
+    setSelectedGeminiModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
     setGrokPermissionMode,
+    setGeminiPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
@@ -115,10 +123,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     claudePermissionMode,
     codexPermissionMode,
     selectedGrokModel,
+    selectedGeminiModel,
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
     grokPermissionMode,
+    geminiPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
@@ -312,6 +322,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...claude,
     ...codex,
     ...grok,
+    ...gemini,
     ...kimi,
     ...openCode,
     ...pi,
