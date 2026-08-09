@@ -6,6 +6,8 @@ import com.github.claudecodegui.settings.CodexSettingsManager;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+import com.github.claudecodegui.session.GeminiMessageHandler;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -33,6 +35,7 @@ public class SessionSendService {
     private final Gson gson;
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
     private final SessionContextService contextService;
 
@@ -48,6 +51,22 @@ public class SessionSendService {
             Map<String, MarkerCliBridge> cliBridges,
             SessionContextService contextService
     ) {
+        this(project, state, callbackFacade, messageParser, messageMerger, gson, claudeSDKBridge, codexSDKBridge, cliBridges, contextService, null);
+    }
+
+    public SessionSendService(
+            Project project,
+            SessionState state,
+            SessionCallbackFacade callbackFacade,
+            MessageParser messageParser,
+            MessageMerger messageMerger,
+            Gson gson,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            SessionContextService contextService,
+            GeminiSDKBridge geminiSDKBridge
+    ) {
         this.project = project;
         this.state = state;
         this.callbackFacade = callbackFacade;
@@ -58,6 +77,7 @@ public class SessionSendService {
         this.codexSDKBridge = codexSDKBridge;
         this.cliBridges = cliBridges != null ? cliBridges : Collections.emptyMap();
         this.contextService = contextService;
+        this.geminiSDKBridge = geminiSDKBridge;
     }
 
     public void prepareContextCollector(EditorContextCollector contextCollector) {
@@ -138,6 +158,19 @@ public class SessionSendService {
                     effectivePermissionMode,
                     normalizedRequestedEffort,
                     effectiveCodexServiceTier
+            );
+        }
+
+        if ("gemini".equals(currentProvider) && geminiSDKBridge != null) {
+            return sendToGemini(
+                    channelId,
+                    input,
+                    attachments,
+                    openedFilesJson,
+                    agentPrompt,
+                    fileTagPaths,
+                    effectivePermissionMode,
+                    normalizedRequestedEffort
             );
         }
 
@@ -301,6 +334,54 @@ public class SessionSendService {
                 agentPrompt,
                 requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
                 effectiveCodexServiceTier,
+                handler
+        ).thenApply(result -> null);
+    }
+
+    private CompletableFuture<Void> sendToGemini(
+            String channelId,
+            String input,
+            List<ClaudeSession.Attachment> attachments,
+            JsonObject openedFilesJson,
+            String agentPrompt,
+            List<String> fileTagPaths,
+            String effectivePermissionMode,
+            String requestedReasoningEffort
+    ) {
+        GeminiMessageHandler handler = new GeminiMessageHandler(state, callbackFacade.getCallbackHandler(), project);
+
+        String contextAppend = contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
+        String finalInput = (input != null ? input : "") + contextAppend;
+        Boolean streaming = readStreamingEnabled();
+        String projectBase = project != null ? project.getBasePath() : null;
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
+                state.getCwd(), projectBase);
+        if (guardedCwd == null) {
+            guardedCwd = state.getCwd();
+        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            state.setCwd(guardedCwd);
+        }
+
+        final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
+
+        LOG.info("[Lifecycle] sendToGemini sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
+                + ", cwd=" + guardedCwd
+                + ", model=" + state.getModel());
+
+        return geminiSDKBridge.sendMessage(
+                channelId,
+                finalInput,
+                state.getSessionId(),
+                runtimeSessionEpoch,
+                guardedCwd,
+                attachments,
+                effectivePermissionMode,
+                state.getModel(),
+                openedFilesJson,
+                agentPrompt,
+                streaming,
+                false,
+                requestedReasoningEffort != null ? requestedReasoningEffort : state.getReasoningEffort(),
                 handler
         ).thenApply(result -> null);
     }
