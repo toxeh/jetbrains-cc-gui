@@ -1,6 +1,12 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AVAILABLE_MODELS, normalizeClaudeModelId, modelSupports1MContext, strip1MContextSuffix } from '../types';
+import {
+  AVAILABLE_MODELS,
+  normalizeClaudeModelId,
+  modelSupports1MContext,
+  strip1MContextSuffix,
+  toGeminiFamilyId,
+} from '../types';
 import type { ModelInfo } from '../types';
 import { readClaudeModelMapping } from '../../../utils/claudeModelMapping';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
@@ -163,13 +169,29 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     preferredAlignment: 'right',
   });
 
-  // Strip [1m] suffix for finding the model in the list
+  // Strip [1m] suffix for finding the model in the list.
+  // Gemini: backend may echo full agy slugs (...-high); UI list is family base ids.
   const strippedValue = strip1MContextSuffix(value);
-  const normalizedValue = currentProvider === 'claude' ? normalizeClaudeModelId(strippedValue) : strippedValue;
-  const currentModel = models.find(m => m.id === normalizedValue) || models.find(m => m.id === strippedValue) || models[0];
+  const normalizedValue = currentProvider === 'claude'
+    ? normalizeClaudeModelId(strippedValue)
+    : currentProvider === 'gemini'
+      ? toGeminiFamilyId(strippedValue) || strippedValue
+      : strippedValue;
+  // Prefer the user's selection even when the catalog is still loading / only a
+  // static fallback is available. Falling back to models[0] made OpenCode (and
+  // other dynamic providers) visually snap back to the first entry after leaving
+  // history and remounting ChatScreen.
+  const currentModel = models.find(m => m.id === normalizedValue)
+    || models.find(m => m.id === strippedValue)
+    || (strippedValue
+      ? { id: strippedValue, label: strippedValue } as ModelInfo
+      : models[0]);
   const modelMapping = readClaudeModelMapping();
 
   const isSelectedModel = (modelId: string): boolean => {
+    if (currentProvider === 'gemini') {
+      return modelId === normalizedValue || modelId === strippedValue;
+    }
     if (currentProvider !== 'claude') {
       return modelId === strippedValue;
     }

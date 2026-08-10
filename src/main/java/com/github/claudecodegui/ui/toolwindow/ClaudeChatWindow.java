@@ -32,6 +32,7 @@ import com.github.claudecodegui.ui.detached.DetachedChatFrame;
 import com.github.claudecodegui.ui.detached.DetachedWindowManager;
 import com.github.claudecodegui.util.HtmlLoader;
 import com.github.claudecodegui.util.JsUtils;
+import com.github.claudecodegui.util.ThemeConfigService;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -61,6 +62,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+
 /**
  * Chat window instance. Coordinates UI components, session management,
  * and message dispatching. One instance per tab.
@@ -71,6 +74,7 @@ public class ClaudeChatWindow {
     private final JPanel mainPanel;
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
     private final GrokCliBridge grokCliBridge;
     private final KimiCliBridge kimiCliBridge;
@@ -152,6 +156,11 @@ public class ClaudeChatWindow {
     private DaemonBridge.DaemonEventListener titleEventListener;
     private volatile int fetchedSlashCommandsCount = 0;
 
+    // Theme-change callback handle for updating Swing component backgrounds (mainPanel, browser).
+    // Separate from the SettingsHandler's JS-notification callback: this one ensures the Java-side
+    // Swing containers repaint with the new theme color, not just the webview's CSS.
+    private ThemeConfigService.RegisteredCallback swingThemeCallbackHandle;
+
     // Coalesces session_updated reloads. SessionState's message list is not
     // thread-safe and loadFromServer() runs async, so concurrent background-task
     // completions must not reload at the same time. Guarded by sessionReloadLock.
@@ -210,6 +219,7 @@ public class ClaudeChatWindow {
         this.project = project;
         this.claudeSDKBridge = new ClaudeSDKBridge();
         this.codexSDKBridge = new CodexSDKBridge();
+        this.geminiSDKBridge = new GeminiSDKBridge();
         this.grokCliBridge = new GrokCliBridge();
         this.kimiCliBridge = new KimiCliBridge();
         this.openCodeCliBridge = new OpenCodeCliBridge();
@@ -271,7 +281,7 @@ public class ClaudeChatWindow {
                 () -> frontendReady
         );
 
-        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges);
+        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, geminiSDKBridge);
 
         this.chatWindowDelegate = new ChatWindowDelegate(createDelegateHost());
         chatWindowDelegate.loadPermissionModeFromSettings();
@@ -295,6 +305,11 @@ public class ClaudeChatWindow {
             @Override
             public CodexSDKBridge getCodexSDKBridge() {
                 return codexSDKBridge;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override
@@ -390,6 +405,32 @@ public class ClaudeChatWindow {
             }
         });
         editorContextTracker.registerListeners();
+
+        // Register a Swing-level theme change callback to update the background color of
+        // mainPanel and the browser component when the IDE theme changes. This ensures
+        // Java-side containers repaint with the correct color, complementing the webview's
+        // CSS theme update (handled by SettingsHandler). Fixes issue #1586.
+        swingThemeCallbackHandle = ThemeConfigService.registerThemeChangeListener(themeConfig -> {
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (disposed) {
+                    return;
+                }
+                Color bgColor = ThemeConfigService.getBackgroundColor();
+                mainPanel.setBackground(bgColor);
+                JBCefBrowser currentBrowser = browser;
+                if (currentBrowser != null) {
+                    try {
+                        java.awt.Component browserComp = currentBrowser.getComponent();
+                        if (browserComp != null) {
+                            browserComp.setBackground(bgColor);
+                        }
+                    } catch (Exception | LinkageError e) {
+                        LOG.debug("Failed to update browser component background on theme change: " + e.getMessage());
+                    }
+                }
+                mainPanel.repaint();
+            });
+        }, true);
 
         this.webviewInitializer = new WebviewInitializer(createWebviewHost());
 
@@ -1329,6 +1370,10 @@ public class ClaudeChatWindow {
 
     public ClaudeSDKBridge getClaudeSDKBridge() {
         return claudeSDKBridge;
+    }
+
+    public GeminiSDKBridge getGeminiSDKBridge() {
+        return geminiSDKBridge;
     }
 
     public CodexSDKBridge getCodexSDKBridge() {
@@ -2717,6 +2762,12 @@ public class ClaudeChatWindow {
         chatWindowDelegate.dispose();
         editorContextTracker.dispose();
         streamCoalescer.dispose();
+        // Unregister the Swing-level theme change callback to prevent background updates
+        // on a disposed panel. The SettingsHandler's callback is cleaned up via chatWindowDelegate.dispose().
+        if (swingThemeCallbackHandle != null) {
+            ThemeConfigService.unregisterThemeChangeListener(swingThemeCallbackHandle);
+            swingThemeCallbackHandle = null;
+        }
         Disposer.dispose(surfaceRefreshAlarmDisposable);
         deferredReloadSafetyAlarm.cancelAllRequests();
         Disposer.dispose(safetyAlarmDisposable);
@@ -2948,6 +2999,11 @@ public class ClaudeChatWindow {
             @Override
             public CodexSDKBridge getCodexSDKBridge() {
                 return codexSDKBridge;
+            }
+
+            @Override
+            public GeminiSDKBridge getGeminiSDKBridge() {
+                return geminiSDKBridge;
             }
 
             @Override

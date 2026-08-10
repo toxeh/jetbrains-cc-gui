@@ -2,6 +2,7 @@ package com.github.claudecodegui.session;
 
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.google.gson.JsonObject;
 
@@ -33,6 +34,7 @@ public class SessionProviderRouter {
 
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GeminiSDKBridge geminiSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
 
     public SessionProviderRouter(
@@ -40,8 +42,18 @@ public class SessionProviderRouter {
             CodexSDKBridge codexSDKBridge,
             Map<String, MarkerCliBridge> cliBridges
     ) {
+        this(claudeSDKBridge, codexSDKBridge, cliBridges, null);
+    }
+
+    public SessionProviderRouter(
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GeminiSDKBridge geminiSDKBridge
+    ) {
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
+        this.geminiSDKBridge = geminiSDKBridge;
         this.cliBridges = cliBridges != null
                 ? Collections.unmodifiableMap(new LinkedHashMap<>(cliBridges))
                 : Collections.emptyMap();
@@ -67,6 +79,8 @@ public class SessionProviderRouter {
     public JsonObject launchChannel(String provider, String channelId, String sessionId, String cwd) {
         if ("codex".equals(provider)) {
             return codexSDKBridge.launchChannel(channelId, sessionId, cwd);
+        } else if ("gemini".equals(provider) && geminiSDKBridge != null) {
+            return geminiSDKBridge.launchChannel(channelId, sessionId, cwd);
         }
         MarkerCliBridge bridge = cli(provider);
         if (bridge != null) {
@@ -78,6 +92,9 @@ public class SessionProviderRouter {
     public void interruptChannel(String provider, String channelId) {
         if ("codex".equals(provider)) {
             codexSDKBridge.interruptChannel(channelId);
+            return;
+        } else if ("gemini".equals(provider) && geminiSDKBridge != null) {
+            geminiSDKBridge.interruptChannel(channelId);
             return;
         }
         MarkerCliBridge bridge = cli(provider);
@@ -91,6 +108,8 @@ public class SessionProviderRouter {
     public List<JsonObject> getSessionMessages(String provider, String sessionId, String cwd) {
         if ("codex".equals(provider)) {
             return codexSDKBridge.getSessionMessages(sessionId, cwd);
+        } else if ("gemini".equals(provider) && geminiSDKBridge != null) {
+            return geminiSDKBridge.getSessionMessages(sessionId, cwd);
         }
         MarkerCliBridge bridge = cli(provider);
         if (bridge != null) {
