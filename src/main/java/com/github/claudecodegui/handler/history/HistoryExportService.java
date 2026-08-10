@@ -147,6 +147,13 @@ class HistoryExportService {
             LOG.info("[HistoryHandler] 使用 PiHistoryReader 导出 PI 会话");
             return toJsonArray(new PiHistoryReader().getSessionMessages(sessionId, projectPath));
         }
+        if ("gemini".equals(provider)) {
+            LOG.info("[HistoryHandler] 使用 GeminiHistoryReader 读取 Gemini 会话消息");
+            com.github.claudecodegui.provider.gemini.GeminiHistoryReader geminiReader =
+                    new com.github.claudecodegui.provider.gemini.GeminiHistoryReader();
+            String messagesJson = geminiReader.getSessionMessagesAsJson(sessionId);
+            return JsonParser.parseString(messagesJson != null ? messagesJson : "[]");
+        }
         LOG.info("[HistoryHandler] 使用 ClaudeHistoryReader 读取 Claude 会话消息");
         ClaudeHistoryReader historyReader = new ClaudeHistoryReader();
         String messagesJson = historyReader.getSessionMessagesAsJson(projectPath, sessionId);

@@ -242,6 +242,9 @@ class HistoryDeleteService {
         if ("kimi".equals(currentProvider)) {
             return new DeleteResult(deleteKimiSession(sessionId), 0);
         }
+        if ("gemini".equals(currentProvider)) {
+            return new DeleteResult(deleteGeminiSession(sessionId), 0);
+        }
 
         String rawPath = context.resolveEffectiveWorkingDirectory();
         String nodePath = NodeDetector.getInstance().getCachedNodePath();
@@ -296,6 +299,14 @@ class HistoryDeleteService {
                 new com.github.claudecodegui.provider.kimi.KimiHistoryReader();
         boolean deleted = reader.deleteSession(sessionId, projectPath);
         LOG.info("[HistoryHandler] Delete Kimi session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
+    }
+
+    private boolean deleteGeminiSession(String sessionId) throws java.io.IOException {
+        com.github.claudecodegui.provider.gemini.GeminiHistoryReader reader =
+                new com.github.claudecodegui.provider.gemini.GeminiHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId);
+        LOG.info("[HistoryHandler] Delete Gemini session " + sessionId + ": " + (deleted ? "ok" : "not found"));
         return deleted;
     }
 

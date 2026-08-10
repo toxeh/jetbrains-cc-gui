@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { CodexFastModeSelect, ConfigSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
-import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS } from './types';
+import { CLAUDE_MODELS, CODEX_MODELS, GROK_MODELS, GEMINI_MODELS } from './types';
 import { buildCodexModelList } from './codexModelList';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
@@ -97,6 +97,7 @@ export const ButtonArea = ({
   onAddModel,
   longContextEnabled = true,
   onLongContextChange,
+  geminiModels,
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
@@ -173,6 +174,13 @@ export const ButtonArea = ({
     if (currentProvider === 'grok') {
       return GROK_MODELS;
     }
+    if (currentProvider === 'gemini') {
+      // Prefer live catalog rows when parent passes geminiModels; else static fallback.
+      if (geminiModels && geminiModels.length > 0) {
+        return geminiModels;
+      }
+      return GEMINI_MODELS;
+    }
     if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
       return cliModels;
     }
@@ -200,11 +208,11 @@ export const ButtonArea = ({
     const customIds = new Set(customModels.map(m => m.id));
     const filteredBuiltIn = builtInModels.filter(m => !customIds.has(m.id));
     return [...customModels, ...filteredBuiltIn];
-  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, cliCatalogHasEntries]);
+  }, [currentProvider, applyModelMapping, customModelsVersion, cliModels, cliCatalogHasEntries, geminiModels]);
 
   // When a dynamic model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-    const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
+    const isDynamicProvider = currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex';
     if (!isDynamicProvider) return;
     // Only correct once a *real* catalog arrived. Static fallback lists

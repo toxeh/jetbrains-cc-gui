@@ -2,6 +2,9 @@ package com.github.claudecodegui.dependency;
 
 import com.github.claudecodegui.bridge.EnvironmentConfigurator;
 import com.github.claudecodegui.bridge.NodeDetector;
+import com.github.claudecodegui.cli.CliStatusDetector;
+import com.github.claudecodegui.cli.CliToolId;
+import com.github.claudecodegui.cli.CliToolStatus;
 import com.github.claudecodegui.model.NodeDetectionResult;
 import com.github.claudecodegui.util.PlatformUtils;
 import com.google.gson.Gson;
@@ -103,6 +106,10 @@ public class DependencyManager {
      * Checks whether an SDK is installed.
      */
     public boolean isInstalled(String sdkId) {
+        if ("gemini-cli".equals(sdkId)) {
+            return CliStatusDetector.detect(CliToolId.AGY).isInstalled();
+        }
+
         SdkDefinition sdk = SdkDefinition.fromId(sdkId);
         if (sdk == null) {
             return false;
@@ -170,6 +177,11 @@ public class DependencyManager {
      * Returns the installed version.
      */
     public String getInstalledVersion(String sdkId) {
+        if ("gemini-cli".equals(sdkId)) {
+            CliToolStatus status = CliStatusDetector.detect(CliToolId.AGY);
+            return status.getVersion() != null ? status.getVersion() : (status.isInstalled() ? "installed" : null);
+        }
+
         SdkDefinition sdk = SdkDefinition.fromId(sdkId);
         if (sdk == null || !isInstalled(sdkId)) {
             return null;

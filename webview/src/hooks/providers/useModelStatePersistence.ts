@@ -4,6 +4,7 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   DEFAULT_CLAUDE_MODEL_ID,
+  DEFAULT_GEMINI_MODEL_ID,
   GROK_DEFAULT_MODEL_ID,
   KIMI_DEFAULT_MODEL_ID,
   OPENCODE_DEFAULT_MODEL_ID,
@@ -12,12 +13,14 @@ import {
   normalizeClaudeModelId,
   apply1MContextSuffix,
   strip1MContextSuffix,
+  splitGeminiAgyModelId,
+  toGeminiFamilyId,
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider, normalizeCliPermissionMode } from './cliProviders';
 
 const STORAGE_KEY = 'model-selection-state';
-const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max', 'thinking'] as const;
 const CODEX_FAST_MODE_VALUES = ['normal', 'fast'] as const;
 
 const getCustomModels = (key: string): { id: string }[] => {
@@ -40,8 +43,10 @@ export interface UseModelStatePersistenceOptions {
   setCurrentProvider: (value: string) => void;
   setSelectedClaudeModel: (value: string) => void;
   setSelectedCodexModel: (value: string) => void;
+  setSelectedGeminiModel: (value: string) => void;
   setClaudePermissionMode: (value: PermissionMode) => void;
   setCodexPermissionMode: (value: PermissionMode) => void;
+  setGeminiPermissionMode: (value: PermissionMode) => void;
   setSelectedGrokModel: (value: string) => void;
   setSelectedKimiModel: (value: string) => void;
   setSelectedOpenCodeModel: (value: string) => void;
@@ -58,8 +63,10 @@ export interface UseModelStatePersistenceOptions {
   currentProvider: string;
   selectedClaudeModel: string;
   selectedCodexModel: string;
+  selectedGeminiModel: string;
   claudePermissionMode: PermissionMode;
   codexPermissionMode: PermissionMode;
+  geminiPermissionMode: PermissionMode;
   selectedGrokModel: string;
   selectedKimiModel: string;
   selectedOpenCodeModel: string;
@@ -88,8 +95,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     setCurrentProvider,
     setSelectedClaudeModel,
     setSelectedCodexModel,
+    setSelectedGeminiModel,
     setClaudePermissionMode,
     setCodexPermissionMode,
+    setGeminiPermissionMode,
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
@@ -105,8 +114,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
+    selectedGeminiModel,
     claudePermissionMode,
     codexPermissionMode,
+    geminiPermissionMode,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
@@ -140,14 +151,17 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         : '';
       const hasBackendProvider = initialTabProvider === 'claude'
         || initialTabProvider === 'codex'
+        || initialTabProvider === 'gemini'
         || isCliOnlyProvider(initialTabProvider);
       const hasBackendModel = initialTabModel.length > 0;
 
       let restoredProvider = 'claude';
       let restoredClaudeModel = DEFAULT_CLAUDE_MODEL_ID;
       let restoredCodexModel = CODEX_MODELS[0].id;
+      let restoredGeminiModel = DEFAULT_GEMINI_MODEL_ID;
       let restoredClaudePermissionMode: PermissionMode = 'default';
       let restoredCodexPermissionMode: PermissionMode = 'default';
+      let restoredGeminiPermissionMode: PermissionMode = 'default';
       let restoredGrokModel = GROK_DEFAULT_MODEL_ID;
       let restoredKimiModel = KIMI_DEFAULT_MODEL_ID;
       let restoredOpenCodeModel = OPENCODE_DEFAULT_MODEL_ID;
@@ -177,6 +191,19 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         if (typeof modelId === 'string' && modelId.trim().length > 0) {
           restoredCodexModel = modelId;
           setSelectedCodexModel(modelId);
+        }
+      };
+      const applyGeminiModel = (modelId: string) => {
+        if (typeof modelId !== 'string' || !modelId.trim()) return;
+        const split = splitGeminiAgyModelId(modelId);
+        const baseId = toGeminiFamilyId(modelId) || split.baseId || modelId;
+        const effort = split.effort;
+        if (baseId) {
+          restoredGeminiModel = baseId;
+          setSelectedGeminiModel(baseId);
+          if (effort && isReasoningEffort(effort)) {
+            setReasoningEffort(effort);
+          }
         }
       };
       // CLI catalogs are dynamic (user-defined Grok profiles, backend-reported
@@ -210,7 +237,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         // hydration so non-provider preferences (permission mode, reasoning
         // effort, codex fast mode, …) are restored from localStorage.
         const providerCandidate = hasBackendProvider ? initialTabProvider : state.provider;
-        if (['claude', 'codex'].includes(providerCandidate) || isCliOnlyProvider(providerCandidate)) {
+        if (['claude', 'codex', 'gemini'].includes(providerCandidate) || isCliOnlyProvider(providerCandidate)) {
           restoredProvider = providerCandidate;
           setCurrentProvider(providerCandidate);
         }
@@ -222,6 +249,9 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           restoredCodexPermissionMode = state.codexPermissionMode === 'plan'
             ? 'default'
             : state.codexPermissionMode;
+        }
+        if (isValidPermissionMode(state.geminiPermissionMode)) {
+          restoredGeminiPermissionMode = state.geminiPermissionMode;
         }
         if (isValidPermissionMode(state.grokPermissionMode)) {
           restoredGrokPermissionMode = normalizeCliPermissionMode(state.grokPermissionMode);
@@ -259,6 +289,11 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           : state.codexModel;
         applyCodexModel(codexModelCandidate);
 
+        const geminiModelCandidate = hasBackendModel && restoredProvider === 'gemini'
+          ? initialTabModel
+          : state.geminiModel;
+        applyGeminiModel(geminiModelCandidate);
+
         const grokModelCandidate = hasBackendModel && restoredProvider === 'grok'
           ? initialTabModel
           : state.grokModel;
@@ -286,6 +321,7 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         if (hasBackendModel) {
           if (initialTabProvider === 'claude') applyClaudeModel(initialTabModel);
           else if (initialTabProvider === 'codex') applyCodexModel(initialTabModel);
+          else if (initialTabProvider === 'gemini') applyGeminiModel(initialTabModel);
           else if (initialTabProvider === 'grok') applyGrokModel(initialTabModel);
           else if (initialTabProvider === 'kimi') applyKimiModel(initialTabModel);
           else if (initialTabProvider === 'opencode') applyOpenCodeModel(initialTabModel);
@@ -295,17 +331,20 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
 
       const initialPermissionMode: PermissionMode = restoredProvider === 'codex'
         ? restoredCodexPermissionMode
-        : restoredProvider === 'grok'
-          ? restoredGrokPermissionMode
-          : restoredProvider === 'kimi'
-            ? restoredKimiPermissionMode
-            : restoredProvider === 'opencode'
-              ? restoredOpenCodePermissionMode
-              : restoredProvider === 'pi'
-                ? restoredPiPermissionMode
-                : restoredClaudePermissionMode;
+        : restoredProvider === 'gemini'
+          ? restoredGeminiPermissionMode
+          : restoredProvider === 'grok'
+            ? restoredGrokPermissionMode
+            : restoredProvider === 'kimi'
+              ? restoredKimiPermissionMode
+              : restoredProvider === 'opencode'
+                ? restoredOpenCodePermissionMode
+                : restoredProvider === 'pi'
+                  ? restoredPiPermissionMode
+                  : restoredClaudePermissionMode;
       setClaudePermissionMode(restoredClaudePermissionMode);
       setCodexPermissionMode(restoredCodexPermissionMode);
+      setGeminiPermissionMode(restoredGeminiPermissionMode);
       setGrokPermissionMode(restoredGrokPermissionMode);
       setKimiPermissionMode(restoredKimiPermissionMode);
       setOpenCodePermissionMode(restoredOpenCodePermissionMode);
@@ -326,15 +365,17 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           sendBridgeEvent('set_provider', restoredProvider);
           const modelToSync = restoredProvider === 'codex'
             ? restoredCodexModel
-            : restoredProvider === 'grok'
-              ? restoredGrokModel
-              : restoredProvider === 'kimi'
-                ? restoredKimiModel
-                : restoredProvider === 'opencode'
-                  ? restoredOpenCodeModel
-                  : restoredProvider === 'pi'
-                    ? restoredPiModel
-                    : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
+            : restoredProvider === 'gemini'
+              ? restoredGeminiModel
+              : restoredProvider === 'grok'
+                ? restoredGrokModel
+                : restoredProvider === 'kimi'
+                  ? restoredKimiModel
+                  : restoredProvider === 'opencode'
+                    ? restoredOpenCodeModel
+                    : restoredProvider === 'pi'
+                      ? restoredPiModel
+                      : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
           sendBridgeEvent('set_model', modelToSync);
           // Do NOT push the permission mode to Java on boot. Java is the source
           // of truth for the mode (persisted app-level in PropertiesComponent,
@@ -387,8 +428,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           provider: currentProvider,
           claudeModel: selectedClaudeModel,
           codexModel: selectedCodexModel,
+          geminiModel: selectedGeminiModel,
           claudePermissionMode,
           codexPermissionMode,
+          geminiPermissionMode,
           grokModel: selectedGrokModel,
           kimiModel: selectedKimiModel,
           openCodeModel: selectedOpenCodeModel,
@@ -416,8 +459,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
+    selectedGeminiModel,
     claudePermissionMode,
     codexPermissionMode,
+    geminiPermissionMode,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,

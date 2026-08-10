@@ -25,6 +25,7 @@ import com.github.claudecodegui.handler.PromptHandler;
 import com.github.claudecodegui.handler.provider.CustomModelPricingHandler;
 import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.handler.provider.ProviderHandler;
+import com.github.claudecodegui.handler.provider.gemini.GeminiPlanUsageHandler;
 import com.github.claudecodegui.handler.RewindHandler;
 import com.github.claudecodegui.handler.SessionHandler;
 import com.github.claudecodegui.handler.SettingsHandler;
@@ -39,6 +40,7 @@ import com.github.claudecodegui.handler.file.UndoFileHandler;
 import com.github.claudecodegui.permission.PermissionService;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import java.util.Map;
 import com.github.claudecodegui.provider.common.MessageCallback;
@@ -82,6 +84,7 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        GeminiSDKBridge getGeminiSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
@@ -318,6 +321,7 @@ public class ChatWindowDelegate {
                 project,
                 claudeSDKBridge,
                 codexSDKBridge,
+                host.getGeminiSDKBridge(),
                 settingsService,
                 jsCallback,
                 host::isActiveContent,
@@ -345,6 +349,7 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new CodexPetHandler(handlerContext));
         messageDispatcher.registerHandler(new SkillHandler(handlerContext));
         messageDispatcher.registerHandler(new FileHandler(handlerContext));
+        messageDispatcher.registerHandler(new GeminiPlanUsageHandler(handlerContext));
         this.settingsHandler = new SettingsHandler(handlerContext);
         messageDispatcher.registerHandler(this.settingsHandler);
         messageDispatcher.registerHandler(new SessionHandler(handlerContext));
