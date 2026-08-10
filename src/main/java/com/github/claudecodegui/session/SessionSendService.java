@@ -373,9 +373,12 @@ public class SessionSendService {
                 + ", sessionId=" + (state.getSessionId() != null ? state.getSessionId() : "(new)")
                 + ", cwd=" + guardedCwd);
 
+        String contextAppend = contextService.buildCodexContextAppend(openedFilesJson, fileTagPaths);
+        String finalInput = (input != null ? input : "") + contextAppend;
+
         return geminiSDKBridge.sendMessage(
                 channelId,
-                input,
+                finalInput,
                 state.getSessionId(),
                 runtimeSessionEpoch,
                 guardedCwd,

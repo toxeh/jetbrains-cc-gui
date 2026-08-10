@@ -63,9 +63,19 @@ export async function sendMessage(messageOrOptions, sessionId = '', cwd = '', pe
     normalizer.begin();
 
     // Optional agent role preamble (agy has no separate system prompt flag in headless)
-    let finalMessage = String(message ?? '');
+    let finalMessage = String(message ?? '').trim();
     if (agentPrompt && String(agentPrompt).trim()) {
-      finalMessage = `${finalMessage}\n\n## Agent Role and Instructions\n\n${agentPrompt}`;
+      finalMessage = finalMessage
+        ? `${finalMessage}\n\n## Agent Role and Instructions\n\n${agentPrompt}`
+        : `## Agent Role and Instructions\n\n${agentPrompt}`;
+    }
+
+    if (!finalMessage.trim()) {
+      if (Array.isArray(opts.attachments) && opts.attachments.length > 0) {
+        finalMessage = 'Please analyze the attached content.';
+      } else {
+        finalMessage = 'Continue';
+      }
     }
 
     const turn = await runAgyTurn({
