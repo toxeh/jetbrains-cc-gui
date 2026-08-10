@@ -9,6 +9,7 @@ const STDIN_ENV_BY_PROVIDER = {
   kimi: 'KIMI_USE_STDIN',
   opencode: 'OPENCODE_USE_STDIN',
   pi: 'PI_USE_STDIN',
+  gemini: 'GEMINI_USE_STDIN',
 };
 
 /**

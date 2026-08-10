@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
-import { CODEX_MODELS, GROK_MODELS, KIMI_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
+import { GROK_MODELS, KIMI_MODELS, OPENCODE_MODELS, PI_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 import { subscribeActiveCodexProvider } from '../../utils/runtimeProviderCapabilities';
 
@@ -32,6 +32,7 @@ function fallbackModels(providerId: string): ModelInfo[] {
   if (providerId === 'opencode') return OPENCODE_MODELS;
   if (providerId === 'pi') return PI_MODELS;
   if (providerId === 'codex') return CODEX_MODELS;
+  if (providerId === 'gemini') return GEMINI_MODELS;
   return [];
 }
 
@@ -41,7 +42,7 @@ function fallbackModels(providerId: string): ModelInfo[] {
  * from ~/.codex/config.toml + model_catalog_json, same as the codex CLI picker.
  */
 function supportsDynamicModels(providerId: string): boolean {
-  if (providerId === 'codex') return true;
+  if (providerId === 'codex' || providerId === 'gemini') return true;
   return isCliOnlyProvider(providerId);
 }
 
