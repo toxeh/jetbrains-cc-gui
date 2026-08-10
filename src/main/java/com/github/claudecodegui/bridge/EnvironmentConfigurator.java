@@ -27,6 +27,9 @@ import java.util.regex.Pattern;
  * Environment configurator.
  * Responsible for configuring process environment variables.
  */
+import com.intellij.util.EnvironmentUtil;
+import com.intellij.util.net.HttpConfigurable;
+
 public class EnvironmentConfigurator {
 
     private static final Logger LOG = Logger.getInstance(EnvironmentConfigurator.class);
@@ -59,6 +62,16 @@ public class EnvironmentConfigurator {
      */
     public void updateProcessEnvironment(ProcessBuilder pb, String nodeExecutable) {
         Map<String, String> env = pb.environment();
+        
+        // Merge login shell environment variables (e.g. proxy, API keys in ~/.zshrc)
+        try {
+            Map<String, String> shellEnv = EnvironmentUtil.getEnvironmentMap();
+            for (Map.Entry<String, String> entry : shellEnv.entrySet()) {
+                env.putIfAbsent(entry.getKey(), entry.getValue());
+            }
+        } catch (Exception e) {
+            LOG.warn("[EnvironmentConfigurator] Failed to load shell environment: " + e.getMessage());
+        }
 
         // Use PlatformUtils to get the PATH variable (case-insensitive)
         String path = PlatformUtils.isWindows() ?
@@ -171,6 +184,43 @@ public class EnvironmentConfigurator {
         }
 
         configurePermissionEnv(env, nodeExecutable);
+        configureProxyEnv(env);
+    }
+
+    private void configureProxyEnv(Map<String, String> env) {
+        try {
+            HttpConfigurable proxySettings = HttpConfigurable.getInstance();
+            if (proxySettings != null && proxySettings.USE_HTTP_PROXY) {
+                String host = proxySettings.PROXY_HOST;
+                int port = proxySettings.PROXY_PORT;
+                if (host != null && !host.isEmpty()) {
+                    String auth = "";
+                    if (proxySettings.PROXY_AUTHENTICATION) {
+                        String user = proxySettings.getProxyLogin();
+                        String pass = proxySettings.getPlainProxyPassword();
+                        if (user != null && !user.isEmpty()) {
+                            auth = user + (pass != null ? ":" + pass : "") + "@";
+                        }
+                    }
+                    boolean isSocks = false;
+                    try {
+                        java.lang.reflect.Field field = proxySettings.getClass().getField("PROXY_TYPE_IS_SOCKS");
+                        isSocks = field.getBoolean(proxySettings);
+                    } catch (Exception ignored) {}
+
+                    String scheme = isSocks ? "socks5://" : "http://";
+                    String proxyUrl = scheme + auth + host + ":" + port;
+                    env.put("HTTP_PROXY", proxyUrl);
+                    env.put("HTTPS_PROXY", proxyUrl);
+                    env.put("ALL_PROXY", proxyUrl);
+                    env.put("http_proxy", proxyUrl);
+                    env.put("https_proxy", proxyUrl);
+                    env.put("all_proxy", proxyUrl);
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("[EnvironmentConfigurator] Failed to configure proxy: " + e.getMessage());
+        }
     }
 
     static String resolveHomeForNodeEnvironment(String nodeExecutable, String currentHome) {
