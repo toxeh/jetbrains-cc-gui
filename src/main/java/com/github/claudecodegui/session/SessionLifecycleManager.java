@@ -41,6 +41,8 @@ public class SessionLifecycleManager {
 
         CodexSDKBridge getCodexSDKBridge();
 
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge();
+
         Map<String, MarkerCliBridge> getCliBridges();
 
         ClaudeSession getSession();
@@ -259,7 +261,8 @@ public class SessionLifecycleManager {
                     host.getProject(),
                     host.getClaudeSDKBridge(),
                     host.getCodexSDKBridge(),
-                    host.getCliBridges());
+                    host.getCliBridges(),
+                    host.getGeminiSDKBridge());
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
             newSession.setModel(modelToRestore);
@@ -275,7 +278,9 @@ public class SessionLifecycleManager {
             newSession.setSessionInfo(sessionId, workingDir);
 
             // Prewarm daemon runtime for the historical session so /context and first message are fast
-            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
+            if ("claude".equals(newSession.getProvider())) {
+                host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
+            }
 
             newSession.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
@@ -425,7 +430,8 @@ public class SessionLifecycleManager {
                 host.getProject(),
                 host.getClaudeSDKBridge(),
                 host.getCodexSDKBridge(),
-                host.getCliBridges());
+                host.getCliBridges(),
+                host.getGeminiSDKBridge());
     }
 
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {
@@ -437,7 +443,9 @@ public class SessionLifecycleManager {
 
         newSession.setSessionInfo(null, workingDirectory);
         LOG.info(successLogPrefix + workingDirectory + ", epoch=" + newSession.getRuntimeSessionEpoch());
-        host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        if ("claude".equals(newSession.getProvider())) {
+            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        }
         fetchSlashCommandsOnStartup();
 
         ApplicationManager.getApplication().invokeLater(() -> {

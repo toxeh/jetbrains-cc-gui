@@ -42,6 +42,7 @@ public class SettingsHandler extends BaseMessageHandler {
         "set_provider",
         "set_reasoning_effort",
         "set_codex_fast_mode",
+        "get_gemini_models",
         "get_node_path",
         "set_node_path",
         "get_claude_cli_path",
@@ -178,6 +179,9 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_codex_fast_mode":
                 modelProviderHandler.handleSetCodexFastMode(content);
+                return true;
+            case "get_gemini_models":
+                modelProviderHandler.handleGetGeminiModels(content);
                 return true;
             // Node path
             case "get_node_path":
