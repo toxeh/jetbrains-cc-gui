@@ -233,6 +233,21 @@ class HistoryDeleteService {
         if ("grok".equals(currentProvider)) {
             return new DeleteResult(deleteGrokSession(sessionId), 0);
         }
+        if ("gemini".equals(currentProvider)) {
+            return new DeleteResult(deleteGeminiSession(sessionId), 0);
+        }
+        if ("pi".equals(currentProvider)) {
+            return new DeleteResult(deletePiSession(sessionId), 0);
+        }
+        if ("opencode".equals(currentProvider)) {
+            return new DeleteResult(deleteOpenCodeSession(sessionId), 0);
+        }
+        if ("kimi".equals(currentProvider)) {
+            return new DeleteResult(deleteKimiSession(sessionId), 0);
+        }
+        if ("gemini".equals(currentProvider)) {
+            return new DeleteResult(deleteGeminiSession(sessionId), 0);
+        }
 
         String rawPath = context.resolveEffectiveWorkingDirectory();
         String nodePath = NodeDetector.getInstance().getCachedNodePath();
@@ -256,6 +271,48 @@ class HistoryDeleteService {
         LOG.info("[HistoryHandler] Delete Grok session " + sessionId + ": " + (deleted ? "ok" : "not found"));
         return deleted;
     }
+
+    private boolean deleteGeminiSession(String sessionId) throws java.io.IOException {
+        com.github.claudecodegui.provider.gemini.GeminiHistoryReader reader =
+                new com.github.claudecodegui.provider.gemini.GeminiHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId);
+        LOG.info("[HistoryHandler] Delete Gemini session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
+    }
+
+    private boolean deletePiSession(String sessionId) throws java.io.IOException {
+        String rawPath = context.resolveEffectiveWorkingDirectory();
+        String nodePath = NodeDetector.getInstance().getCachedNodePath();
+        String projectPath = NodeDetector.isWslPath(nodePath) ? NodeDetector.convertToWslPath(rawPath) : rawPath;
+        com.github.claudecodegui.provider.pi.PiHistoryReader reader =
+                new com.github.claudecodegui.provider.pi.PiHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId, projectPath);
+        LOG.info("[HistoryHandler] Delete PI session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
+    }
+
+    private boolean deleteOpenCodeSession(String sessionId) throws java.io.IOException {
+        String rawPath = context.resolveEffectiveWorkingDirectory();
+        String nodePath = NodeDetector.getInstance().getCachedNodePath();
+        String projectPath = NodeDetector.isWslPath(nodePath) ? NodeDetector.convertToWslPath(rawPath) : rawPath;
+        com.github.claudecodegui.provider.opencode.OpenCodeHistoryReader reader =
+                new com.github.claudecodegui.provider.opencode.OpenCodeHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId, projectPath);
+        LOG.info("[HistoryHandler] Delete OpenCode session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
+    }
+
+    private boolean deleteKimiSession(String sessionId) throws java.io.IOException {
+        String rawPath = context.resolveEffectiveWorkingDirectory();
+        String nodePath = NodeDetector.getInstance().getCachedNodePath();
+        String projectPath = NodeDetector.isWslPath(nodePath) ? NodeDetector.convertToWslPath(rawPath) : rawPath;
+        com.github.claudecodegui.provider.kimi.KimiHistoryReader reader =
+                new com.github.claudecodegui.provider.kimi.KimiHistoryReader();
+        boolean deleted = reader.deleteSession(sessionId, projectPath);
+        LOG.info("[HistoryHandler] Delete Kimi session " + sessionId + ": " + (deleted ? "ok" : "not found"));
+        return deleted;
+    }
+
 
     private boolean deleteCodexSession(String sessionId) throws java.io.IOException {
         return deleteCodexSessions(Collections.singleton(sessionId)).deletedSessionIds.contains(sessionId);

@@ -41,6 +41,8 @@ public class SessionLifecycleManager {
 
         CodexSDKBridge getCodexSDKBridge();
 
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge();
+
         Map<String, MarkerCliBridge> getCliBridges();
 
         ClaudeSession getSession();
@@ -197,13 +199,22 @@ public class SessionLifecycleManager {
      * Load a history session by ID.
      */
     public void loadHistorySession(String sessionId, String projectPath) {
-        loadHistorySession(sessionId, projectPath, null);
+        loadHistorySession(sessionId, projectPath, null, null);
     }
 
     /**
      * Load a history session by ID and provider.
      */
     public void loadHistorySession(String sessionId, String projectPath, String provider) {
+        loadHistorySession(sessionId, projectPath, provider, null);
+    }
+
+    /**
+     * Load a history session by ID, provider, and optional model from the history row.
+     *
+     * @param model when non-blank, restores that model instead of keeping the previous UI selection
+     */
+    public void loadHistorySession(String sessionId, String projectPath, String provider, String model) {
         LOG.info("Loading history session: " + sessionId + " from project: " + projectPath);
 
         ClaudeSession oldSession = host.getSession();
@@ -224,8 +235,10 @@ public class SessionLifecycleManager {
             previousProvider = defaultSession.getProvider();
             previousModel = defaultSession.getModel();
         }
+        String modelToRestore = (model != null && !model.trim().isEmpty()) ? model.trim() : previousModel;
         LOG.info("Preserving session state when loading history: mode=" + previousPermissionMode
-                         + ", provider=" + previousProvider + ", model=" + previousModel);
+                         + ", provider=" + previousProvider + ", model=" + modelToRestore
+                         + (model != null && !model.trim().isEmpty() ? " (from history)" : " (previous)"));
 
         host.invalidateSessionCallbacks();
         long clearBarrierSeq = host.getStreamCoalescer().resetStreamState();
@@ -248,12 +261,13 @@ public class SessionLifecycleManager {
                     host.getProject(),
                     host.getClaudeSDKBridge(),
                     host.getCodexSDKBridge(),
-                    host.getCliBridges());
+                    host.getCliBridges(),
+                    host.getGeminiSDKBridge());
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
-            newSession.setModel(previousModel);
+            newSession.setModel(modelToRestore);
             LOG.info("Restored session state to loaded session: mode=" + previousPermissionMode
-                             + ", provider=" + newSession.getProvider() + ", model=" + previousModel);
+                             + ", provider=" + newSession.getProvider() + ", model=" + modelToRestore);
 
             host.setSession(newSession);
             host.getHandlerContext().setSession(newSession);
@@ -264,7 +278,9 @@ public class SessionLifecycleManager {
             newSession.setSessionInfo(sessionId, workingDir);
 
             // Prewarm daemon runtime for the historical session so /context and first message are fast
-            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
+            if ("claude".equals(newSession.getProvider())) {
+                host.getClaudeSDKBridge().prewarmDaemonAsync(workingDir, newSession.getRuntimeSessionEpoch(), sessionId);
+            }
 
             newSession.loadFromServer().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
                 host.callJavaScript("historyLoadComplete");
@@ -414,7 +430,8 @@ public class SessionLifecycleManager {
                 host.getProject(),
                 host.getClaudeSDKBridge(),
                 host.getCodexSDKBridge(),
-                host.getCliBridges());
+                host.getCliBridges(),
+                host.getGeminiSDKBridge());
     }
 
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {
@@ -426,7 +443,9 @@ public class SessionLifecycleManager {
 
         newSession.setSessionInfo(null, workingDirectory);
         LOG.info(successLogPrefix + workingDirectory + ", epoch=" + newSession.getRuntimeSessionEpoch());
-        host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        if ("claude".equals(newSession.getProvider())) {
+            host.getClaudeSDKBridge().prewarmDaemonAsync(workingDirectory, newSession.getRuntimeSessionEpoch());
+        }
         fetchSlashCommandsOnStartup();
 
         ApplicationManager.getApplication().invokeLater(() -> {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import {
@@ -6,10 +6,11 @@ import {
   normalizeClaudeModelId,
   strip1MContextSuffix,
 } from '../components/ChatInputBox/types';
-import type { PermissionMode } from '../components/ChatInputBox/types';
+import type { PermissionMode, ReasoningEffort } from '../components/ChatInputBox/types';
 import { isSpecialProviderId } from '../types/provider';
 import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
+import { useGeminiProvider } from './providers/useGeminiProvider';
 import { useGrokProvider } from './providers/useGrokProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
@@ -55,6 +56,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const claude = useClaudeProvider();
   const codex = useCodexProvider();
   const grok = useGrokProvider();
+  const gemini = useGeminiProvider();
   const kimi = useKimiProvider();
   const openCode = useOpenCodeProvider();
   const pi = usePiProvider();
@@ -72,11 +74,23 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     codexPermissionMode, setCodexPermissionMode,
     reasoningEffort, setReasoningEffort,
     codexFastMode, setCodexFastMode,
+    handleReasoningChange: codexHandleReasoningChange,
+    handleCodexFastModeChange,
   } = codex;
   const {
     selectedGrokModel, setSelectedGrokModel,
     grokPermissionMode, setGrokPermissionMode,
   } = grok;
+  const {
+    selectedGeminiModel, setSelectedGeminiModel,
+    geminiPermissionMode, setGeminiPermissionMode,
+    geminiFamilies,
+    geminiModels,
+    geminiCatalogLoaded,
+    fetchGeminiModels,
+    resolveGeminiAgyModelId,
+    resolveDefaultEffortForFamily,
+  } = gemini;
   const {
     selectedKimiModel, setSelectedKimiModel,
     kimiPermissionMode, setKimiPermissionMode,
@@ -90,13 +104,60 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     piPermissionMode, setPiPermissionMode,
   } = pi;
 
+  // Pull live agy catalog when Gemini is active (new tab / provider switch).
+  useEffect(() => {
+    if (currentProvider === 'gemini') {
+      fetchGeminiModels();
+    }
+  }, [currentProvider, fetchGeminiModels]);
+
+  // After catalog arrives, re-push full agy slug so session state is never left
+  // on a bare family id that agy rejects without --effort.
+  useEffect(() => {
+    if (currentProvider !== 'gemini' || !geminiCatalogLoaded) {
+      return;
+    }
+    const fullSlug = resolveGeminiAgyModelId(selectedGeminiModel, reasoningEffort);
+    if (fullSlug) {
+      sendBridgeEvent('set_model', fullSlug);
+    }
+  }, [
+    currentProvider,
+    geminiCatalogLoaded,
+    reasoningEffort,
+    resolveGeminiAgyModelId,
+    selectedGeminiModel,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const prev = window.onTabActivated;
+    window.onTabActivated = () => {
+      if (currentProviderRef.current === 'gemini') {
+        fetchGeminiModels();
+      }
+      if (typeof prev === 'function') {
+        try {
+          prev();
+        } catch {
+          // ignore
+        }
+      }
+    };
+    return () => {
+      window.onTabActivated = prev;
+    };
+  }, [fetchGeminiModels]);
+
   // ── Persistence: load on mount + save on change ──
   useModelStatePersistence({
     setCurrentProvider,
     setSelectedClaudeModel,
     setSelectedCodexModel,
+    setSelectedGeminiModel,
     setClaudePermissionMode,
     setCodexPermissionMode,
+    setGeminiPermissionMode,
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
@@ -112,8 +173,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     currentProvider,
     selectedClaudeModel,
     selectedCodexModel,
+    selectedGeminiModel,
     claudePermissionMode,
     codexPermissionMode,
+    geminiPermissionMode,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
@@ -130,15 +193,17 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   // ── Computed values ──
   const selectedModel = currentProvider === 'codex'
     ? selectedCodexModel
-    : currentProvider === 'grok'
-      ? selectedGrokModel
-      : currentProvider === 'kimi'
-        ? selectedKimiModel
-        : currentProvider === 'opencode'
-          ? selectedOpenCodeModel
-          : currentProvider === 'pi'
-            ? selectedPiModel
-            : selectedClaudeModel;
+    : currentProvider === 'gemini'
+      ? selectedGeminiModel
+      : currentProvider === 'grok'
+        ? selectedGrokModel
+        : currentProvider === 'kimi'
+          ? selectedKimiModel
+          : currentProvider === 'opencode'
+            ? selectedOpenCodeModel
+            : currentProvider === 'pi'
+              ? selectedPiModel
+              : selectedClaudeModel;
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
@@ -164,6 +229,12 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       sendBridgeEvent('set_mode', codexMode);
       return;
     }
+    if (currentProvider === 'gemini') {
+      setPermissionMode(mode);
+      setGeminiPermissionMode(mode);
+      sendBridgeEvent('set_mode', mode);
+      return;
+    }
     if (isCliOnlyProvider(currentProvider)) {
       const cliMode = normalizeCliPermissionMode(mode);
       setPermissionMode(cliMode);
@@ -181,6 +252,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     currentProvider,
     setCodexPermissionMode,
     setClaudePermissionMode,
+    setGeminiPermissionMode,
     setGrokPermissionMode,
     setKimiPermissionMode,
     setOpenCodePermissionMode,
@@ -196,6 +268,13 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'codex') {
       setSelectedCodexModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'gemini') {
+      setSelectedGeminiModel(modelId);
+      const effort = resolveDefaultEffortForFamily(modelId);
+      setReasoningEffort(effort);
+      sendBridgeEvent('set_reasoning_effort', effort);
+      const fullSlug = resolveGeminiAgyModelId(modelId, effort);
+      sendBridgeEvent('set_model', fullSlug);
     } else if (currentProvider === 'grok') {
       setSelectedGrokModel(modelId);
       sendBridgeEvent('set_model', modelId);
@@ -212,21 +291,45 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   }, [
     currentProvider,
     longContextEnabled,
+    resolveDefaultEffortForFamily,
+    resolveGeminiAgyModelId,
+    setReasoningEffort,
     setSelectedClaudeModel,
     setSelectedCodexModel,
+    setSelectedGeminiModel,
     setSelectedGrokModel,
     setSelectedKimiModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
   ]);
 
-  const handleProviderSelect = useCallback((providerId: string) => {
+  const handleReasoningChange = useCallback((effort: ReasoningEffort) => {
+    if (currentProvider === 'gemini') {
+      setReasoningEffort(effort);
+      sendBridgeEvent('set_reasoning_effort', effort);
+      const fullSlug = resolveGeminiAgyModelId(selectedGeminiModel, effort);
+      sendBridgeEvent('set_model', fullSlug);
+      return;
+    }
+    codexHandleReasoningChange(effort);
+  }, [
+    codexHandleReasoningChange,
+    currentProvider,
+    resolveGeminiAgyModelId,
+    selectedGeminiModel,
+    setReasoningEffort,
+  ]);
+
+    const handleProviderSelect = useCallback((providerId: string) => {
     setCurrentProvider(providerId);
     sendBridgeEvent('set_provider', providerId);
 
     let modeToSet: PermissionMode = claudePermissionMode;
     if (providerId === 'codex') {
       modeToSet = normalizeCliPermissionMode(codexPermissionMode);
+    } else if (providerId === 'gemini') {
+      modeToSet = geminiPermissionMode;
+      fetchGeminiModels();
     } else if (providerId === 'grok') {
       modeToSet = normalizeCliPermissionMode(grokPermissionMode);
     } else if (providerId === 'kimi') {
@@ -241,6 +344,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
 
     let newModel = apply1MContextSuffix(selectedClaudeModel, longContextEnabled);
     if (providerId === 'codex') newModel = selectedCodexModel;
+    else if (providerId === 'gemini') newModel = resolveGeminiAgyModelId(selectedGeminiModel, reasoningEffort);
     else if (providerId === 'grok') newModel = selectedGrokModel;
     else if (providerId === 'kimi') newModel = selectedKimiModel;
     else if (providerId === 'opencode') newModel = selectedOpenCodeModel;
@@ -249,17 +353,22 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   }, [
     claudePermissionMode,
     codexPermissionMode,
+    fetchGeminiModels,
+    geminiPermissionMode,
     grokPermissionMode,
     kimiPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
+    longContextEnabled,
+    reasoningEffort,
+    resolveGeminiAgyModelId,
     selectedCodexModel,
     selectedClaudeModel,
+    selectedGeminiModel,
     selectedGrokModel,
     selectedKimiModel,
     selectedOpenCodeModel,
     selectedPiModel,
-    longContextEnabled,
   ]);
 
   const handleLongContextChange = useCallback((enabled: boolean) => {
@@ -311,6 +420,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   return {
     ...claude,
     ...codex,
+    ...gemini,
     ...grok,
     ...kimi,
     ...openCode,
@@ -322,13 +432,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     currentProvider, setCurrentProvider,
     permissionMode, setPermissionMode,
     selectedModel,
+    geminiFamilies,
+    geminiModels,
+    geminiCatalogLoaded,
     currentSdkInstalled,
     claudeSdkMeetsMinimum,
     currentProviderRef,
     handleModeSelect,
     handleModelSelect,
     handleProviderSelect,
+    handleReasoningChange,
+    handleCodexFastModeChange,
     handleLongContextChange,
     handleToggleThinking,
+    fetchGeminiModels,
+    resolveGeminiAgyModelId,
   };
 }

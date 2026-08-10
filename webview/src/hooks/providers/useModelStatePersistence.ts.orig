@@ -1,0 +1,476 @@
+import { useEffect } from 'react';
+import { sendBridgeEvent } from '../../utils/bridge';
+import {
+  CLAUDE_MODELS,
+  CODEX_MODELS,
+  DEFAULT_CLAUDE_MODEL_ID,
+  DEFAULT_GEMINI_MODEL_ID,
+  GROK_DEFAULT_MODEL_ID,
+  KIMI_DEFAULT_MODEL_ID,
+  OPENCODE_DEFAULT_MODEL_ID,
+  PI_DEFAULT_MODEL_ID,
+  isValidPermissionMode,
+  normalizeClaudeModelId,
+  apply1MContextSuffix,
+  strip1MContextSuffix,
+  splitGeminiAgyModelId,
+  toGeminiFamilyId,
+} from '../../components/ChatInputBox/types';
+import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
+import { isCliOnlyProvider, normalizeCliPermissionMode } from './cliProviders';
+
+const STORAGE_KEY = 'model-selection-state';
+const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max', 'thinking'] as const;
+const CODEX_FAST_MODE_VALUES = ['normal', 'fast'] as const;
+
+const getCustomModels = (key: string): { id: string }[] => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
+  typeof value === 'string' && (REASONING_VALUES as readonly string[]).includes(value);
+
+const isCodexFastMode = (value: unknown): value is CodexFastMode =>
+  typeof value === 'string' && (CODEX_FAST_MODE_VALUES as readonly string[]).includes(value);
+
+export interface UseModelStatePersistenceOptions {
+  // Cross-slice load setters (run once on mount)
+  setCurrentProvider: (value: string) => void;
+  setSelectedClaudeModel: (value: string) => void;
+  setSelectedCodexModel: (value: string) => void;
+  setSelectedGeminiModel: (value: string) => void;
+  setClaudePermissionMode: (value: PermissionMode) => void;
+  setCodexPermissionMode: (value: PermissionMode) => void;
+  setGeminiPermissionMode: (value: PermissionMode) => void;
+  setSelectedGrokModel: (value: string) => void;
+  setSelectedKimiModel: (value: string) => void;
+  setSelectedOpenCodeModel: (value: string) => void;
+  setSelectedPiModel: (value: string) => void;
+  setGrokPermissionMode: (value: PermissionMode) => void;
+  setKimiPermissionMode: (value: PermissionMode) => void;
+  setOpenCodePermissionMode: (value: PermissionMode) => void;
+  setPiPermissionMode: (value: PermissionMode) => void;
+  setPermissionMode: (value: PermissionMode) => void;
+  setLongContextEnabled: (value: boolean) => void;
+  setReasoningEffort: (value: ReasoningEffort) => void;
+  setCodexFastMode: (value: CodexFastMode) => void;
+  // Cross-slice save deps (re-saves on any change)
+  currentProvider: string;
+  selectedClaudeModel: string;
+  selectedCodexModel: string;
+  selectedGeminiModel: string;
+  claudePermissionMode: PermissionMode;
+  codexPermissionMode: PermissionMode;
+  geminiPermissionMode: PermissionMode;
+  selectedGrokModel: string;
+  selectedKimiModel: string;
+  selectedOpenCodeModel: string;
+  selectedPiModel: string;
+  grokPermissionMode: PermissionMode;
+  kimiPermissionMode: PermissionMode;
+  openCodePermissionMode: PermissionMode;
+  piPermissionMode: PermissionMode;
+  longContextEnabled: boolean;
+  reasoningEffort: ReasoningEffort;
+  codexFastMode: CodexFastMode;
+}
+
+/**
+ * Two effects for persisting cross-slice provider/model state to localStorage:
+ *  1. On mount: hydrate state from localStorage and sync the restored values
+ *     to the backend (retrying until the JCEF bridge is ready).
+ *  2. On change: re-save the snapshot to localStorage.
+ *
+ * Save uses `JSON.stringify` of the persisted keys; load applies
+ * defensive validation (custom models lookup, permission mode allowlist,
+ * reasoning effort allowlist) before invoking the slice setters.
+ */
+export function useModelStatePersistence(options: UseModelStatePersistenceOptions) {
+  const {
+    setCurrentProvider,
+    setSelectedClaudeModel,
+    setSelectedCodexModel,
+    setSelectedGeminiModel,
+    setClaudePermissionMode,
+    setCodexPermissionMode,
+    setGeminiPermissionMode,
+    setSelectedGrokModel,
+    setSelectedKimiModel,
+    setSelectedOpenCodeModel,
+    setSelectedPiModel,
+    setGrokPermissionMode,
+    setKimiPermissionMode,
+    setOpenCodePermissionMode,
+    setPiPermissionMode,
+    setPermissionMode,
+    setLongContextEnabled,
+    setReasoningEffort,
+    setCodexFastMode,
+    currentProvider,
+    selectedClaudeModel,
+    selectedCodexModel,
+    selectedGeminiModel,
+    claudePermissionMode,
+    codexPermissionMode,
+    geminiPermissionMode,
+    selectedGrokModel,
+    selectedKimiModel,
+    selectedOpenCodeModel,
+    selectedPiModel,
+    grokPermissionMode,
+    kimiPermissionMode,
+    openCodePermissionMode,
+    piPermissionMode,
+    longContextEnabled,
+    reasoningEffort,
+    codexFastMode,
+  } = options;
+
+  // Hydrate from localStorage and sync to backend (mount only).
+  // Setters are stable; deps left empty to ensure single execution.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      // Per-tab restore (issue #1353): when the Java backend has loaded a saved
+      // session for this specific tab, it injects __INITIAL_TAB_PROVIDER__ /
+      // __INITIAL_TAB_MODEL__ into the HTML before React boots. Those values
+      // win over the global localStorage snapshot, which is shared across every
+      // tab in the JCEF process and would otherwise cause every CC tab on
+      // restart to be set to whichever provider was last saved by ANY tab.
+      const initialTabProvider = typeof window.__INITIAL_TAB_PROVIDER__ === 'string'
+        ? window.__INITIAL_TAB_PROVIDER__.trim()
+        : '';
+      const initialTabModel = typeof window.__INITIAL_TAB_MODEL__ === 'string'
+        ? window.__INITIAL_TAB_MODEL__.trim()
+        : '';
+      const hasBackendProvider = initialTabProvider === 'claude'
+        || initialTabProvider === 'codex'
+        || initialTabProvider === 'gemini'
+        || isCliOnlyProvider(initialTabProvider);
+      const hasBackendModel = initialTabModel.length > 0;
+
+      let restoredProvider = 'claude';
+      let restoredClaudeModel = DEFAULT_CLAUDE_MODEL_ID;
+      let restoredCodexModel = CODEX_MODELS[0].id;
+      let restoredGeminiModel = DEFAULT_GEMINI_MODEL_ID;
+      let restoredClaudePermissionMode: PermissionMode = 'default';
+      let restoredCodexPermissionMode: PermissionMode = 'default';
+      let restoredGeminiPermissionMode: PermissionMode = 'default';
+      let restoredGrokModel = GROK_DEFAULT_MODEL_ID;
+      let restoredKimiModel = KIMI_DEFAULT_MODEL_ID;
+      let restoredOpenCodeModel = OPENCODE_DEFAULT_MODEL_ID;
+      let restoredPiModel = PI_DEFAULT_MODEL_ID;
+      let restoredGrokPermissionMode: PermissionMode = 'default';
+      let restoredKimiPermissionMode: PermissionMode = 'default';
+      let restoredOpenCodePermissionMode: PermissionMode = 'default';
+      let restoredPiPermissionMode: PermissionMode = 'default';
+      let restoredLongContextEnabled = true;
+      let restoredCodexFastMode: CodexFastMode = 'normal';
+
+      // Model validation helpers — close over the restored* lets so both
+      // branches (saved localStorage / fresh backend-only) share the same logic
+      // and each getCustomModels localStorage read happens at most once.
+      const applyClaudeModel = (modelId: string) => {
+        const normalized = normalizeClaudeModelId(strip1MContextSuffix(modelId));
+        const customs = getCustomModels('claude-custom-models');
+        if (CLAUDE_MODELS.find(m => m.id === normalized) || customs.find(m => m.id === normalized)) {
+          restoredClaudeModel = normalized;
+          setSelectedClaudeModel(normalized);
+        }
+      };
+      const applyCodexModel = (modelId: string) => {
+        const customs = getCustomModels('codex-custom-models');
+        if (CODEX_MODELS.find(m => m.id === modelId) || customs.find(m => m.id === modelId)) {
+          restoredCodexModel = modelId;
+          setSelectedCodexModel(modelId);
+        }
+      };
+      const applyGeminiModel = (modelId: string) => {
+        if (typeof modelId !== 'string' || !modelId.trim()) return;
+        const split = splitGeminiAgyModelId(modelId);
+        const baseId = toGeminiFamilyId(modelId) || split.baseId || modelId;
+        const effort = split.effort;
+        if (baseId) {
+          restoredGeminiModel = baseId;
+          setSelectedGeminiModel(baseId);
+          if (effort && isReasoningEffort(effort)) {
+            setReasoningEffort(effort);
+          }
+        }
+      };
+      // CLI catalogs are dynamic (user-defined Grok profiles, backend-reported
+      // Kimi/OpenCode models), so any non-empty saved id is accepted.
+      const makeCliModelApplier = (apply: (id: string) => void) => (modelId: unknown) => {
+        if (typeof modelId === 'string' && modelId.trim().length > 0) {
+          apply(modelId);
+        }
+      };
+      const applyGrokModel = makeCliModelApplier((id) => {
+        restoredGrokModel = id;
+        setSelectedGrokModel(id);
+      });
+      const applyKimiModel = makeCliModelApplier((id) => {
+        restoredKimiModel = id;
+        setSelectedKimiModel(id);
+      });
+      const applyOpenCodeModel = makeCliModelApplier((id) => {
+        restoredOpenCodeModel = id;
+        setSelectedOpenCodeModel(id);
+      });
+      const applyPiModel = makeCliModelApplier((id) => {
+        restoredPiModel = id;
+        setSelectedPiModel(id);
+      });
+
+      if (saved) {
+        const state = JSON.parse(saved);
+
+        // Backend-supplied provider wins. We still fall through the rest of the
+        // hydration so non-provider preferences (permission mode, reasoning
+        // effort, codex fast mode, …) are restored from localStorage.
+        const providerCandidate = hasBackendProvider ? initialTabProvider : state.provider;
+        if (['claude', 'codex', 'gemini'].includes(providerCandidate) || isCliOnlyProvider(providerCandidate)) {
+          restoredProvider = providerCandidate;
+          setCurrentProvider(providerCandidate);
+        }
+
+        if (isValidPermissionMode(state.claudePermissionMode)) {
+          restoredClaudePermissionMode = state.claudePermissionMode;
+        }
+        if (isValidPermissionMode(state.codexPermissionMode)) {
+          restoredCodexPermissionMode = state.codexPermissionMode === 'plan'
+            ? 'default'
+            : state.codexPermissionMode;
+        }
+        if (isValidPermissionMode(state.geminiPermissionMode)) {
+          restoredGeminiPermissionMode = state.geminiPermissionMode;
+        }
+        if (isValidPermissionMode(state.grokPermissionMode)) {
+          restoredGrokPermissionMode = normalizeCliPermissionMode(state.grokPermissionMode);
+        }
+        if (isValidPermissionMode(state.kimiPermissionMode)) {
+          restoredKimiPermissionMode = normalizeCliPermissionMode(state.kimiPermissionMode);
+        }
+        if (isValidPermissionMode(state.openCodePermissionMode)) {
+          restoredOpenCodePermissionMode = normalizeCliPermissionMode(state.openCodePermissionMode);
+        }
+        if (isValidPermissionMode(state.piPermissionMode)) {
+          restoredPiPermissionMode = normalizeCliPermissionMode(state.piPermissionMode);
+        }
+
+        if (typeof state.longContextEnabled === 'boolean') {
+          restoredLongContextEnabled = state.longContextEnabled;
+          setLongContextEnabled(state.longContextEnabled);
+        }
+
+        if (isReasoningEffort(state.reasoningEffort)) {
+          setReasoningEffort(state.reasoningEffort);
+        }
+        if (isCodexFastMode(state.codexFastMode)) {
+          restoredCodexFastMode = state.codexFastMode;
+          setCodexFastMode(restoredCodexFastMode);
+        }
+
+        const claudeModelCandidate = hasBackendModel && restoredProvider === 'claude'
+          ? initialTabModel
+          : state.claudeModel;
+        applyClaudeModel(claudeModelCandidate);
+
+        const codexModelCandidate = hasBackendModel && restoredProvider === 'codex'
+          ? initialTabModel
+          : state.codexModel;
+        applyCodexModel(codexModelCandidate);
+
+        const geminiModelCandidate = hasBackendModel && restoredProvider === 'gemini'
+          ? initialTabModel
+          : state.geminiModel;
+        applyGeminiModel(geminiModelCandidate);
+
+        const grokModelCandidate = hasBackendModel && restoredProvider === 'grok'
+          ? initialTabModel
+          : state.grokModel;
+        applyGrokModel(grokModelCandidate);
+
+        const kimiModelCandidate = hasBackendModel && restoredProvider === 'kimi'
+          ? initialTabModel
+          : state.kimiModel;
+        applyKimiModel(kimiModelCandidate);
+
+        const openCodeModelCandidate = hasBackendModel && restoredProvider === 'opencode'
+          ? initialTabModel
+          : state.openCodeModel;
+        applyOpenCodeModel(openCodeModelCandidate);
+
+        const piModelCandidate = hasBackendModel && restoredProvider === 'pi'
+          ? initialTabModel
+          : state.piModel;
+        applyPiModel(piModelCandidate);
+      } else if (hasBackendProvider) {
+        // No localStorage yet (fresh user) but backend supplied a provider:
+        // honor it so the tab starts with the right provider.
+        restoredProvider = initialTabProvider;
+        setCurrentProvider(initialTabProvider);
+        if (hasBackendModel) {
+          if (initialTabProvider === 'claude') applyClaudeModel(initialTabModel);
+          else if (initialTabProvider === 'codex') applyCodexModel(initialTabModel);
+          else if (initialTabProvider === 'gemini') applyGeminiModel(initialTabModel);
+          else if (initialTabProvider === 'grok') applyGrokModel(initialTabModel);
+          else if (initialTabProvider === 'kimi') applyKimiModel(initialTabModel);
+          else if (initialTabProvider === 'opencode') applyOpenCodeModel(initialTabModel);
+          else if (initialTabProvider === 'pi') applyPiModel(initialTabModel);
+        }
+      }
+
+      const initialPermissionMode: PermissionMode = restoredProvider === 'codex'
+        ? restoredCodexPermissionMode
+        : restoredProvider === 'gemini'
+          ? restoredGeminiPermissionMode
+          : restoredProvider === 'grok'
+            ? restoredGrokPermissionMode
+            : restoredProvider === 'kimi'
+              ? restoredKimiPermissionMode
+              : restoredProvider === 'opencode'
+                ? restoredOpenCodePermissionMode
+                : restoredProvider === 'pi'
+                  ? restoredPiPermissionMode
+                  : restoredClaudePermissionMode;
+      setClaudePermissionMode(restoredClaudePermissionMode);
+      setCodexPermissionMode(restoredCodexPermissionMode);
+      setGeminiPermissionMode(restoredGeminiPermissionMode);
+      setGrokPermissionMode(restoredGrokPermissionMode);
+      setKimiPermissionMode(restoredKimiPermissionMode);
+      setOpenCodePermissionMode(restoredOpenCodePermissionMode);
+      setPiPermissionMode(restoredPiPermissionMode);
+      setPermissionMode(initialPermissionMode);
+
+      let syncRetryCount = 0;
+      const MAX_SYNC_RETRIES = 30;
+
+      const syncToBackend = () => {
+        if (window.sendToJava) {
+          // Native watchdog reload reuses the original HTML snapshot. Java
+          // pushes the current Session state after frontend_ready; echoing the
+          // stale boot snapshot would route the existing transcript incorrectly.
+          if (window.__CCGUI_RECOVERY_RELOAD__ === true) {
+            return;
+          }
+          sendBridgeEvent('set_provider', restoredProvider);
+          const modelToSync = restoredProvider === 'codex'
+            ? restoredCodexModel
+            : restoredProvider === 'gemini'
+              ? restoredGeminiModel
+              : restoredProvider === 'grok'
+                ? restoredGrokModel
+                : restoredProvider === 'kimi'
+                  ? restoredKimiModel
+                  : restoredProvider === 'opencode'
+                    ? restoredOpenCodeModel
+                    : restoredProvider === 'pi'
+                      ? restoredPiModel
+                      : apply1MContextSuffix(restoredClaudeModel, restoredLongContextEnabled);
+          sendBridgeEvent('set_model', modelToSync);
+          // Do NOT push the permission mode to Java on boot. Java is the source
+          // of truth for the mode (persisted app-level in PropertiesComponent,
+          // which survives a plugin reinstall) and the webview seeds its own mode
+          // FROM Java via get_mode → onModeReceived. Our localStorage copy is
+          // wiped on reinstall, so pushing it here would clobber the surviving
+          // Java value with 'default' — the reported "reinstall forgets Auto" bug.
+          // The mode is only sent to Java on an explicit user switch
+          // (handleModeSelect → set_mode).
+          sendBridgeEvent('set_codex_fast_mode', restoredCodexFastMode);
+        } else {
+          syncRetryCount++;
+          if (syncRetryCount < MAX_SYNC_RETRIES) {
+            setTimeout(syncToBackend, 100);
+          }
+        }
+      };
+      setTimeout(syncToBackend, 200);
+    } catch {
+      // Failed to load model selection state — fall back to defaults already
+      // set by individual slice hooks.
+    }
+  }, []);
+
+  // Persist snapshot whenever any of the persisted keys change.
+  useEffect(() => {
+    let retryTimer: number | undefined;
+    let retryCount = 0;
+
+    const persistWhenPageContextIsReady = () => {
+      const pageContextPending = window.__CCGUI_PAGE_CONTEXT_READY__ !== true;
+      const recoveryStatePending = window.__CCGUI_RECOVERY_RELOAD__ === true
+        && window.__CCGUI_RECOVERY_STATE_APPLIED__ !== true;
+
+      // React may mount before onLoadEnd/fallback establishes the runtime page
+      // context. Never publish provisional HTML/default state to the localStorage
+      // snapshot shared by every tab. Keep the same fast-then-slow retry policy as
+      // bridge startup so delayed remote JCEF initialization can still settle.
+      if (pageContextPending || recoveryStatePending) {
+        retryCount += 1;
+        retryTimer = window.setTimeout(
+          persistWhenPageContextIsReady,
+          retryCount < 50 ? 100 : 1000,
+        );
+        return;
+      }
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          provider: currentProvider,
+          claudeModel: selectedClaudeModel,
+          codexModel: selectedCodexModel,
+          geminiModel: selectedGeminiModel,
+          claudePermissionMode,
+          codexPermissionMode,
+          geminiPermissionMode,
+          grokModel: selectedGrokModel,
+          kimiModel: selectedKimiModel,
+          openCodeModel: selectedOpenCodeModel,
+          piModel: selectedPiModel,
+          grokPermissionMode,
+          kimiPermissionMode,
+          openCodePermissionMode,
+          piPermissionMode,
+          longContextEnabled,
+          reasoningEffort,
+          codexFastMode,
+        }));
+      } catch {
+        // Failed to save model selection state — non-fatal.
+      }
+    };
+
+    persistWhenPageContextIsReady();
+    return () => {
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [
+    currentProvider,
+    selectedClaudeModel,
+    selectedCodexModel,
+    selectedGeminiModel,
+    claudePermissionMode,
+    codexPermissionMode,
+    geminiPermissionMode,
+    selectedGrokModel,
+    selectedKimiModel,
+    selectedOpenCodeModel,
+    selectedPiModel,
+    grokPermissionMode,
+    kimiPermissionMode,
+    openCodePermissionMode,
+    piPermissionMode,
+    longContextEnabled,
+    reasoningEffort,
+    codexFastMode,
+  ]);
+}

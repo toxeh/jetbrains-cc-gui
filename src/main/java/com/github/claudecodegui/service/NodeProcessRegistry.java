@@ -3,6 +3,7 @@ package com.github.claudecodegui.service;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.DaemonBridge;
+import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
 import com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow;
 import com.github.claudecodegui.ui.toolwindow.ClaudeSDKToolWindow;
 import com.github.claudecodegui.util.PlatformUtils;
@@ -104,6 +105,7 @@ public final class NodeProcessRegistry implements Disposable {
 
             // -- DAEMON entries from ClaudeSDKBridge --
             ClaudeSDKBridge claudeBridge = safeClaudeBridge(window);
+            GeminiSDKBridge geminiBridge = safeGeminiBridge(window);
             if (claudeBridge != null) {
                 DaemonBridge daemon = claudeBridge.getCurrentDaemonBridgeForInspection();
                 if (daemon != null && daemon.isAlive()) {
@@ -170,6 +172,35 @@ public final class NodeProcessRegistry implements Disposable {
             if (codexBridge != null) {
                 Map<String, Process> codexChannels = codexBridge.getProcessManager().getActiveChannelSnapshot();
                 for (Map.Entry<String, Process> entry : codexChannels.entrySet()) {
+                    Process p = entry.getValue();
+                    if (p == null || !p.isAlive()) {
+                        continue;
+                    }
+                    long pid = p.pid();
+                    knownPids.add(pid);
+                    ProcessHandle.Info info = safeInfo(p);
+                    long startedAt = info != null
+                            ? info.startInstant().map(Instant::toEpochMilli).orElse(-1L)
+                            : -1L;
+                    result.add(NodeProcessInfo.builder()
+                            .kind(NodeProcessInfo.Kind.CHANNEL)
+                            .provider(tabProvider)
+                            .pid(pid)
+                            .alive(true)
+                            .startedAtMs(startedAt)
+                            .uptimeMs(startedAt > 0 ? Math.max(0, now - startedAt) : 0L)
+                            .command(extractCommand(info))
+                            .channelId(entry.getKey())
+                            .sessionId(sessionId)
+                            .tabName(tabName)
+                            .build());
+                }
+            }
+
+            // -- CHANNEL entries from geminiBridge.processManager (per-message processes) --
+            if (geminiBridge != null) {
+                Map<String, Process> geminiChannels = geminiBridge.getProcessManager().getActiveChannelSnapshot();
+                for (Map.Entry<String, Process> entry : geminiChannels.entrySet()) {
                     Process p = entry.getValue();
                     if (p == null || !p.isAlive()) {
                         continue;
@@ -445,6 +476,14 @@ public final class NodeProcessRegistry implements Disposable {
     private static @Nullable ClaudeSDKBridge safeClaudeBridge(ClaudeChatWindow window) {
         try {
             return window != null ? window.getClaudeSDKBridge() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static @Nullable GeminiSDKBridge safeGeminiBridge(ClaudeChatWindow window) {
+        try {
+            return window != null ? window.getGeminiSDKBridge() : null;
         } catch (Exception e) {
             return null;
         }
