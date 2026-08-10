@@ -174,42 +174,6 @@ export async function ensureSession(client, { sessionId = '', cwd = '', model = 
   return { sessionId: activeSessionId, sessionMeta };
 }
 
-/**
- * Sync Grok CLI always-approve flag with our permission mode.
- * Default/plan/acceptEdits must turn always-approve OFF so ACP keeps
- * emitting session/request_permission (otherwise tools run in silence).
- * Bypass/auto modes turn it ON.
- *
- * This is the single entry point for mode→CLI sync (replaces the old
- * applyAutoApproveIfNeeded helper that only ever turned always-approve on).
- */
-/**
- * Control-plane prompts (/always-approve on|off) should not wait the full turn
- * timeout. They are best-effort and must never kill a healthy mid-turn agent:
- * recycleOnTimeout is false so a slow/busy session only skips the mode sync
- * (error swallowed) instead of popping ACP timeout UI or recycling the runtime.
- */
-const PERMISSION_MODE_SYNC_TIMEOUT_MS = 20_000;
-
-export async function applyPermissionModeToSession(client, sessionId, permissionMode) {
-  if (!client || !sessionId) return;
-  const cmd = isAutoApproveMode(permissionMode) ? '/always-approve on' : '/always-approve off';
-  try {
-    await client.request(
-      'session/prompt',
-      {
-        sessionId,
-        prompt: [{ type: 'text', text: cmd }],
-      },
-      PERMISSION_MODE_SYNC_TIMEOUT_MS,
-      { recycleOnTimeout: false },
-    );
-  } catch {
-    // Best-effort: older CLIs may not support the command, or the agent is busy
-    // on a user turn. Never surface to UI; live.permissionMode still drives dialogs.
-  }
-}
-
 export class GrokAcpClient {
   constructor({
     env = process.env,

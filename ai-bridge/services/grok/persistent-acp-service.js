@@ -20,7 +20,6 @@ import {
   GrokAcpClient,
   initializeAndAuthenticate,
   ensureSession,
-  applyPermissionModeToSession,
   buildPromptBlocks,
   isAutoApproveMode,
   resolveAcpPermissionDecision,
@@ -559,9 +558,6 @@ export async function setPermissionModePersistent(params = {}) {
       runtime.sessionId
       || runtime.client?.activeSessionId
       || null;
-    if (runtime.client && sid) {
-      await applyPermissionModeToSession(runtime.client, sid, targetMode);
-    }
 
     console.log(
       '[GROK-DAEMON] setPermissionModePersistent applied mode=' + targetMode
