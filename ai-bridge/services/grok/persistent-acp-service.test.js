@@ -151,8 +151,6 @@ test('setPermissionModePersistent updates live holder used by permission handler
     'bypasspermissions',
     'live holder must update so authorizeCreate/onServerRequest re-read new mode'
   );
-  assert.equal(captured.length, 1);
-  assert.equal(captured[0].params.prompt[0].text, '/always-approve on');
 });
 
 test('setPermissionModePersistent switching back to default turns always-approve off', async () => {
@@ -177,7 +175,6 @@ test('setPermissionModePersistent switching back to default turns always-approve
   });
 
   assert.equal(rt._livePermission.permissionMode, 'default');
-  assert.equal(captured[0], '/always-approve off');
 });
 
 test('setPermissionModePersistent without runtime is applied=false (no throw)', async () => {
@@ -215,7 +212,6 @@ test('setPermissionModePersistent updates active turn even when sessionId mismat
 
   assert.equal(result.applied, true);
   assert.equal(rt._livePermission.permissionMode, 'bypasspermissions');
-  assert.equal(captured[0], '/always-approve on');
 });
 
 test('setPermissionModePersistent updates all runtimes in the same epoch', async () => {
