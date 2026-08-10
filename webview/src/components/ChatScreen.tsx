@@ -4,6 +4,7 @@ import { ChatInputBox } from './ChatInputBox';
 import type {
   Attachment,
   ChatInputBoxHandle,
+  GeminiModelFamily,
 } from './ChatInputBox/types';
 import { MessageAnchorRail } from './MessageAnchorRail';
 import { MessageList } from './MessageList';
@@ -103,6 +104,7 @@ export interface ChatScreenProps {
   usagePercentage: ProviderState['usagePercentage'];
   usageUsedTokens: ProviderState['usageUsedTokens'];
   usageMaxTokens: ProviderState['usageMaxTokens'];
+  geminiFamilies?: GeminiModelFamily[];
 
   // Model handlers
   onModeSelect: ProviderState['handleModeSelect'];
@@ -143,7 +145,7 @@ export const ChatScreen = ({
   sdkStatusLoading, sdkStatusError, onRetrySdkStatus, currentSdkInstalled,
   activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
   reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
-  longContextEnabled, usagePercentage, usageUsedTokens, usageMaxTokens,
+  longContextEnabled, usagePercentage, usageUsedTokens, usageMaxTokens, geminiFamilies,
   onModeSelect, onModelSelect, onAgentSelect, onReasoningChange, onCodexFastModeChange, onToggleThinking,
   onStreamingEnabledChange,
   onAutoOpenFileEnabledChange, onLongContextChange,
@@ -336,6 +338,7 @@ export const ChatScreen = ({
           usagePercentage={usagePercentage}
           usageUsedTokens={usageUsedTokens}
           usageMaxTokens={usageMaxTokens}
+          geminiFamilies={geminiFamilies}
           showUsage={true}
           alwaysThinkingEnabled={activeProviderConfig?.settingsConfig?.alwaysThinkingEnabled ?? claudeSettingsAlwaysThinkingEnabled}
           placeholder={sendShortcut === 'cmdEnter' ? t('chat.inputPlaceholderCmdEnter') : t('chat.inputPlaceholderEnter')}
