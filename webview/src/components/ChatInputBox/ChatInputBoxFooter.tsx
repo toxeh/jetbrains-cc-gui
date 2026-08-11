@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import type { CodexFastMode, DropdownItemData, DropdownPosition, PermissionMode, ReasoningEffort, SelectedAgent, GeminiModelFamily } from './types.js';
+import type { CodexFastMode, DropdownItemData, DropdownPosition, ModelInfo, PermissionMode, ReasoningEffort, SelectedAgent, GeminiModelFamily } from './types.js';
 import type { TooltipState } from './hooks/useTooltip.js';
 import { ButtonArea } from './ButtonArea.js';
 import { CompletionDropdown } from './Dropdown/index.js';
@@ -27,6 +27,7 @@ export function ChatInputBoxFooter({
   reasoningEffort,
   codexFastMode,
   geminiFamilies,
+  geminiModels,
   onSubmit,
   onStop,
   onModeSelect,
@@ -65,6 +66,7 @@ export function ChatInputBoxFooter({
   reasoningEffort: ReasoningEffort;
   codexFastMode?: CodexFastMode;
   geminiFamilies?: GeminiModelFamily[];
+  geminiModels?: ModelInfo[];
   onSubmit: () => void;
   onStop?: () => void;
   onModeSelect?: (mode: PermissionMode) => void;
@@ -121,6 +123,7 @@ export function ChatInputBoxFooter({
         reasoningEffort={reasoningEffort}
         codexFastMode={codexFastMode}
         geminiFamilies={geminiFamilies}
+        geminiModels={geminiModels}
         onSubmit={onSubmit}
         onStop={onStop}
         onModeSelect={onModeSelect}

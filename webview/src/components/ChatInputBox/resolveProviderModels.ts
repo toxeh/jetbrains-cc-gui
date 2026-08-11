@@ -51,11 +51,10 @@ export function resolveProviderModels({
   }
 
   if (provider === 'gemini') {
+    // Family base ids only (effort suffixes live in ReasoningSelect via geminiFamilies).
+    // Never fall back to flat get_cli_models slugs (...-high / ...-thinking).
     if (geminiModels && geminiModels.length > 0) {
       return geminiModels;
-    }
-    if (cliCatalogHasEntries && cliModels.length > 0) {
-      return cliModels;
     }
     return GEMINI_MODELS;
   }
