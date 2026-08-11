@@ -8,6 +8,7 @@ import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
 import { useCliModels } from '../../hooks/providers/useCliModels';
 import { useToolbarSelectorCompact } from './hooks/useToolbarSelectorCompact';
 import { resolveProviderModels } from './resolveProviderModels';
+import { toGeminiFamilyId } from './types';
 
 /**
  * Get custom Codex model list from localStorage
@@ -156,19 +157,29 @@ export const ButtonArea = ({
 
   // When CLI model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-    const isDynamicProvider = currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode'
+    const isGemini = currentProvider === 'gemini';
+    const isDynamicProvider = isGemini || currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex'
       || currentProvider === 'grok';
     if (!isDynamicProvider) return;
+    // Gemini uses family list from get_gemini_models (geminiModels), not flat cliModels.
     // Only correct once a *real* catalog arrived. Static fallback lists
     // (OPENCODE_MODELS = just "opencode-default", CODEX built-ins, …) must not
     // clobber the user's choice — especially when ChatScreen remounts after
     // leaving history and briefly shows the fallback before the cache/fetch
     // lands.
-    if (!cliCatalogHasEntries) return;
-    if (cliModelsLoading) return;
+    if (isGemini) {
+      if (!geminiModels || geminiModels.length === 0) return;
+    } else {
+      if (!cliCatalogHasEntries) return;
+      if (cliModelsLoading) return;
+    }
     if (!availableModels.length || !onModelSelect) return;
-    const exists = availableModels.some((model: ModelInfo) => model.id === selectedModel);
+    const selectedFamily = isGemini
+      ? (toGeminiFamilyId(selectedModel) || selectedModel)
+      : selectedModel;
+    const exists = availableModels.some((model: ModelInfo) =>
+      model.id === selectedModel || model.id === selectedFamily);
     if (!exists) {
       onModelSelect(availableModels[0].id);
     }
@@ -180,6 +191,7 @@ export const ButtonArea = ({
     cliDefaultModel,
     cliCatalogHasEntries,
     cliModelsLoading,
+    geminiModels,
   ]);
 
   /**
