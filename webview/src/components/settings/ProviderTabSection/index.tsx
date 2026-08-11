@@ -5,6 +5,7 @@ import { STORAGE_KEYS } from '../../../types/provider';
 import ProviderManageSection from '../ProviderManageSection';
 import CodexProviderSection from '../CodexProviderSection';
 import CliSection from '../CliSection';
+import GrokProviderSection from '../GrokProviderSection';
 import CustomModelDialog from '../CustomModelDialog';
 import { usePluginModels } from '../hooks/usePluginModels';
 import { useConfiguredClaudeModelPricing } from '../hooks/useConfiguredModelPricing';
@@ -13,7 +14,7 @@ import styles from './style.module.less';
 const ICON_14_STYLE: React.CSSProperties = { fontSize: 14 };
 const FLEX_1_STYLE: React.CSSProperties = { flex: 1 };
 
-type ProviderManageTab = 'claude' | 'codex' | 'cli';
+type ProviderManageTab = 'claude' | 'codex' | 'cli' | 'grok';
 
 interface ProviderTabSectionProps {
   currentProvider: 'claude' | 'codex' | string;
@@ -57,9 +58,9 @@ const ProviderTabSection = ({
 
   const [activeTab, setActiveTab] = useState<ProviderManageTab>(() => {
     if (currentProvider === 'codex') return 'codex';
-    // Grok / Kimi / OpenCode / PI share the CLI management surface.
-    if (currentProvider === 'grok' || currentProvider === 'kimi'
-      || currentProvider === 'opencode' || currentProvider === 'pi') {
+    if (currentProvider === 'grok') return 'grok';
+    // Kimi / OpenCode / PI share the CLI management surface.
+    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi') {
       return 'cli';
     }
     return 'claude';
@@ -124,6 +125,16 @@ const ProviderTabSection = ({
         >
           <span className="codicon codicon-terminal-bash" aria-hidden="true" />
           {t('settings.providerTab.cli')}
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'grok'}
+          aria-controls="panel-grok-providers"
+          className={`${styles.tabBtn} ${activeTab === 'grok' ? styles.active : ''}`}
+          onClick={() => setActiveTab('grok')}
+        >
+          <span className="codicon codicon-rocket" aria-hidden="true" />
+          {t('settings.providerTab.grok')}
         </button>
       </div>
 
@@ -209,6 +220,10 @@ const ProviderTabSection = ({
           <CliSection addToast={addToast} />
         </div>
       )}
+
+      <div id="panel-grok-providers" role="tabpanel" style={activeTab === 'grok' ? BLOCK_STYLE : NONE_STYLE}>
+        <GrokProviderSection />
+      </div>
 
       {/* Shared model management dialog */}
       <CustomModelDialog
