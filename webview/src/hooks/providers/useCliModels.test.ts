@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { __resetCliModelsCacheForTests, useCliModels } from './useCliModels';
-import { CODEX_MODELS, KIMI_MODELS } from '../../components/ChatInputBox/types';
+import { KIMI_MODELS } from '../../components/ChatInputBox/types';
 import { installRuntimeProviderDispatchers } from '../../utils/runtimeProviderCapabilities';
 
 const sendBridgeEventMock = vi.hoisted(() => vi.fn());
