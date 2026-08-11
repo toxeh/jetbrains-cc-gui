@@ -6,6 +6,7 @@ import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
@@ -27,6 +28,15 @@ public class ClaudeSession {
     private static final Logger LOG = Logger.getInstance(ClaudeSession.class);
 
     /**
+     * Flag set when the user manually interrupts the current turn (clicks Stop).
+     * Checked by {@link com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow#onStreamEnded()}
+     * to suppress the task-completion notification sound for manual stops.
+     * Reset to {@code false} at the start of each new {@link #send} call.
+     */
+    private volatile boolean manuallyInterrupted = false;
+
+
+    /**
      * Maximum file size for Codex context injection (100KB)
      */
     private static final int MAX_FILE_SIZE_BYTES = 100 * 1024;
@@ -35,14 +45,6 @@ public class ClaudeSession {
     private final Project project;
     /** Start time of the latest submitted turn, retained across Webview rebuilds. */
     private volatile long lastTurnStartedAtMillis;
-
-    /**
-     * Flag set when the user manually interrupts the current turn (clicks Stop).
-     * Checked by {@link com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow#onStreamEnded()}
-     * to suppress the task-completion notification sound for manual stops.
-     * Reset to {@code false} at the start of each new {@link #send} call.
-     */
-    private volatile boolean manuallyInterrupted = false;
 
     // Session state manager
     private final com.github.claudecodegui.session.SessionState state;
@@ -64,6 +66,7 @@ public class ClaudeSession {
     // SDK bridges
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
+    private final GrokSDKBridge grokSDKBridge;
     private final GeminiSDKBridge geminiSDKBridge;
 
     // Permission manager
@@ -167,7 +170,7 @@ public class ClaudeSession {
             CodexSDKBridge codexSDKBridge,
             Map<String, MarkerCliBridge> cliBridges
     ) {
-        this(project, claudeSDKBridge, codexSDKBridge, cliBridges, null);
+        this(project, claudeSDKBridge, codexSDKBridge, cliBridges, null, null);
     }
 
     public ClaudeSession(
@@ -177,9 +180,21 @@ public class ClaudeSession {
             Map<String, MarkerCliBridge> cliBridges,
             GeminiSDKBridge geminiSDKBridge
     ) {
+        this(project, claudeSDKBridge, codexSDKBridge, cliBridges, null, geminiSDKBridge);
+    }
+
+    public ClaudeSession(
+            Project project,
+            ClaudeSDKBridge claudeSDKBridge,
+            CodexSDKBridge codexSDKBridge,
+            Map<String, MarkerCliBridge> cliBridges,
+            GrokSDKBridge grokSDKBridge,
+            GeminiSDKBridge geminiSDKBridge
+    ) {
         this.project = project;
         this.claudeSDKBridge = claudeSDKBridge;
         this.codexSDKBridge = codexSDKBridge;
+        this.grokSDKBridge = grokSDKBridge;
         this.geminiSDKBridge = geminiSDKBridge;
 
         // Initialize managers
@@ -189,7 +204,8 @@ public class ClaudeSession {
         this.contextCollector = new com.github.claudecodegui.session.EditorContextCollector(project);
         this.callbackFacade = new SessionCallbackFacade(project);
         this.contextService = new SessionContextService(project, MAX_FILE_SIZE_BYTES);
-        this.providerRouter = new SessionProviderRouter(claudeSDKBridge, codexSDKBridge, cliBridges, geminiSDKBridge);
+        this.providerRouter = new SessionProviderRouter(
+                claudeSDKBridge, codexSDKBridge, cliBridges, this.grokSDKBridge, this.geminiSDKBridge);
         this.sendService = new SessionSendService(
                 project,
                 state,
@@ -201,7 +217,8 @@ public class ClaudeSession {
                 codexSDKBridge,
                 cliBridges,
                 contextService,
-                geminiSDKBridge
+                geminiSDKBridge,
+                grokSDKBridge
         );
         this.messageOrchestrator = new SessionMessageOrchestrator(
                 project,
@@ -256,16 +273,6 @@ public class ClaudeSession {
         return state.getError();
     }
 
-    /**
-     * Returns whether the current (or most recent) turn was manually interrupted
-     * by the user clicking Stop. Used to suppress the task-completion sound.
-     *
-     * @return {@code true} if the user manually interrupted the current turn
-     */
-    public boolean isManuallyInterrupted() {
-        return manuallyInterrupted;
-    }
-
     public List<Message> getMessages() {
         return state.getMessages();
     }
@@ -298,6 +305,17 @@ public class ClaudeSession {
         } else {
             state.setCwd(null);
         }
+    }
+
+
+    /**
+     * Returns whether the current (or most recent) turn was manually interrupted
+     * by the user clicking Stop. Used to suppress the task-completion sound.
+     *
+     * @return {@code true} if the user manually interrupted the current turn
+     */
+    public boolean isManuallyInterrupted() {
+        return manuallyInterrupted;
     }
 
     public void clearSessionId() {

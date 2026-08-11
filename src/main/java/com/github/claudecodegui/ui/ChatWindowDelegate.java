@@ -83,6 +83,9 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        default com.github.claudecodegui.provider.grok.GrokSDKBridge getGrokSDKBridge() {
+            return null;
+        }
         com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
         ClaudeSession getSession();
@@ -320,6 +323,7 @@ public class ChatWindowDelegate {
                 project,
                 claudeSDKBridge,
                 codexSDKBridge,
+                host.getGrokSDKBridge(),
                 host.getGeminiSDKBridge(),
                 settingsService,
                 jsCallback,

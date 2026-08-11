@@ -139,20 +139,42 @@ export class GrokEventNormalizer {
 
     switch (kind) {
       case 'agent_message_chunk': {
-        const text = extractText(update.content);
+        const text = extractText(update.content) || extractText(update.delta) || update.text || '';
         if (text) {
-          this.assistantText += text;
-          this.#emit(`[CONTENT_DELTA] ${JSON.stringify(text)}`);
+          let delta = '';
+          if (text.startsWith(this.assistantText)) {
+            delta = text.slice(this.assistantText.length);
+            this.assistantText = text;
+          } else if (this.assistantText.startsWith(text)) {
+            delta = '';
+          } else {
+            delta = text;
+            this.assistantText += text;
+          }
+          if (delta) {
+            this.#emit(`[CONTENT_DELTA] ${JSON.stringify(delta)}`);
+          }
         }
         break;
       }
       case 'agent_thought_chunk':
       case 'agent_thinking_chunk':
       case 'thought_chunk': {
-        const text = extractText(update.content) || update.text || '';
+        const text = extractText(update.content) || extractText(update.delta) || update.text || '';
         if (text) {
-          this.thinkingText += text;
-          this.#emit(`[THINKING_DELTA] ${JSON.stringify(text)}`);
+          let delta = '';
+          if (text.startsWith(this.thinkingText)) {
+            delta = text.slice(this.thinkingText.length);
+            this.thinkingText = text;
+          } else if (this.thinkingText.startsWith(text)) {
+            delta = '';
+          } else {
+            delta = text;
+            this.thinkingText += text;
+          }
+          if (delta) {
+            this.#emit(`[THINKING_DELTA] ${JSON.stringify(delta)}`);
+          }
         }
         break;
       }
@@ -175,10 +197,21 @@ export class GrokEventNormalizer {
         break;
       default: {
         // Try generic text fields
-        const text = extractText(update.content) || update.text;
+        const text = extractText(update.content) || extractText(update.delta) || update.text;
         if (text && kind.includes('message')) {
-          this.assistantText += text;
-          this.#emit(`[CONTENT_DELTA] ${JSON.stringify(text)}`);
+          let delta = '';
+          if (text.startsWith(this.assistantText)) {
+            delta = text.slice(this.assistantText.length);
+            this.assistantText = text;
+          } else if (this.assistantText.startsWith(text)) {
+            delta = '';
+          } else {
+            delta = text;
+            this.assistantText += text;
+          }
+          if (delta) {
+            this.#emit(`[CONTENT_DELTA] ${JSON.stringify(delta)}`);
+          }
         }
         break;
       }
@@ -299,9 +332,15 @@ export class GrokEventNormalizer {
 function extractText(content) {
   if (content == null) return '';
   if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(extractText).join('');
+  }
   if (typeof content === 'object') {
     if (typeof content.text === 'string') return content.text;
-    if (typeof content.content === 'string') return content.content;
+    if (typeof content.content === 'string' || typeof content.content === 'object') {
+      return extractText(content.content);
+    }
+    if (typeof content.delta === 'string') return content.delta;
   }
   return '';
 }
