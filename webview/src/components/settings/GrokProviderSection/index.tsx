@@ -12,9 +12,13 @@ const GrokProviderSection = () => {
     const handler = (jsonStr: string) => {
       try {
         const data = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+        // XAI_API_KEY is the official xAI env; GROK_API_KEY is a compatible alias.
+        // Runtime accepts either (and usually writes both when injecting a key).
+        const apiKey = data?.apiKey || '';
         const configObj = {
           env: data?.env || {
-            GROK_API_KEY: data?.apiKey || '',
+            XAI_API_KEY: apiKey,
+            GROK_API_KEY: apiKey,
             GROK_MODELS_BASE_URL: data?.apiBaseUrl || '',
             GROK_CLI_CHAT_PROXY_BASE_URL: data?.oauthBaseUrl || '',
           },
@@ -45,8 +49,8 @@ const GrokProviderSection = () => {
       const env = parsed.env || {};
       const next = {
         authMethod: parsed.authMethod || 'oauth',
-        apiKey: env.GROK_API_KEY || env.XAI_API_KEY || '',
-        apiBaseUrl: env.GROK_MODELS_BASE_URL || env.XAI_API_BASE_URL || env.GROK_XAI_API_BASE_URL || '',
+        apiKey: env.XAI_API_KEY || env.GROK_API_KEY || '',
+        apiBaseUrl: env.XAI_API_BASE_URL || env.GROK_XAI_API_BASE_URL || env.GROK_MODELS_BASE_URL || '',
         oauthBaseUrl: env.GROK_CLI_CHAT_PROXY_BASE_URL || '',
         gatewayOrigin: '',
         env: env // send custom env down to backend
@@ -91,6 +95,7 @@ const GrokProviderSection = () => {
               onChange={handleJsonChange}
               placeholder={`{
   "env": {
+    "XAI_API_KEY": "",
     "GROK_API_KEY": "",
     "GROK_MODELS_BASE_URL": "",
     "GROK_CLI_CHAT_PROXY_BASE_URL": ""
