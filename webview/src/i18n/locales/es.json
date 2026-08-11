@@ -339,7 +339,8 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "cli": "CLI"
+      "cli": "CLI",
+      "grok": "Grok"
     },
     "pluginModels": {
       "title": "Modelos personalizados",
@@ -1615,9 +1616,6 @@
     },
     "opencode": {
       "label": "OpenCode"
-    },
-    "pi": {
-      "label": "PI CLI"
     },
     "pi": {
       "label": "PI CLI"

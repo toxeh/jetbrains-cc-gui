@@ -366,7 +366,8 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "cli": "CLI"
+      "cli": "CLI",
+      "grok": "Grok"
     },
     "pluginModels": {
       "title": "Modelos Personalizados",

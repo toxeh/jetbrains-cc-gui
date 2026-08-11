@@ -339,7 +339,8 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "cli": "CLI"
+      "cli": "CLI",
+      "grok": "Grok"
     },
     "pluginModels": {
       "title": "사용자 지정 모델",

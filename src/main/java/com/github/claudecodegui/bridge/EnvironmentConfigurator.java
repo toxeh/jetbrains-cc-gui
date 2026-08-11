@@ -185,6 +185,7 @@ public class EnvironmentConfigurator {
 
         configurePermissionEnv(env, nodeExecutable);
         configureProxyEnv(env);
+        configureGrokEnv(env);
     }
 
     private void configureProxyEnv(Map<String, String> env) {
@@ -216,6 +217,15 @@ public class EnvironmentConfigurator {
                     env.put("http_proxy", proxyUrl);
                     env.put("https_proxy", proxyUrl);
                     env.put("all_proxy", proxyUrl);
+                    
+                    String noProxy = resolveEnvValue("NO_PROXY");
+                    if (noProxy == null || noProxy.isEmpty()) {
+                        noProxy = resolveEnvValue("no_proxy");
+                    }
+                    if (noProxy != null && !noProxy.isEmpty()) {
+                        env.put("NO_PROXY", noProxy);
+                        env.put("no_proxy", noProxy);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -585,6 +595,36 @@ public class EnvironmentConfigurator {
             }
         } catch (Exception e) {
             LOG.warn("[Codex] Error configuring Codex env: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Configure Grok-specific environment variables.
+     * Loads custom base URLs and proxy configs from the shell environment.
+     */
+    public void configureGrokEnv(Map<String, String> env) {
+        if (env == null) {
+            return;
+        }
+        String[] grokEnvKeys = {
+            "GROK_MODELS_BASE_URL",
+            "GROK_XAI_API_BASE_URL",
+            "XAI_API_BASE_URL",
+            "GROK_CLI_CHAT_PROXY_BASE_URL",
+            "GROK_HOME",
+            "GROK_API_KEY",
+            "XAI_API_KEY",
+            "NO_PROXY",
+            "no_proxy"
+        };
+        for (String key : grokEnvKeys) {
+            if (env.containsKey(key) && env.get(key) != null && !env.get(key).isEmpty()) {
+                continue; // Already set
+            }
+            String value = resolveEnvValue(key);
+            if (value != null && !value.trim().isEmpty()) {
+                env.put(key, value.trim());
+            }
         }
     }
 

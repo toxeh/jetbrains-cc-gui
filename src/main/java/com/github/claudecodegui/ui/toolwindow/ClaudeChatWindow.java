@@ -10,6 +10,7 @@ import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.grok.GrokCliBridge;
+import com.github.claudecodegui.provider.grok.GrokSDKBridge;
 import com.github.claudecodegui.provider.kimi.KimiCliBridge;
 import com.github.claudecodegui.provider.opencode.OpenCodeCliBridge;
 import com.github.claudecodegui.provider.pi.PiCliBridge;
@@ -75,6 +76,7 @@ public class ClaudeChatWindow {
     private final ClaudeSDKBridge claudeSDKBridge;
     private final CodexSDKBridge codexSDKBridge;
     private final GeminiSDKBridge geminiSDKBridge;
+    private final GrokSDKBridge grokSDKBridge;
     private final Map<String, MarkerCliBridge> cliBridges;
     private final GrokCliBridge grokCliBridge;
     private final KimiCliBridge kimiCliBridge;
@@ -220,12 +222,14 @@ public class ClaudeChatWindow {
         this.claudeSDKBridge = new ClaudeSDKBridge();
         this.codexSDKBridge = new CodexSDKBridge();
         this.geminiSDKBridge = new GeminiSDKBridge();
+        this.grokSDKBridge = new GrokSDKBridge();
         this.grokCliBridge = new GrokCliBridge();
         this.kimiCliBridge = new KimiCliBridge();
         this.openCodeCliBridge = new OpenCodeCliBridge();
         this.piCliBridge = new PiCliBridge();
+        // Grok uses GrokSDKBridge (persistent ACP / grok agent stdio), not MarkerCliBridge.
         this.cliBridges = SessionProviderRouter.registerCliBridges(
-                this.grokCliBridge, this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge);
+                this.kimiCliBridge, this.openCodeCliBridge, this.piCliBridge);
         this.settingsService = new CodemossSettingsService();
         this.htmlLoader = new HtmlLoader(getClass());
         this.mainPanel = new JPanel(new BorderLayout());
@@ -281,7 +285,7 @@ public class ClaudeChatWindow {
                 () -> frontendReady
         );
 
-        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, geminiSDKBridge);
+        this.session = new ClaudeSession(project, claudeSDKBridge, codexSDKBridge, cliBridges, grokSDKBridge, geminiSDKBridge);
 
         this.chatWindowDelegate = new ChatWindowDelegate(createDelegateHost());
         chatWindowDelegate.loadPermissionModeFromSettings();
@@ -305,6 +309,11 @@ public class ClaudeChatWindow {
             @Override
             public CodexSDKBridge getCodexSDKBridge() {
                 return codexSDKBridge;
+            }
+
+            @Override
+            public GrokSDKBridge getGrokSDKBridge() {
+                return grokSDKBridge;
             }
 
             @Override
@@ -1374,6 +1383,10 @@ public class ClaudeChatWindow {
 
     public GeminiSDKBridge getGeminiSDKBridge() {
         return geminiSDKBridge;
+    }
+
+    public GrokSDKBridge getGrokSDKBridge() {
+        return grokSDKBridge;
     }
 
     public CodexSDKBridge getCodexSDKBridge() {
@@ -2836,6 +2849,18 @@ public class ClaudeChatWindow {
         }
 
         try {
+            if (grokSDKBridge != null) {
+                int activeCount = grokSDKBridge.getActiveProcessCount();
+                if (activeCount > 0) {
+                    LOG.info("Cleaning up " + activeCount + " active Grok process(es)...");
+                }
+                grokSDKBridge.cleanupAllProcesses();
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to clean up Grok processes: " + e.getMessage());
+        }
+
+        try {
             if (targetBrowser != null) {
                 targetBrowser.dispose();
             }
@@ -2999,6 +3024,11 @@ public class ClaudeChatWindow {
             @Override
             public CodexSDKBridge getCodexSDKBridge() {
                 return codexSDKBridge;
+            }
+
+            @Override
+            public GrokSDKBridge getGrokSDKBridge() {
+                return grokSDKBridge;
             }
 
             @Override
