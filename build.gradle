@@ -291,6 +291,10 @@ tasks.named('instrumentCode') {
     enabled = false
 }
 
+tasks.named('instrumentTestCode') {
+    enabled = false
+}
+
 tasks.named('jarSearchableOptions') {
     enabled = false
 }
