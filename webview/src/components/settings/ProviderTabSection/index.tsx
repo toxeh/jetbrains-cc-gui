@@ -221,9 +221,11 @@ const ProviderTabSection = ({
         </div>
       )}
 
-      <div id="panel-grok-providers" role="tabpanel" style={activeTab === 'grok' ? BLOCK_STYLE : NONE_STYLE}>
-        <GrokProviderSection />
-      </div>
+      {activeTab === 'grok' && (
+        <div id="panel-grok-providers" role="tabpanel">
+          <GrokProviderSection />
+        </div>
+      )}
 
       {/* Shared model management dialog */}
       <CustomModelDialog
