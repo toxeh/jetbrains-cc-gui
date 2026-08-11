@@ -546,7 +546,8 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "cli": "CLI"
+      "cli": "CLI",
+      "grok": "Grok"
     },
     "cli": {
       "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
