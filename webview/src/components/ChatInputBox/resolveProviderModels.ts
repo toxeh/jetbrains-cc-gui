@@ -2,6 +2,7 @@ import type { ModelInfo } from './types';
 import {
   CLAUDE_MODELS,
   CODEX_MODELS,
+  GEMINI_MODELS,
   GROK_MODELS,
 } from './types';
 import { buildCodexModelList } from './codexModelList';
@@ -23,6 +24,8 @@ export interface ResolveProviderModelsInput {
   claudeCustomModels?: ModelInfo[];
   codexCustomModels?: ModelInfo[];
   claudeMapping?: ClaudeModelMapping | null;
+  /** Live Gemini family rows from parent; falls back to GEMINI_MODELS / cliModels. */
+  geminiModels?: ModelInfo[];
 }
 
 /**
@@ -40,10 +43,21 @@ export function resolveProviderModels({
   claudeCustomModels = [],
   codexCustomModels = [],
   claudeMapping = null,
+  geminiModels,
 }: ResolveProviderModelsInput): ModelInfo[] {
   if (provider === 'codex') {
     const catalogModels = cliCatalogHasEntries ? cliModels : [];
     return buildCodexModelList(catalogModels, codexCustomModels, CODEX_MODELS);
+  }
+
+  if (provider === 'gemini') {
+    if (geminiModels && geminiModels.length > 0) {
+      return geminiModels;
+    }
+    if (cliCatalogHasEntries && cliModels.length > 0) {
+      return cliModels;
+    }
+    return GEMINI_MODELS;
   }
 
   if (provider === 'grok') {

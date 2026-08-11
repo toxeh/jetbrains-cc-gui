@@ -69,6 +69,8 @@ function getCustomClaudeModels(): ModelInfo[] {
  * Contains mode selector, model selector, attachment button, prompt enhancer button, send/stop button
  */
 export const ButtonArea = ({
+  geminiFamilies,
+  geminiModels,
   disabled = false,
   hasInputContent = false,
   isLoading = false,
@@ -99,7 +101,7 @@ export const ButtonArea = ({
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
   // const fileInputRef = useRef<HTMLInputElement>(null);
-  const { cliModels, cliModelsLoading, cliModelsError, cliDefaultModel, cliCatalogHasEntries, refreshCliModels } = useCliModels(currentProvider);
+  const { cliModels, cliModelsLoading, cliModelsError, refreshCliModels, cliDefaultModel, cliCatalogHasEntries } = useCliModels(currentProvider);
 
   // Track changes to custom models in localStorage
   // When localStorage changes, updating this version number triggers useMemo recalculation
@@ -146,14 +148,15 @@ export const ButtonArea = ({
       claudeCustomModels: getCustomClaudeModels(),
       codexCustomModels: getCustomCodexModels(),
       claudeMapping,
+      geminiModels,
     });
     // customModelsVersion intentionally forces re-read of localStorage customs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries]);
+  }, [currentProvider, customModelsVersion, cliModels, cliCatalogHasEntries, geminiModels]);
 
-  // When a dynamic model catalog arrives, ensure selection is a real entry.
+  // When CLI model catalog arrives, ensure selection is a real entry.
   useEffect(() => {
-    const isDynamicProvider = currentProvider === 'kimi' || currentProvider === 'opencode'
+    const isDynamicProvider = currentProvider === 'gemini' || currentProvider === 'kimi' || currentProvider === 'opencode'
       || currentProvider === 'pi' || currentProvider === 'codex'
       || currentProvider === 'grok';
     if (!isDynamicProvider) return;
@@ -165,9 +168,9 @@ export const ButtonArea = ({
     if (!cliCatalogHasEntries) return;
     if (cliModelsLoading) return;
     if (!availableModels.length || !onModelSelect) return;
-    const exists = availableModels.some((model) => model.id === selectedModel);
+    const exists = availableModels.some((model: ModelInfo) => model.id === selectedModel);
     if (!exists) {
-      onModelSelect(cliDefaultModel ?? availableModels[0].id);
+      onModelSelect(availableModels[0].id);
     }
   }, [
     availableModels,
@@ -294,7 +297,13 @@ export const ButtonArea = ({
           longContextEnabled={longContextEnabled}
           onLongContextChange={onLongContextChange}
         />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
+        <ReasoningSelect
+          value={reasoningEffort}
+          onChange={handleReasoningChange}
+          selectedModel={selectedModel}
+          currentProvider={currentProvider}
+          geminiFamilies={geminiFamilies}
+        />
         {currentProvider === 'codex' && (
           <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
         )}

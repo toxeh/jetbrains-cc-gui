@@ -25,6 +25,7 @@ import com.github.claudecodegui.handler.PromptHandler;
 import com.github.claudecodegui.handler.provider.CustomModelPricingHandler;
 import com.github.claudecodegui.handler.provider.ModelProviderHandler;
 import com.github.claudecodegui.handler.provider.ProviderHandler;
+import com.github.claudecodegui.handler.provider.gemini.GeminiPlanUsageHandler;
 import com.github.claudecodegui.handler.RewindHandler;
 import com.github.claudecodegui.handler.SessionHandler;
 import com.github.claudecodegui.handler.SettingsHandler;
@@ -82,6 +83,7 @@ public class ChatWindowDelegate {
         Project getProject();
         ClaudeSDKBridge getClaudeSDKBridge();
         CodexSDKBridge getCodexSDKBridge();
+        com.github.claudecodegui.provider.gemini.GeminiSDKBridge getGeminiSDKBridge();
         Map<String, MarkerCliBridge> getCliBridges();
         ClaudeSession getSession();
         CodemossSettingsService getSettingsService();
@@ -318,6 +320,7 @@ public class ChatWindowDelegate {
                 project,
                 claudeSDKBridge,
                 codexSDKBridge,
+                host.getGeminiSDKBridge(),
                 settingsService,
                 jsCallback,
                 host::isActiveContent,
@@ -337,6 +340,7 @@ public class ChatWindowDelegate {
         host.setMessageDispatcher(messageDispatcher);
 
         messageDispatcher.registerHandler(new ProviderHandler(handlerContext));
+        messageDispatcher.registerHandler(new GeminiPlanUsageHandler(handlerContext));
         messageDispatcher.registerHandler(new CustomModelPricingHandler(handlerContext, settingsService));
         messageDispatcher.registerHandler(new McpServerHandler(handlerContext));
         messageDispatcher.registerHandler(new McpMarketplaceHandler(handlerContext));

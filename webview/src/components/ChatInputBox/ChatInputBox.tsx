@@ -114,6 +114,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onAutoOpenFileEnabledChange,
       longContextEnabled = true,
       onLongContextChange,
+      geminiFamilies,
     }: ChatInputBoxProps,
     ref: React.ForwardedRef<ChatInputBoxHandle>
   ) => {
@@ -735,6 +736,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
           currentProvider={currentProvider}
           reasoningEffort={reasoningEffort}
           codexFastMode={codexFastMode}
+          geminiFamilies={geminiFamilies}
           onSubmit={handleSubmit}
           onStop={onStop}
           onModeSelect={handleModeSelect}
