@@ -232,8 +232,11 @@ public class SessionSendService {
             resolvedMode = "default";
         }
 
-        // Codex + headless CLI providers have no plan mode equivalent.
-        if (("codex".equals(provider) || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
+        // Codex and Grok run as full SDK bridges (not MarkerCli providers, so they
+        // are absent from CLI_PROVIDER_IDS), but like the headless CLI providers
+        // they have no plan-mode equivalent — so plan still downgrades to default.
+        if (("codex".equals(provider) || "grok".equals(provider)
+                || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
             return "default";
         }
         return resolvedMode;
@@ -504,9 +507,10 @@ private CompletableFuture<Void> sendToCliProvider(
             return null;
         }
         if ("grok".equals(provider)) {
-            if ("grok".equals(lower) || "default".equals(lower) || "(default)".equals(lower)) {
-                LOG.info("[Grok] Normalizing sentinel model id '" + trimmed + "' to default model 'grok-4.5'");
-                return "grok-4.5";
+            if ("grok".equals(lower) || "default".equals(lower) || "(default)".equals(lower)
+                    || "grok-4.5".equals(lower)) {
+                LOG.info("[Grok] Normalizing sentinel model id '" + trimmed + "' to default model 'grok-4.6'");
+                return "grok-4.6";
             }
         }
         return trimmed;

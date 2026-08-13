@@ -546,7 +546,8 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "cli": "CLI"
+      "cli": "CLI",
+      "grok": "Grok"
     },
     "cli": {
       "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
@@ -1685,6 +1686,7 @@
   "subagent": {
     "process": {
       "title": "Agent process",
+      "prompt": "Prompt",
       "thought": "Thought",
       "filesRead_one": "Read {{count}} file",
       "filesRead_other": "Read {{count}} files",
@@ -1964,9 +1966,9 @@
       }
     },
     "grok": {
-      "grok45": {
-        "label": "Grok 4.5",
-        "description": "xAI Grok 4.5"
+      "grok46": {
+        "label": "Grok 4.6",
+        "description": "xAI Grok 4.6"
       }
     }
   },

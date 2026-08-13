@@ -546,7 +546,8 @@
     "providerTab": {
       "claude": "Claude Code",
       "codex": "Codex",
-      "cli": "CLI"
+      "cli": "CLI",
+      "grok": "Grok"
     },
     "cli": {
       "hint": "以下 CLI 需在系统终端自行安装并完成配置。插件只负责检测是否已安装及版本号，不会替你自动安装。请先在终端确认可正常使用，再回到此处使用。",
@@ -1690,6 +1691,7 @@
   "subagent": {
     "process": {
       "title": "Agent 进程",
+      "prompt": "提示词",
       "thought": "思考",
       "filesRead_one": "读取 {{count}} 个文件",
       "filesRead_other": "读取 {{count}} 个文件",
@@ -1969,9 +1971,9 @@
       }
     },
     "grok": {
-      "grok45": {
-        "label": "Grok 4.5",
-        "description": "xAI Grok 4.5"
+      "grok46": {
+        "label": "Grok 4.6",
+        "description": "xAI Grok 4.6"
       }
     }
   },

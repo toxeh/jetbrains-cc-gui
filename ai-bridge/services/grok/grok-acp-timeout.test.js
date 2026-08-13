@@ -26,6 +26,13 @@ function mockClientForRequest() {
     get killed() {
       return killed;
     },
+    // Mirror Node's ChildProcess: exitCode is null while the process is still
+    // running and a number once it has exited. grok-acp-client gates kill() on
+    // `exitCode === null` (real liveness), not on `killed` (which only signals
+    // that kill() was *called*), so the mock must expose exitCode too.
+    get exitCode() {
+      return killed ? 0 : null;
+    },
     kill() {
       killed = true;
     },
@@ -97,14 +104,14 @@ test('extractUsedTokens prefers total_tokens then sums parts', () => {
 
 test('getContextUsagePersistent reads runtime.lastUsedTokens after usage remember', async () => {
   resetRegistry();
-  const rt = createTestRuntime('timeout-rt', { model: 'grok-4.5', permissionMode: 'default' });
+  const rt = createTestRuntime('timeout-rt', { model: 'grok-4.6', permissionMode: 'default' });
   rt.lastUsedTokens = 12_345;
   forceSetActiveTurn(rt);
 
   const payload = await getContextUsagePersistent({ maxTokens: 500_000 });
   assert.equal(payload.totalTokens, 12_345);
   assert.equal(payload.maxTokens, 500_000);
-  assert.equal(payload.model, 'grok-4.5');
+  assert.equal(payload.model, 'grok-4.6');
   assert.equal(payload.source, 'grok-synthesized');
 });
 
