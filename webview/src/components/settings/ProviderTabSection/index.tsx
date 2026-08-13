@@ -13,6 +13,10 @@ import styles from './style.module.less';
 
 const ICON_14_STYLE: React.CSSProperties = { fontSize: 14 };
 const FLEX_1_STYLE: React.CSSProperties = { flex: 1 };
+// Display-toggle (not conditional render) so GrokProviderSection stays mounted
+// and keeps its form state when the user switches away from the Grok tab.
+const BLOCK_STYLE: React.CSSProperties = { display: 'block' };
+const NONE_STYLE: React.CSSProperties = { display: 'none' };
 
 type ProviderManageTab = 'claude' | 'codex' | 'cli' | 'grok';
 
