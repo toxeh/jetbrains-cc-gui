@@ -232,8 +232,11 @@ public class SessionSendService {
             resolvedMode = "default";
         }
 
-        // Codex + headless CLI providers have no plan mode equivalent.
-        if (("codex".equals(provider) || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
+        // Codex and Grok run as full SDK bridges (not MarkerCli providers, so they
+        // are absent from CLI_PROVIDER_IDS), but like the headless CLI providers
+        // they have no plan-mode equivalent — so plan still downgrades to default.
+        if (("codex".equals(provider) || "grok".equals(provider)
+                || SessionProviderRouter.isCliProvider(provider)) && "plan".equals(resolvedMode)) {
             return "default";
         }
         return resolvedMode;
