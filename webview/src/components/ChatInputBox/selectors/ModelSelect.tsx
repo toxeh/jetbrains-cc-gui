@@ -216,6 +216,15 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
   };
 
   const getModelLabel = (model: ModelInfo, show1MContext = false): string => {
+    // The Anthropic slot maps below (MODEL_ID_TO_MAPPING_KEY, DEFAULT_MODEL_MAP,
+    // MODEL_LABEL_KEYS) are keyed by claude-* ids. agy's catalog exposes
+    // third-party models whose ids collide with those slots (e.g. claude-sonnet-4-6).
+    // For any non-claude provider, render the catalog label verbatim — never let
+    // the Claude model mapping override agy/cli catalog labels.
+    if (currentProvider !== 'claude') {
+      return append1MContextSuffix(model.label ?? '', model.id, show1MContext);
+    }
+
     const mappingKey = MODEL_ID_TO_MAPPING_KEY[model.id];
     if (mappingKey) {
       const mappedName = resolveMappedModelName(mappingKey, modelMapping);
