@@ -22,6 +22,8 @@ export class AgyEventNormalizer {
     this.messageEnded = false;
     this.conversationId = null;
     this.lastUsage = null;
+    /** Read-only slash command answer (command_result), when the turn was one. */
+    this.commandResult = null;
     /** Peak context tokens seen this turn (ignore tiny checkpoint regressions). */
     this.peakContextTokens = 0;
     this.emittedToolKeys = new Set();
@@ -35,6 +37,7 @@ export class AgyEventNormalizer {
     this.lastUsage = null;
     this.peakContextTokens = 0;
     this.assistantText = '';
+    this.commandResult = null;
     this.emittedToolKeys = new Set();
     this.emittedToolUses = new Set();
     this.emittedToolResults = new Set();
@@ -66,6 +69,15 @@ export class AgyEventNormalizer {
 
     if (event === 'step_update') {
       this._handleStepUpdate(eventObj.step_update || {});
+      return;
+    }
+
+    // agy ≥ 1.1.11: read-only slash commands (/usage, /model, …) answer via
+    // command_result without an agent turn; the text also arrives in the
+    // terminal result event. Keep command data for callers that want it, but
+    // never treat the pair as a failure.
+    if (event === 'command_result') {
+      this.commandResult = eventObj.command || null;
       return;
     }
 

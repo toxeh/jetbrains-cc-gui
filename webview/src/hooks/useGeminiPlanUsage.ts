@@ -13,7 +13,7 @@ const EMPTY: GeminiPlanUsageState = { status: 'idle', snapshot: null };
 
 /**
  * Gemini / Antigravity plan usage for ContextBar via Java bridge
- * ({@code get_gemini_plan_usage} → temporary agy statusline hook, no token parsing).
+ * ({@code get_gemini_plan_usage} → one-shot `agy -p "/usage"` probe, no token parsing).
  * Same snapshot shape as Gemini/Claude so GeminiPlanUsageIndicator can render it.
  */
 export function useGeminiPlanUsage(currentProvider: string) {
@@ -81,7 +81,7 @@ export function useGeminiPlanUsage(currentProvider: string) {
         genRef.current += 1;
       };
     }
-    // agy statusline spawn is heavier than HTTP capacity — poll less often
+    // agy /usage probe spawn is heavier than HTTP capacity — poll less often
     const id = window.setInterval(() => {
       void refresh();
     }, 120_000);

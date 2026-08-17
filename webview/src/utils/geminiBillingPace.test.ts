@@ -10,7 +10,7 @@ const dualFamilyPayload = {
   ok: true,
   present: true,
   provider: 'gemini',
-  source: 'agy-statusline',
+  source: 'agy-usage-probe',
   default_family: 'gemini',
   capacity_pct: 25,
   reset_at: '2026-08-05T18:15:50Z',

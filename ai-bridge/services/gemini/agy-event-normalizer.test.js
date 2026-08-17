@@ -209,6 +209,38 @@ test('ignores null/unknown events', () => {
   assert.equal(lines.length, before);
 });
 
+test('command_result stores command payload without emitting tags', () => {
+  // agy ≥ 1.1.11 read-only slash commands: command_result + result pair,
+  // no agent turn. Normalizer must not emit anything for command_result
+  // itself (the text arrives via result) but keep the structured payload.
+  const { n, lines } = collect();
+  n.begin();
+  const before = lines.length;
+  n.handleStreamEvent({
+    event: 'command_result',
+    command: { name: 'usage', data: { groups: [{ name: 'Gemini Models', buckets: [] }] } },
+  });
+  assert.equal(lines.length, before);
+  assert.equal(n.commandResult?.name, 'usage');
+
+  // terminal result carries the human-readable table text
+  n.handleStreamEvent({
+    event: 'result',
+    result: {
+      conversation_id: '',
+      status: 'SUCCESS',
+      response: 'Gemini Models\tWeekly Limit Remaining\t94%\t2026-08-18T23:37:11Z',
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    },
+  });
+  assert.ok(lines.some((l) => l.startsWith('[CONTENT_DELTA]')));
+  assert.equal(n._terminalError, null);
+
+  // begin() resets command state for the next turn
+  n.begin();
+  assert.equal(n.commandResult, null);
+});
+
 test('emits tool_use message and BLOCK_RESET when tool step update arrives', () => {
   const { n, lines } = collect();
   n.begin();

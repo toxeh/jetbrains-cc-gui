@@ -147,3 +147,35 @@ process.exit(0);
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('runAgyTurn surfaces ERROR status payload despite exit code 0', async () => {
+  // agy ≥ 1.1.11: interactive-only slash commands (e.g. /clear) exit 0 but
+  // carry status:"ERROR" + actionable error text in the result payload.
+  const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
+console.log(JSON.stringify({
+  event: 'result',
+  result: {
+    conversation_id: '',
+    status: 'ERROR',
+    response: '',
+    error: '/clear is not available in print mode (every print-mode run already starts a new conversation unless --continue or --conversation is passed); pass --disable-slash-commands to send /clear to the model as literal text',
+  },
+}));
+process.exit(0);
+`);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const turn = await runAgyTurn({ message: '/clear' });
+    assert.equal(turn.exitCode, 0);
+    assert.equal(turn.status, 'ERROR');
+    assert.match(turn.error, /not available in print mode/);
+    // callers (message-service) throw on non-SUCCESS without response text
+    assert.equal(turn.response, '');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
