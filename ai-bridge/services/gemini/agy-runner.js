@@ -129,28 +129,42 @@ export function runAgyTurn(options = {}) {
 
     const timeoutMs = options.turnTimeoutMs != null
       ? Number(options.turnTimeoutMs)
-      : 15 * 60 * 1000; // 15-minute default watchdog
+      : 15 * 60 * 1000; // 15-minute default IDLE window
 
+    // Idle watchdog, not a total turn cap: re-armed on every stdout line and
+    // stderr chunk. A hard cap kills legitimately long turns (builds, emulator
+    // sessions) while the CLI is still streaming; the watchdog exists to reap
+    // HUNG turns (auth prompt, stuck pipe) — those stop producing output.
     let timeoutTimer = null;
-    if (timeoutMs > 0) {
+    const disarmWatchdog = () => {
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = null;
+      }
+    };
+    const armWatchdog = () => {
+      if (settled || !(timeoutMs > 0)) return;
+      disarmWatchdog();
       timeoutTimer = setTimeout(() => {
         if (settled) return;
-        console.error(`[AGY] Watchdog timeout after ${Math.round(timeoutMs / 1000)}s — terminating process group ${child.pid}`);
+        console.error(`[AGY] Watchdog: no output for ${Math.round(timeoutMs / 1000)}s — terminating process group ${child.pid}`);
         settled = true;
         killProcessGroup(child);
         rl.close();
         removeProcessListeners();
         reject(new Error(
-          `Antigravity CLI (agy) turn timed out after ${Math.round(timeoutMs / 60000)} minutes.`
-          + ' If running a long background task (like starting an emulator), run it in background with output redirected (e.g. `nohup emulator @nexus > /dev/null 2>&1 &`).'
+          `Antigravity CLI (agy) turn timed out: no output for ${Math.round(timeoutMs / 60000)} minutes.`
+          + ' If the agent is mid-way through a long silent task (like starting an emulator), run it in background with output redirected (e.g. `nohup emulator @nexus > /dev/null 2>&1 &`).'
         ));
       }, timeoutMs);
-    }
+    };
+    armWatchdog();
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
 
     rl.on('line', (line) => {
+      armWatchdog(); // any output line proves the turn is alive
       const trimmed = String(line || '').trim();
       if (!trimmed) return;
       if (!trimmed.startsWith('{')) {
@@ -193,6 +207,7 @@ export function runAgyTurn(options = {}) {
     });
 
     child.stderr.on('data', (buf) => {
+      armWatchdog(); // stderr chatter is liveness too (progress, deprecation notes)
       const s = buf.toString('utf8');
       stderrBuf += s;
       onStderr(s);
@@ -200,7 +215,7 @@ export function runAgyTurn(options = {}) {
 
     child.on('error', (err) => {
       if (settled) return;
-      if (timeoutTimer) clearTimeout(timeoutTimer);
+      disarmWatchdog();
       settled = true;
       killProcessGroup(child);
       rl.close();
@@ -213,7 +228,7 @@ export function runAgyTurn(options = {}) {
         // Settled via timeout/error above — listeners already removed there.
         return;
       }
-      if (timeoutTimer) clearTimeout(timeoutTimer);
+      disarmWatchdog();
       settled = true;
       rl.close();
       removeProcessListeners();

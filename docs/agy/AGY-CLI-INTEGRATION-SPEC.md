@@ -21,6 +21,10 @@ UI provider=gemini
   → GeminiMessageHandler → webview
 ```
 
+### Turn watchdog
+
+15-min **idle** watchdog (re-armed on every stdout line / stderr chunk), not a total turn cap: legitimately long turns (builds, emulator sessions) keep streaming and survive; only turns that stop producing output entirely (auth prompt, stuck pipe) are reaped. `turnTimeoutMs: 0` disables it. One silent long-running tool call can still trip it — the timeout text tells the user to background such tasks (`nohup … &`).
+
 ## Multi-turn
 
 `conversation_id` from agy `init` / `result` is stored as plugin `sessionId` and passed back as `--conversation` on later turns.

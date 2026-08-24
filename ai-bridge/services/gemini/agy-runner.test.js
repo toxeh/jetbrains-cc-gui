@@ -281,3 +281,54 @@ setInterval(() => {}, 60_000); // hang forever — watchdog must reap us
   }
 });
 
+test('runAgyTurn idle watchdog stays armed by streaming output', async () => {
+  // Emits a line every 80ms for 600ms total — 2.4x the 250ms idle window —
+  // then finishes. A hard TOTAL cap would have killed this turn at 250ms;
+  // only idle semantics (re-arm on each line) let active long turns live.
+  const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
+let i = 0;
+const iv = setInterval(() => {
+  console.log(JSON.stringify({ event: 'step_update', seq: i++ }));
+}, 80);
+setTimeout(() => {
+  clearInterval(iv);
+  console.log(JSON.stringify({ event: 'result', result: { conversation_id: 'c', status: 'SUCCESS', response: 'ok' } }));
+  process.exit(0);
+}, 600);
+`);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const turn = await runAgyTurn({ message: 'x', turnTimeoutMs: 250 });
+    assert.equal(turn.status, 'SUCCESS');
+    assert.equal(turn.response, 'ok');
+    assert.equal(turn.exitCode, 0);
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runAgyTurn watchdog reaps a turn that goes silent after output', async () => {
+  // One line, then silence: guards the IDLE semantics against a naive
+  // "first output disables the watchdog" misimplementation — the timer
+  // restarts on the line and still fires after the quiet window.
+  const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
+console.log(JSON.stringify({ event: 'step_update', n: 1 }));
+setInterval(() => {}, 60_000);
+`);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    await assert.rejects(
+      () => runAgyTurn({ message: 'x', turnTimeoutMs: 250 }),
+      /no output for/,
+    );
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
