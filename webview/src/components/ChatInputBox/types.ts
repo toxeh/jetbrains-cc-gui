@@ -680,6 +680,28 @@ export function toGeminiFamilyId(modelId: string): string {
   return baseId || modelId;
 }
 
+/**
+ * True for ids in the LIVE claude catalog. Gemini/agy restore paths use this
+ * as a cross-provider guard: the JCEF boot snapshot and tab-state pushes are
+ * shared across chat tabs, so a claude-era tab's model (e.g. claude-sonnet-5,
+ * the claude default) can surface as a gemini tab's saved model — accepting
+ * it poisons the slot and the catalog re-push relays set_model('claude-…')
+ * to agy, which rejects it at spawn. Retired claude ids that agy still ships
+ * (claude-sonnet-4-6, claude-opus-4-6) are aliased out of CLAUDE_MODELS and
+ * are NOT live — they pass, as do unknown dynamic agy ids (same
+ * accept-unknown policy as the codex restore path).
+ */
+export function isLiveClaudeModelId(modelId: string | undefined | null): boolean {
+  if (!modelId) return false;
+  // A claude tab with the 1M-context toggle on carries the [1m] suffix on its
+  // model id (claude-sonnet-5[1m] — the exact value seen in IDE logs). Strip it
+  // before matching, mirroring normalizeClaudeModelId, or the suffix makes a
+  // live claude id miss the catalog and slip the guard.
+  const baseId = strip1MContextSuffix(modelId);
+  if (GEMINI_MODELS.some((m) => m.id === baseId)) return false;
+  return CLAUDE_MODELS.some((m) => m.id === baseId);
+}
+
 export const AVAILABLE_MODELS = CLAUDE_MODELS;
 
 /**

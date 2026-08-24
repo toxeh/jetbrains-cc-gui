@@ -580,3 +580,26 @@ test('listAgyModels spawns the resolved binary and parses its output', async () 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('listAgyModels closes child stdin — agy waits for EOF (regression: 15s timeout, empty catalog)', async () => {
+  // agy ≥1.1.x prints nothing while its stdin pipe stays open. `cat` blocks
+  // the same way, so the fake binary reproduces the hang without the real
+  // CLI: without the stdin.end() fix this times out at 15s and returns [].
+  const dir = fs.mkdtempSync(join(tmpdir(), 'agy-stdin-'));
+  const bin = join(dir, 'agy-fake');
+  fs.writeFileSync(bin, '#!/bin/sh\n'
+    + 'cat > /dev/null\n'
+    + 'echo "claude-sonnet-4-6  Claude Sonnet 4.6 (Thinking)"\n');
+  fs.chmodSync(bin, 0o755);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const models = await listAgyModels();
+    assert.equal(models.length, 1, 'must resolve after stdin EOF, got: ' + JSON.stringify(models));
+    assert.equal(models[0].id, 'claude-sonnet-4-6');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

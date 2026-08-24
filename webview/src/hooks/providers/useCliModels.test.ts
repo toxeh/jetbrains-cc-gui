@@ -44,6 +44,19 @@ describe('useCliModels', () => {
     expect(sendBridgeEventMock).not.toHaveBeenCalled();
   });
 
+  it('gemini empty catalog answer stops the auto-fetch loop', () => {
+    // Regression: gemini had no static fallback, so an answered-but-empty
+    // payload left the cache empty and the auto-fetch effect refired
+    // get_cli_models forever (endless dropdown spinner + a node/agy spawn
+    // per cycle). The seed keeps cliModels non-empty after the answer.
+    const { result } = renderHook(() => useCliModels('gemini'));
+    expect(sendBridgeEventMock).toHaveBeenCalledTimes(1);
+    emitCliModels({ success: true, provider: 'gemini', models: [] });
+    expect(sendBridgeEventMock).toHaveBeenCalledTimes(1);
+    expect(result.current.cliModels.length).toBeGreaterThan(0);
+    expect(result.current.cliCatalogHasEntries).toBe(false);
+  });
+
   it('falls back to the static KIMI_MODELS list before the catalog arrives', () => {
     const { result } = renderHook(() => useCliModels('kimi'));
     expect(result.current.cliModels).toEqual(KIMI_MODELS);

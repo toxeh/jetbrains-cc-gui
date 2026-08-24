@@ -20,6 +20,7 @@ import {
   composeGeminiAgyModelId,
   splitGeminiAgyModelId,
   toGeminiFamilyId,
+  isLiveClaudeModelId,
   REASONING_EFFORTS,
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
@@ -245,6 +246,14 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         if (typeof modelId !== 'string' || !modelId.trim()) return;
         const split = splitGeminiAgyModelId(modelId);
         const baseId = toGeminiFamilyId(modelId) || split.baseId || modelId;
+        // Cross-provider guard: __INITIAL_TAB_MODEL__ and the localStorage
+        // snapshot are shared across chat tabs, so a claude-era tab's model
+        // can arrive here as a gemini tab's saved model. A live claude id is
+        // not an agy model — the boot sync would relay it as set_model and
+        // agy rejects it at spawn. Same validate-and-reject as
+        // applyClaudeModel above; retired claude ids agy still ships
+        // (claude-sonnet-4-6) pass and unknown dynamic ids stay accepted.
+        if (isLiveClaudeModelId(baseId)) return;
         const effort = split.effort;
         if (baseId) {
           restoredGeminiModel = baseId;

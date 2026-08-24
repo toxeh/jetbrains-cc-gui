@@ -12,6 +12,7 @@ import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../../co
 import {
   has1MContextSuffix,
   isValidPermissionMode,
+  isLiveClaudeModelId,
   normalizeClaudeModelId,
   splitGeminiAgyModelId,
   strip1MContextSuffix,
@@ -111,6 +112,12 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
   const applyGeminiModelFromBackend = (modelId: string) => {
     // Backend stores full agy slugs (...-high / ...-thinking). UI selection is family base only.
     const family = toGeminiFamilyId(modelId) || modelId;
+    // Cross-provider guard: applyBackendTabState / onModelConfirmed can carry
+    // a claude-era tab model with provider 'gemini' (JCEF tab state is shared
+    // across chat tabs). A live claude id is not an agy model — accepting it
+    // poisons the slot and the catalog re-push relays it to agy, which
+    // rejects it at spawn. Same guard as the persistence restore path.
+    if (isLiveClaudeModelId(family)) return;
     setSelectedGeminiModel(family);
     // Mirror the slug's effort tier into the shared slot — the separate
     // reasoningEffort field excludes gemini-only tiers (...-thinking), so

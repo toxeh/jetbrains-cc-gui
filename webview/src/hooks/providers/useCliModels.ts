@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
-import { CODEX_MODELS, DSH_MODELS, GROK_MODELS, KIMI_MODELS, OMP_MODELS, OMP_ROLE_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
+import { CODEX_MODELS, DSH_MODELS, GEMINI_MODELS, GROK_MODELS, KIMI_MODELS, OMP_MODELS, OMP_ROLE_MODELS, OPENCODE_MODELS, PI_MODELS } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 import { subscribeActiveCodexProvider } from '../../utils/runtimeProviderCapabilities';
 
@@ -56,6 +56,11 @@ function fallbackModels(providerId: string): ModelInfo[] {
   if (providerId === 'omp') return OMP_MODELS;
   if (providerId === 'dsh') return DSH_MODELS;
   if (providerId === 'codex') return CODEX_MODELS;
+  // Gemini's real catalog arrives via get_gemini_models (families), not this
+  // hook — the seed only keeps the auto-fetch effect from looping forever on
+  // answered-but-empty payloads ([] fallback → cache stays empty → effect
+  // refires get_cli_models); catalogHasEntries=false still marks it not-real.
+  if (providerId === 'gemini') return GEMINI_MODELS;
   return [];
 }
 

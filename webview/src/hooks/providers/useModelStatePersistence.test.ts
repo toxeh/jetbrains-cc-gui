@@ -605,3 +605,89 @@ describe('useModelStatePersistence — gemini agy slug persistence', () => {
   });
 });
 
+describe('useModelStatePersistence — gemini slot cross-provider guard', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sendBridgeEventMock.mockClear();
+    (window as unknown as { sendToJava?: unknown }).sendToJava = () => {};
+    window.__CCGUI_PAGE_CONTEXT_READY__ = true;
+    window.__CCGUI_PAGE_LOAD_KIND__ = 'initial_load';
+    window.__CCGUI_RECOVERY_RELOAD__ = false;
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (window as unknown as { sendToJava?: unknown }).sendToJava;
+    delete window.__CCGUI_PAGE_CONTEXT_READY__;
+    delete window.__CCGUI_PAGE_LOAD_KIND__;
+    delete window.__CCGUI_RECOVERY_RELOAD__;
+    delete window.__CCGUI_RECOVERY_STATE_APPLIED__;
+    delete (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__;
+    delete (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__;
+  });
+
+  it('rejects a claude-catalog id injected as the gemini tab model (__INITIAL_TAB_MODEL__)', () => {
+    // Regression: JCEF tab state is shared across chat tabs, so a claude-era
+    // tab's model can boot as the gemini tab's saved model. claude-sonnet-5
+    // (the claude default) is not an agy model — the boot sync would relay it
+    // as set_model('claude-sonnet-5') and agy rejects it at spawn
+    // (--model "claude-sonnet-5" --effort "").
+    const setSelectedGeminiModel = vi.fn();
+    (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__ = 'gemini';
+    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'claude-sonnet-5';
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedGeminiModel })));
+    vi.advanceTimersByTime(200);
+
+    expect(setSelectedGeminiModel).not.toHaveBeenCalledWith('claude-sonnet-5');
+    // The slot keeps the default family, and the boot set_model stays agy-valid.
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'gemini-3.5-flash-high']]);
+  });
+
+  it('rejects a claude-catalog id saved in the localStorage gemini slot', () => {
+    const setSelectedGeminiModel = vi.fn();
+    localStorage.setItem('model-selection-state', JSON.stringify({
+      provider: 'gemini',
+      geminiModel: 'claude-sonnet-5',
+    }));
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedGeminiModel })));
+    vi.advanceTimersByTime(200);
+
+    expect(setSelectedGeminiModel).not.toHaveBeenCalledWith('claude-sonnet-5');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'gemini-3.5-flash-high']]);
+  });
+
+  it('rejects a claude id carrying the [1m] context suffix (claude-sonnet-5[1m])', () => {
+    // Regression from IDE logs: the poisoning tab had the 1M-context toggle on,
+    // so the shared tab state carried claude-sonnet-5[1m]. The [1m] suffix made
+    // the id miss the live-claude catalog and slip the guard, relaying
+    // set_model('claude-sonnet-5[1m]') to agy.
+    const setSelectedGeminiModel = vi.fn();
+    (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__ = 'gemini';
+    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'claude-sonnet-5[1m]';
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedGeminiModel })));
+    vi.advanceTimersByTime(200);
+
+    expect(setSelectedGeminiModel).not.toHaveBeenCalledWith('claude-sonnet-5[1m]');
+    expect(setSelectedGeminiModel).not.toHaveBeenCalledWith('claude-sonnet-5');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'gemini-3.5-flash-high']]);
+  });
+
+  it('still applies retired claude ids that agy ships live (claude-sonnet-4-6)', () => {
+    // claude-sonnet-4-6 is retired in the claude catalog (aliased to
+    // claude-sonnet-5 there) but LIVE in agy — the guard must not reject it.
+    const setSelectedGeminiModel = vi.fn();
+    (window as unknown as { __INITIAL_TAB_PROVIDER__?: unknown }).__INITIAL_TAB_PROVIDER__ = 'gemini';
+    (window as unknown as { __INITIAL_TAB_MODEL__?: unknown }).__INITIAL_TAB_MODEL__ = 'claude-sonnet-4-6';
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedGeminiModel })));
+    vi.advanceTimersByTime(200);
+
+    expect(setSelectedGeminiModel).toHaveBeenCalledWith('claude-sonnet-4-6');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-4-6-high']]);
+  });
+});
+

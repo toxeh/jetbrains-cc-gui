@@ -7,11 +7,8 @@ import { existsSync, accessSync, constants as fsConstants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, delimiter, dirname } from 'node:path';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import { resolveCliSpawn } from '../../utils/cli-path.js';
-
-const execFileAsync = promisify(execFile);
 
 const DEFAULT_MAX_TOKENS = 200_000;
 
@@ -540,11 +537,20 @@ export async function listAgyModels() {
       env: buildAgyEnv(),
       maxBuffer: 4 * 1024 * 1024,
     });
-    const { stdout } = await execFileAsync(
-      invocation.file,
-      invocation.args,
-      invocation.options,
-    );
+    // agy (≥1.1.x) waits for stdin EOF on non-interactive subcommands before
+    // printing; execFile's default stdin pipe never closes (a custom stdio
+    // option is silently ignored), so the spawn would sit until the 15s
+    // timeout and return []. End the pipe explicitly — the same stdin-closed
+    // discipline as agy-runner's spawn stdio:['ignore','pipe','pipe'].
+    const { stdout } = await new Promise((resolve, reject) => {
+      const child = execFile(
+        invocation.file,
+        invocation.args,
+        invocation.options,
+        (err, out) => (err ? reject(err) : resolve({ stdout: out })),
+      );
+      child.stdin?.end?.();
+    });
     return parseAgyModelsOutput(String(stdout || ''));
   } catch {
     return [];

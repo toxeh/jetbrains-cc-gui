@@ -261,17 +261,26 @@ export function useGeminiProvider() {
   const resolveDefaultEffortForFamily = useCallback(
     (familyId: string): ReasoningEffort => {
       const fam = geminiFamilies.find((f) => f.id === familyId);
-      if (fam?.defaultEffort) {
+      if (fam && fam.defaultEffort !== undefined && fam.defaultEffort !== null) {
+        // '' is a meaningful tier here: bare single-slug families (e.g.
+        // claude-sonnet-4-6) have the bare id as their default — not a
+        // missing value. Truthiness would wrongly fall through to 'high'
+        // and compose claude-sonnet-4-6-high, which agy rejects.
         return fam.defaultEffort as ReasoningEffort;
       }
       // Bare single-slug families (e.g. claude-sonnet-4-6) have empty effort
       const only = fam?.efforts?.length === 1 ? fam.efforts[0].id : '';
       if (only) return only as ReasoningEffort;
-      // Unknown/unloaded family: 'high' — every gemini family ships a -high
-      // tier, while some (e.g. gemini-3.1-pro) have no -medium at all and
-      // reject the invented slug outright. Mirrors resolveAgySpawnModel's
-      // fallback in ai-bridge/services/gemini/agy-utils.js.
-      return 'high';
+      // Unknown/unloaded family — mirror resolveAgySpawnModel's spawn-side
+      // fallbacks (ai-bridge/services/gemini/agy-utils.js): gemini bare ids
+      // need a tier (every gemini family ships -high; some lack -medium),
+      // gpt-oss ships -medium, and claude-style bare ids must pass through
+      // UNSUFFIXED — agy rejects invented tiers for single-slug models
+      // (claude-sonnet-4-6-high → "not recognized as a known model").
+      if (/^gemini-/i.test(familyId)) return 'high';
+      if (/^gpt-oss-/i.test(familyId)) return 'medium';
+      const bare: string = '';
+      return bare as ReasoningEffort;
     },
     [geminiFamilies],
   );
