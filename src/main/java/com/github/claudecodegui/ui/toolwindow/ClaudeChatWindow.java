@@ -59,6 +59,7 @@ import java.awt.event.HierarchyEvent;
 import java.awt.event.HierarchyListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -152,8 +153,13 @@ public class ClaudeChatWindow {
     private Window observedSurfaceWindow;
     private volatile boolean hasEverBeenFrontendReady = false;
     private final PendingCodeSnippetBuffer pendingCodeSnippetBuffer = new PendingCodeSnippetBuffer();
+    private final PendingFileReferencesBuffer pendingFileReferencesBuffer =
+            new PendingFileReferencesBuffer();
     private volatile boolean slashCommandsFetched = false;
     private final AtomicBoolean restoredHistoryLoadStarted = new AtomicBoolean(false);
+
+    // Shared serializer for structured bridges (Gson instances are thread-safe).
+    private static final Gson GSON = new Gson();
 
     // Daemon event listener for AI title forwarding. Held so it can be removed on dispose.
     private DaemonBridge.DaemonEventListener titleEventListener;
@@ -1582,10 +1588,31 @@ public class ClaudeChatWindow {
         }
     }
 
+    /**
+     * Add project-tree paths through the dedicated structured file-reference
+     * bridge, buffering the batch until the WebView is ready when necessary.
+     */
+    public void addFileReferencesFromExternal(List<String> filePaths) {
+        if (filePaths == null || filePaths.isEmpty()) {
+            return;
+        }
+        List<String> toEmit = pendingFileReferencesBuffer.offer(filePaths, frontendReady);
+        if (toEmit != null) {
+            addFileReferences(toEmit);
+        }
+    }
+
     private void flushPendingCodeSnippet() {
         String snippet = pendingCodeSnippetBuffer.takePending();
         if (snippet != null) {
             addCodeSnippet(snippet);
+        }
+    }
+
+    private void flushPendingFileReferences() {
+        List<String> filePaths = pendingFileReferencesBuffer.takePending();
+        if (filePaths != null) {
+            addFileReferences(filePaths);
         }
     }
 
@@ -1599,6 +1626,7 @@ public class ClaudeChatWindow {
         }
         hasEverBeenFrontendReady = true;
         flushPendingCodeSnippet();
+        flushPendingFileReferences();
         ApplicationManager.getApplication().invokeLater(() -> {
             completeFrontendReadyUiUpdate(
                     disposed,
@@ -2729,6 +2757,25 @@ public class ClaudeChatWindow {
             }
             callJavaScript("addCodeSnippet", JsUtils.escapeJs(selectionInfo));
         }
+    }
+
+    private void addFileReferences(List<String> filePaths) {
+        if (filePaths == null || filePaths.isEmpty()) {
+            return;
+        }
+
+        // Gson emits a JavaScript array literal, preserving each complete path
+        // (including spaces) as one typed callback argument.
+        String pathsJson = GSON.toJson(filePaths);
+        // This method can run on a bridge callback thread (frontend-ready
+        // flush), so touch the Swing component on the EDT.
+        ApplicationManager.getApplication().invokeLater(() -> {
+            JBCefBrowser targetBrowser = this.browser;
+            if (!this.disposed && targetBrowser != null) {
+                targetBrowser.getComponent().requestFocus();
+            }
+        });
+        executeJavaScriptCode("window.insertFileReferencesAtCursor?.(" + pathsJson + ");");
     }
 
     /**

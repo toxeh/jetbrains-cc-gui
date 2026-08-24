@@ -209,7 +209,9 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
     }, [renderFileTags, renderQuoteTags]);
 
     // Tooltip hook
-    const { tooltip, handleMouseOver, handleMouseLeave } = useTooltip();
+    const { tooltip, handleMouseOver, handleMouseLeave } = useTooltip({
+      containerRef: editableRef,
+    });
 
     // Context menu hook
     const ctxMenu = useContextMenu();

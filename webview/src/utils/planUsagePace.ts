@@ -36,6 +36,8 @@ export interface PlanUsageSnapshot {
    */
   families?: Record<string, PlanUsageSnapshot>;
   defaultFamily?: string | null;
+  /** Plan tier, e.g. z.ai {@code level} ("max"). */
+  level?: string;
 }
 
 /** Which Antigravity quota family a model slug bills against. */
@@ -339,6 +341,7 @@ export function parseCapacityPayload(data: unknown): PlanUsageSnapshot {
           : null,
     provider: typeof o.provider === 'string' ? o.provider : undefined,
     source: typeof o.source === 'string' ? o.source : 'gateway',
+    level: typeof o.level === 'string' ? o.level : undefined,
   };
 }
 
