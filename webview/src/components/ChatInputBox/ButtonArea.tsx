@@ -191,15 +191,13 @@ export const ButtonArea = ({
     if (!exists) {
       // Gemini takes the positional first family; honoring the family's
       // defaultModelId stays deferred (product refinement). CLI providers
-      // prefer their reported default — but only when the catalog actually
-      // offers it, else the selection is missing from the dropdown and this
-      // exists-check never converges.
+      // prefer their reported default even when the fetched catalog does not
+      // list it — catalogs are dynamic (config.toml entries, backend-reported
+      // models), the CLI still accepts its own default, and persistence
+      // stores the raw id (makeCliModelApplier accepts any non-empty id).
+      // The first catalog entry is only the last resort.
       const fallback = availableModels[0].id;
-      const cliDefault = cliDefaultModel
-        && availableModels.some((model: ModelInfo) => model.id === cliDefaultModel)
-        ? cliDefaultModel
-        : fallback;
-      onModelSelect(isGemini ? fallback : cliDefault);
+      onModelSelect(isGemini ? fallback : (cliDefaultModel ?? fallback));
     }
   }, [
     availableModels,
