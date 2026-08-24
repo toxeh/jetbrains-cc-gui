@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from './style.module.less';
 
@@ -19,6 +19,7 @@ const GrokProviderSection = () => {
   const [jsonConfig, setJsonConfig] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [saving, setSaving] = useState(false);
+  const savePendingRef = useRef(false);
 
   useEffect(() => {
     const handler = (jsonStr: string) => {
@@ -27,16 +28,39 @@ const GrokProviderSection = () => {
         // XAI_API_KEY is the official xAI env; GROK_API_KEY is a compatible alias.
         // Runtime accepts either (and usually writes both when injecting a key).
         const apiKey = data?.apiKey || '';
-        const configObj = {
-          env: data?.env || {
+        // The backend sends `"env": {}` (never null) when nothing is stored —
+        // `{}` is truthy, so an emptiness check (not `||`) decides whether the
+        // stored env replaces the flat-field template below.
+        const hasEnv = !!data?.env && Object.keys(data.env).length > 0;
+        let env: Record<string, string>;
+        if (hasEnv) {
+          env = { ...data.env };
+          // Legacy configs can carry a flat apiKey with no alias in env —
+          // surface the stored key so a save round-trips it instead of
+          // silently erasing it (`apiKey: ''` deletes the stored key).
+          if (!env.XAI_API_KEY && !env.GROK_API_KEY) {
+            env.XAI_API_KEY = apiKey;
+            env.GROK_API_KEY = apiKey;
+          }
+        } else {
+          env = {
             XAI_API_KEY: apiKey,
             GROK_API_KEY: apiKey,
             GROK_MODELS_BASE_URL: data?.apiBaseUrl || '',
             GROK_CLI_CHAT_PROXY_BASE_URL: data?.oauthBaseUrl || '',
-          },
+          };
+        }
+        const configObj = {
+          env,
           authMethod: data?.authMethod || 'oauth'
         };
         setJsonConfig(JSON.stringify(configObj, null, 2));
+        // After a save the backend pushes the persisted config back — release
+        // the saving state on that ack instead of a blind timer.
+        if (savePendingRef.current) {
+          savePendingRef.current = false;
+          setSaving(false);
+        }
       } catch {
         // ignore parse errors
       }
@@ -68,8 +92,15 @@ const GrokProviderSection = () => {
       };
 
       setSaving(true);
+      savePendingRef.current = true;
       window.sendToJava?.(`set_grok_auth_config:${JSON.stringify(next)}`);
-      setTimeout(() => setSaving(false), 400);
+      // Safety net only — the real release is the config push-back ack above.
+      setTimeout(() => {
+        if (savePendingRef.current) {
+          savePendingRef.current = false;
+          setSaving(false);
+        }
+      }, 5000);
       setJsonError('');
     } catch {
       setJsonError(t('settings.grok.invalidJson'));
@@ -109,6 +140,9 @@ const GrokProviderSection = () => {
             >
               {saving ? t('settings.grok.saving') : t('settings.grok.save')}
             </button>
+            {/* Saving restarts the Grok runtime (new credentials only apply
+                to a fresh daemon) — an in-flight Grok conversation dies. */}
+            <p className={styles.editorHint}>{t('settings.grok.saveHint')}</p>
           </div>
         </div>
       </div>

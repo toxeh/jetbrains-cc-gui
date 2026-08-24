@@ -358,7 +358,8 @@
       "editorHint": "Edita tu configuración a continuación.",
       "save": "Guardar configuración",
       "saving": "Guardando...",
-      "invalidJson": "Formato JSON no válido"
+      "invalidJson": "Formato JSON no válido",
+      "saveHint": "Guardar reinicia el runtime de Grok; una conversación de Grok en curso se interrumpe."
     },
     "pluginModels": {
       "title": "Modelos personalizados",

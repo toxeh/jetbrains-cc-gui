@@ -461,8 +461,6 @@ public class SettingsHandler extends BaseMessageHandler {
             config.addProperty("apiBaseUrl", context.getSettingsService().getGrokApiBaseUrl());
             config.addProperty("oauthBaseUrl", context.getSettingsService().getGrokOauthBaseUrl());
             config.add("env", context.getSettingsService().getGrokEnv());
-            // hasApiKey logic is somewhat handled by JS but let's provide it if needed
-            config.addProperty("hasApiKey", !context.getSettingsService().getGrokApiKey().isEmpty());
             callJavaScript("window.updateGrokAuthConfig", escapeJs(config.toString()));
         } catch (Exception e) {
             LOG.error("[SettingsHandler] Error getting Grok config", e);
@@ -498,6 +496,11 @@ public class SettingsHandler extends BaseMessageHandler {
             LOG.info("[SettingsHandler] Saved Grok Auth Config");
         } catch (Exception e) {
             LOG.error("[SettingsHandler] Error setting Grok config", e);
+        } finally {
+            // Push the persisted config back on success AND failure so the
+            // editor always reflects what is actually stored (a failed write
+            // visibly reverts, and the webview releases its saving state).
+            handleGetGrokAuthConfig();
         }
     }
 

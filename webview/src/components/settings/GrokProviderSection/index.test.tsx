@@ -9,6 +9,7 @@ const translations: Record<string, string> = {
   'settings.grok.save': 'Save Configuration',
   'settings.grok.saving': 'Saving...',
   'settings.grok.invalidJson': 'Invalid JSON format',
+  'settings.grok.saveHint': 'Saving restarts the Grok runtime.',
 };
 
 vi.mock('react-i18next', () => ({
@@ -74,6 +75,68 @@ describe('GrokProviderSection', () => {
     const parsed = JSON.parse(editor().value);
     expect(parsed.env).toEqual(env);
     expect(parsed.env.GROK_API_KEY).toBeUndefined();
+  });
+
+  it('surfaces a flat apiKey when the backend sends an empty env (real payload shape)', async () => {
+    // Java always includes "env": {} when nothing is stored — `{}` is truthy,
+    // so the old `data?.env || {...}` fallback never fired and the key was
+    // invisible in the editor.
+    render(<GrokProviderSection />);
+    await act(async () => {
+      window.updateGrokAuthConfig?.(JSON.stringify({
+        authMethod: 'api_key',
+        apiKey: 'sk-legacy-key',
+        env: {},
+      }));
+    });
+
+    const parsed = JSON.parse(editor().value);
+    expect(parsed.env.XAI_API_KEY).toBe('sk-legacy-key');
+    expect(parsed.env.GROK_API_KEY).toBe('sk-legacy-key');
+  });
+
+  it('fills missing aliases into a non-empty env instead of erasing a stored key on save', async () => {
+    render(<GrokProviderSection />);
+    await act(async () => {
+      window.updateGrokAuthConfig?.(JSON.stringify({
+        authMethod: 'api_key',
+        apiKey: 'sk-legacy-key',
+        env: { GROK_MODELS_BASE_URL: 'https://models.example.com' },
+      }));
+    });
+
+    // Save the hydrated editor as-is: the stored key must survive the
+    // round-trip (an empty apiKey payload deletes it in the backend).
+    fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+    const call = sendToJava.mock.calls
+      .map((c) => String(c[0]))
+      .find((c) => c.startsWith('set_grok_auth_config:'));
+    expect(call).toBeTruthy();
+    const sent = JSON.parse(call!.slice('set_grok_auth_config:'.length));
+    expect(sent.apiKey).toBe('sk-legacy-key');
+    expect(sent.env.XAI_API_KEY).toBe('sk-legacy-key');
+    expect(sent.env.GROK_MODELS_BASE_URL).toBe('https://models.example.com');
+  });
+
+  it('releases the saving state when the backend pushes the config back', async () => {
+    render(<GrokProviderSection />);
+    typeJson(JSON.stringify({ env: { XAI_API_KEY: 'sk-1' }, authMethod: 'api_key' }));
+    // While saving, the label switches to "Saving..." — match either.
+    const saveBtn = () => screen.getByRole('button', { name: /Save Configuration|Saving\.\.\./ }) as HTMLButtonElement;
+
+    fireEvent.click(saveBtn());
+    expect(saveBtn().disabled).toBe(true);
+
+    // handleSetGrokAuthConfig pushes the persisted config back on both
+    // success and failure — that ack ends the saving state.
+    await act(async () => {
+      window.updateGrokAuthConfig?.(JSON.stringify({
+        authMethod: 'api_key',
+        apiKey: 'sk-1',
+        env: { XAI_API_KEY: 'sk-1' },
+      }));
+    });
+    expect(saveBtn().disabled).toBe(false);
   });
 
   it('maps the edited JSON onto the backend payload on save', () => {
