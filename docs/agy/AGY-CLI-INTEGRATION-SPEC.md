@@ -41,7 +41,7 @@ agy uses process cwd as `workspaceDirs`. Never spawn with:
 - embedded or standalone `ai-bridge`
 - `~/.gemini` / antigravity-cli home
 
-Java `PathUtils.guardWorkingDirectory` + Node `selectWorkingDirectory` / `isUnsafeWorkingDirectory` enforce this; `runAgyTurn` always resolves cwd through `selectWorkingDirectory`. An unsafe cwd is passed as `null` from Java onward (the bridge falls back to its own default) — never silently clamped to a different directory.
+Java `PathUtils.selectSafeWorkingDirectory` + Node `selectWorkingDirectory` / `isUnsafeWorkingDirectory` enforce this; `runAgyTurn` always resolves cwd through `selectWorkingDirectory`. An unsafe cwd is passed as `null` from Java onward (the bridge falls back to its own default) — never silently clamped to a different directory.
 
 ## Permissions
 
