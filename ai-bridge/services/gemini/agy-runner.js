@@ -9,8 +9,10 @@ import {
   buildAgyArgs,
   buildAgyEnv,
   resolveAgySpawnModel,
+  getCachedAgyModelFamilies,
 } from './agy-utils.js';
 import { selectWorkingDirectory, isUnsafeWorkingDirectory } from '../../utils/path-utils.js';
+import { resolveCliSpawn } from '../../utils/cli-path.js';
 
 /**
  * Run one agy headless turn.
@@ -38,16 +40,27 @@ export function runAgyTurn(options = {}) {
 
   const bin = resolveAgyBinary();
   if (!bin) {
+    // Setups that followed the old spec silently lose their GEMINI_CLI_PATH
+    // override — point them at the cause instead of a bare "not found".
+    const ignoredHint = (process.env.GEMINI_CLI_PATH || '').trim()
+      ? ' GEMINI_CLI_PATH is deliberately ignored (it names Google\'s gemini CLI); use AGY_PATH or AGY_CLI_PATH.'
+      : '';
     return Promise.reject(new Error(
       'Antigravity CLI (agy) not found. Install from https://antigravity.google/docs/cli/install '
-      + 'or set AGY_PATH / GEMINI_CLI_PATH to the agy binary.'
+      + `or set AGY_PATH (or AGY_CLI_PATH) to the agy binary.${ignoredHint}`
     ));
   }
 
-  // Resolve family base (gemini-3.6-flash) → full catalog slug (…-medium).
+  // Resolve family base (gemini-3.6-flash) → full catalog slug. The families
+  // catalog picks a tier the family actually offers (the default varies by
+  // family); the send path warms it via warmAgyModelCatalogForModel — the
+  // one-shot channel-manager process never sees a listModels process's cache,
+  // while the long-lived daemon keeps the module cache until restart (no TTL
+  // — staleness is tracked in deferred-work). Without a warm catalog we guess
+  // a -high suffix.
   // Never pass a separate --effort: bare slugs like claude-sonnet-4-6 reject it,
   // and effort-required families are selected via the full --model slug.
-  const resolved = resolveAgySpawnModel(model, reasoningEffort);
+  const resolved = resolveAgySpawnModel(model, reasoningEffort, getCachedAgyModelFamilies());
   const modelStr = resolved.model;
   // Guard against plugin/ai-bridge/~/.gemini paths becoming workspaceDirs.
   const workCwd = selectWorkingDirectory(cwd);
@@ -83,20 +96,36 @@ export function runAgyTurn(options = {}) {
     let resultError = null;
     let stderrBuf = '';
 
-    const child = spawn(bin, args, {
+    // A discovered Windows `agy.cmd` shim cannot be spawned directly (Node's
+    // CVE-2024-27980 patch throws EINVAL) — resolveCliSpawn routes .cmd/.bat
+    // through `cmd.exe /d /s /c`, the same wrapper the pi/opencode/dsh
+    // providers use; on posix it is a passthrough (same file/args/options).
+    const invocation = resolveCliSpawn(bin, args, {
       cwd: workCwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
       windowsHide: true,
     });
+    const child = spawn(invocation.file, invocation.args, invocation.options);
 
     const cleanupChild = () => {
       killProcessGroup(child);
     };
-    process.on('exit', cleanupChild);
-    process.on('SIGTERM', () => { cleanupChild(); process.exit(0); });
-    process.on('SIGINT', () => { cleanupChild(); process.exit(0); });
+    // Per-turn shutdown hooks. They MUST be removed when the turn settles —
+    // stacked handlers from earlier turns all run on the next signal, and
+    // each one's process.exit(0) preempts the daemon's graceful shutdown.
+    const onExit = () => cleanupChild();
+    const onSigterm = () => { cleanupChild(); process.exit(0); };
+    const onSigint = () => { cleanupChild(); process.exit(0); };
+    process.on('exit', onExit);
+    process.on('SIGTERM', onSigterm);
+    process.on('SIGINT', onSigint);
+    const removeProcessListeners = () => {
+      process.removeListener('exit', onExit);
+      process.removeListener('SIGTERM', onSigterm);
+      process.removeListener('SIGINT', onSigint);
+    };
 
     const timeoutMs = options.turnTimeoutMs != null
       ? Number(options.turnTimeoutMs)
@@ -110,6 +139,7 @@ export function runAgyTurn(options = {}) {
         settled = true;
         killProcessGroup(child);
         rl.close();
+        removeProcessListeners();
         reject(new Error(
           `Antigravity CLI (agy) turn timed out after ${Math.round(timeoutMs / 60000)} minutes.`
           + ' If running a long background task (like starting an emulator), run it in background with output redirected (e.g. `nohup emulator @nexus > /dev/null 2>&1 &`).'
@@ -173,15 +203,20 @@ export function runAgyTurn(options = {}) {
       if (timeoutTimer) clearTimeout(timeoutTimer);
       settled = true;
       killProcessGroup(child);
+      rl.close();
+      removeProcessListeners();
       reject(err);
     });
 
     child.on('close', (code) => {
-      if (settled) return;
+      if (settled) {
+        // Settled via timeout/error above — listeners already removed there.
+        return;
+      }
       if (timeoutTimer) clearTimeout(timeoutTimer);
       settled = true;
       rl.close();
-      process.removeListener('exit', cleanupChild);
+      removeProcessListeners();
 
       const exitCode = code == null ? 1 : code;
       const st = String(status || '').toUpperCase();

@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -267,18 +268,84 @@ public class GeminiHistoryReader {
         return clean.isEmpty() ? content.trim() : clean;
     }
 
+    /**
+     * Session ids are directory names directly under brainRoot — allow only
+     * the id alphabet agy produces. The old denylist (separators, "..", ".")
+     * let Windows-illegal chars ({@code : * ? |}) through, and
+     * {@code brainRoot.resolve} then throws unchecked InvalidPathException
+     * instead of degrading to "no such session".
+     */
+    private static final Pattern VALID_SESSION_ID = Pattern.compile("^[A-Za-z0-9._-]+$");
+
+    private static boolean isInvalidSessionId(String sessionId) {
+        if (sessionId == null || sessionId.trim().isEmpty()) {
+            return true;
+        }
+        String id = sessionId.trim();
+        // "." resolves to brainRoot itself (".." escapes it) — on delete that
+        // would wipe every session at once.
+        if (id.equals(".") || id.contains("..")) {
+            return true;
+        }
+        return !VALID_SESSION_ID.matcher(id).matches();
+    }
+
+    /**
+     * NOFOLLOW + containment for the transcript file itself: a symlink planted
+     * at the transcript slot must read as absent (same policy as the session
+     * dir one level up), and its resolved target must stay inside the brain
+     * root. A vanished path (TOCTOU) reads as absent, never as an error.
+     */
+    private static boolean isSafeTranscriptFile(Path transcriptPath, Path brainReal) {
+        if (!Files.isRegularFile(transcriptPath, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        try {
+            return transcriptPath.toRealPath().startsWith(brainReal);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     public List<JsonObject> getSessionMessages(String sessionId, String cwd) throws IOException {
-        Path sessionDir = brainRoot.resolve(sessionId);
-        if (!Files.isDirectory(sessionDir)) {
+        // Same traversal guard as deleteSession — read must not be the weaker
+        // sibling of delete.
+        if (isInvalidSessionId(sessionId)) {
+            LOG.warn("[GeminiHistoryReader] Rejected session id: " + sessionId);
+            return List.of();
+        }
+        // Trim once, resolve the trimmed id — validation checks the trimmed
+        // form (isInvalidSessionId), so the probe must use the same value
+        // (same idiom as GrokHistoryReader.resolveSessionDir).
+        String id = sessionId.trim();
+        Path sessionDir = brainRoot.resolve(id);
+        // NOFOLLOW: a symlink planted at the session-dir slot must read as
+        // non-directory (its target must not become readable history) —
+        // read must not be the weaker sibling of delete.
+        if (!Files.isDirectory(sessionDir, LinkOption.NOFOLLOW_LINKS)) {
             LOG.warn("[GeminiHistoryReader] Session dir not found for id=" + sessionId);
             return List.of();
         }
-        Path transcriptPath = sessionDir.resolve(".system_generated").resolve("logs").resolve("transcript.jsonl");
-        if (!Files.isRegularFile(transcriptPath)) {
-            transcriptPath = sessionDir.resolve(".system_generated").resolve("logs").resolve("transcript_full.jsonl");
-        }
-        if (!Files.isRegularFile(transcriptPath)) {
+        // Containment, same as deleteSession: the resolved directory must
+        // stay inside the brain root; a vanished path (TOCTOU) reads as
+        // "no such session", never an IOException up the stack.
+        Path brainReal;
+        try {
+            brainReal = brainRoot.toRealPath();
+            if (!sessionDir.toRealPath().startsWith(brainReal)) {
+                LOG.warn("[GeminiHistoryReader] Refusing to read session outside brain root: " + sessionDir);
+                return List.of();
+            }
+        } catch (IOException e) {
+            LOG.warn("[GeminiHistoryReader] getSessionMessages resolve failed for " + sessionDir + ": " + e.getMessage());
             return List.of();
+        }
+        Path transcriptPath = sessionDir.resolve(".system_generated").resolve("logs").resolve("transcript.jsonl");
+        if (!isSafeTranscriptFile(transcriptPath, brainReal)) {
+            transcriptPath = sessionDir.resolve(".system_generated").resolve("logs").resolve("transcript_full.jsonl");
+            if (!isSafeTranscriptFile(transcriptPath, brainReal)) {
+                return List.of();
+            }
         }
         return parseTranscriptToMessages(transcriptPath);
     }
@@ -311,46 +378,53 @@ public class GeminiHistoryReader {
                 } catch (Exception e) {
                     continue;
                 }
-                String type = obj.has("type") && !obj.get("type").isJsonNull() ? obj.get("type").getAsString() : "";
-                int stepIndex = obj.has("step_index") && obj.get("step_index").isJsonPrimitive() ? obj.get("step_index").getAsInt() : (++counter);
+                // One malformed line (non-numeric step_index, object-valued
+                // content, …) must skip that line only — not abort the whole
+                // session's parse back to [].
+                try {
+                    String type = obj.has("type") && !obj.get("type").isJsonNull() ? obj.get("type").getAsString() : "";
+                    int stepIndex = obj.has("step_index") && obj.get("step_index").isJsonPrimitive() ? obj.get("step_index").getAsInt() : (++counter);
 
-                if ("USER_INPUT".equals(type)) {
-                    String rawContent = obj.has("content") && !obj.get("content").isJsonNull() ? obj.get("content").getAsString() : "";
-                    String userText = extractTitleFromContent(rawContent);
-                    if (!userText.isBlank()) {
-                        messages.add(buildUserTextMessage(userText, "gemini-user-" + stepIndex));
-                    }
-                } else if ("PLANNER_RESPONSE".equals(type)) {
-                    if (obj.has("content") && !obj.get("content").isJsonNull()) {
-                        String assistantText = obj.get("content").getAsString();
-                        if (!assistantText.isBlank()) {
-                            messages.add(buildAssistantTextMessage(assistantText, "gemini-assistant-" + stepIndex));
+                    if ("USER_INPUT".equals(type)) {
+                        String rawContent = obj.has("content") && !obj.get("content").isJsonNull() ? obj.get("content").getAsString() : "";
+                        String userText = extractTitleFromContent(rawContent);
+                        if (!userText.isBlank()) {
+                            messages.add(buildUserTextMessage(userText, "gemini-user-" + stepIndex));
                         }
-                    }
-                    if (obj.has("tool_calls") && obj.get("tool_calls").isJsonArray()) {
-                        com.google.gson.JsonArray toolCalls = obj.getAsJsonArray("tool_calls");
-                        for (int i = 0; i < toolCalls.size(); i++) {
-                            com.google.gson.JsonElement el = toolCalls.get(i);
-                            if (!el.isJsonObject()) {
-                                continue;
+                    } else if ("PLANNER_RESPONSE".equals(type)) {
+                        if (obj.has("content") && !obj.get("content").isJsonNull()) {
+                            String assistantText = obj.get("content").getAsString();
+                            if (!assistantText.isBlank()) {
+                                messages.add(buildAssistantTextMessage(assistantText, "gemini-assistant-" + stepIndex));
                             }
-                            JsonObject call = el.getAsJsonObject();
-                            String toolName = call.has("name") && !call.get("name").isJsonNull() ? call.get("name").getAsString() : "tool";
-                            JsonObject input = call.has("args") && call.get("args").isJsonObject() ? call.getAsJsonObject("args") : new JsonObject();
-                            String callId = "gemini-tool-" + stepIndex + "-" + i;
-                            lastToolCallId = callId;
-                            messages.add(buildToolUseMessage(callId, toolName, input));
+                        }
+                        if (obj.has("tool_calls") && obj.get("tool_calls").isJsonArray()) {
+                            com.google.gson.JsonArray toolCalls = obj.getAsJsonArray("tool_calls");
+                            for (int i = 0; i < toolCalls.size(); i++) {
+                                com.google.gson.JsonElement el = toolCalls.get(i);
+                                if (!el.isJsonObject()) {
+                                    continue;
+                                }
+                                JsonObject call = el.getAsJsonObject();
+                                String toolName = call.has("name") && !call.get("name").isJsonNull() ? call.get("name").getAsString() : "tool";
+                                JsonObject input = call.has("args") && call.get("args").isJsonObject() ? call.getAsJsonObject("args") : new JsonObject();
+                                String callId = "gemini-tool-" + stepIndex + "-" + i;
+                                lastToolCallId = callId;
+                                messages.add(buildToolUseMessage(callId, toolName, input));
+                            }
+                        }
+                    } else if (!"USER_INPUT".equals(type) && !"PLANNER_RESPONSE".equals(type) && !"CHECKPOINT".equals(type) && !"CONVERSATION_HISTORY".equals(type)) {
+                        // Tool output or system event
+                        if (obj.has("content") && !obj.get("content").isJsonNull()) {
+                            String toolOutput = obj.get("content").getAsString();
+                            if (!toolOutput.isBlank()) {
+                                String callId = lastToolCallId != null ? lastToolCallId : "gemini-tool-" + stepIndex;
+                                messages.add(buildToolResultMessage(callId, truncate(toolOutput, 20_000)));
+                            }
                         }
                     }
-                } else if (!"USER_INPUT".equals(type) && !"PLANNER_RESPONSE".equals(type) && !"CHECKPOINT".equals(type) && !"CONVERSATION_HISTORY".equals(type)) {
-                    // Tool output or system event
-                    if (obj.has("content") && !obj.get("content").isJsonNull()) {
-                        String toolOutput = obj.get("content").getAsString();
-                        if (!toolOutput.isBlank()) {
-                            String callId = lastToolCallId != null ? lastToolCallId : "gemini-tool-" + stepIndex;
-                            messages.add(buildToolResultMessage(callId, truncate(toolOutput, 20_000)));
-                        }
-                    }
+                } catch (Exception e) {
+                    LOG.warn("[GeminiHistoryReader] Skipping malformed transcript line: " + e.getMessage());
                 }
             }
         }
@@ -423,28 +497,54 @@ public class GeminiHistoryReader {
         return root;
     }
 
-    private String extractCwdFromContent(String content) {
+    // Package-private for the Windows/UNC cwd-extraction unit test (pure
+    // string parsing, no fixture tree needed).
+    String extractCwdFromContent(String content) {
         if (!content.contains("<user_information>") && !content.contains("active workspaces")) {
             return null;
         }
         String[] lines = content.split("\n");
         for (String l : lines) {
-            if (l.contains(" -> ") && l.trim().startsWith("/")) {
-                String candidate = l.split(" -> ")[0].trim();
-                if (candidate.startsWith("/")) {
-                    return candidate;
-                }
+            if (!l.contains(" -> ")) {
+                continue;
+            }
+            String candidate = l.split(" -> ")[0].trim();
+            // POSIX workspace paths start with /; Windows ones with a drive
+            // letter (C:\ or C:/) or a UNC prefix (\\server\share\…) — all
+            // mark the workspace root line.
+            if (candidate.startsWith("/")
+                    || candidate.startsWith("\\\\")
+                    || candidate.matches("^[A-Za-z]:[\\\\/].*")) {
+                return candidate;
             }
         }
         return null;
     }
 
     public boolean deleteSession(String sessionId) throws IOException {
-        if (sessionId == null || sessionId.trim().isEmpty() || sessionId.contains("..") || sessionId.contains("/") || sessionId.contains("\\")) {
+        if (isInvalidSessionId(sessionId)) {
             return false;
         }
-        Path targetDir = brainRoot.resolve(sessionId);
-        if (!Files.isDirectory(targetDir)) {
+        // Trim once, resolve the trimmed id — validation checks the trimmed
+        // form, so the delete must target the same value.
+        Path targetDir = brainRoot.resolve(sessionId.trim());
+        // NOFOLLOW: a symlink planted at the session-dir slot (e.g. by a
+        // prompt-injected agent) must read as non-directory, not as its target.
+        if (!Files.isDirectory(targetDir, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        // Defense in depth: after resolving links the delete root must still
+        // sit inside the brain dir. TOCTOU: if either path vanishes between
+        // the isDirectory check and here, toRealPath throws — treat that as
+        // "nothing safe to delete", not an IOException up the stack.
+        try {
+            Path brainReal = brainRoot.toRealPath();
+            if (!targetDir.toRealPath().startsWith(brainReal)) {
+                LOG.warn("[GeminiHistoryReader] Refusing to delete outside brain root: " + targetDir);
+                return false;
+            }
+        } catch (IOException e) {
+            LOG.warn("[GeminiHistoryReader] deleteSession resolve failed for " + targetDir + ": " + e.getMessage());
             return false;
         }
         deleteRecursively(targetDir);
@@ -452,7 +552,10 @@ public class GeminiHistoryReader {
     }
 
     private void deleteRecursively(Path path) throws IOException {
-        if (Files.isDirectory(path)) {
+        // NOFOLLOW everywhere: a symlink inside the tree deletes as a link
+        // (deleteIfExists removes the link itself), never recursing into
+        // whatever it points at outside the brain dir.
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
             try (DirectoryStream<Path> entries = Files.newDirectoryStream(path)) {
                 for (Path entry : entries) {
                     deleteRecursively(entry);

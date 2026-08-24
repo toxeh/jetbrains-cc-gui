@@ -2881,6 +2881,18 @@ public class ClaudeChatWindow {
         }
 
         try {
+            if (geminiSDKBridge != null) {
+                int activeCount = geminiSDKBridge.getActiveProcessCount();
+                if (activeCount > 0) {
+                    LOG.info("Cleaning up " + activeCount + " active Gemini process(es)...");
+                }
+                geminiSDKBridge.cleanupAllProcesses();
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to clean up Gemini processes: " + e.getMessage());
+        }
+
+        try {
             if (targetBrowser != null) {
                 targetBrowser.dispose();
             }

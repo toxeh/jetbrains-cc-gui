@@ -393,6 +393,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setCurrentProvider(providerId);
     sendBridgeEvent('set_provider', providerId);
 
+    // 'thinking' is a gemini-only effort tier. ReasoningSelect casts family
+    // tiers into the shared slot (e.id as ReasoningEffort), so a gemini-only
+    // value can be present at runtime even though the shared type excludes
+    // it. Clamp at the source — otherwise the slot (and the persistence
+    // snapshot) carries a value codex/claude/grok silently reject until the
+    // selector's own post-render correction lands.
+    if (providerId !== 'gemini' && (reasoningEffort as string) === 'thinking') {
+      setReasoningEffort('high');
+      // Mirror the clamp to the backend — otherwise Java's session state keeps
+      // 'thinking' for the newly selected provider (codex silently normalizes
+      // it to medium while the UI shows high).
+      sendBridgeEvent('set_reasoning_effort', 'high');
+    }
+
     let modeToSet: PermissionMode = claudePermissionMode;
     if (providerId === 'codex') {
       modeToSet = normalizeCliPermissionMode(codexPermissionMode, providerId);

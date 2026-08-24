@@ -4,6 +4,8 @@ import com.github.claudecodegui.i18n.ClaudeCodeGuiBundle;
 import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.settings.CodexSettingsManager;
 import com.github.claudecodegui.notifications.ClaudeNotifier;
+import com.github.claudecodegui.bridge.BridgeDirectoryResolver;
+import com.github.claudecodegui.startup.BridgePreloader;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.codex.CodexSDKBridge;
 import com.github.claudecodegui.provider.gemini.GeminiSDKBridge;
@@ -15,6 +17,7 @@ import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
+import java.io.File;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +86,23 @@ public class SessionSendService {
         this.cliBridges = cliBridges != null ? cliBridges : Collections.emptyMap();
         this.contextService = contextService;
         this.geminiSDKBridge = geminiSDKBridge;
+    }
+
+    /**
+     * Bridge install dir for the cwd guard (the tree the daemon itself runs
+     * from — same resolver result {@code DaemonBridge} spawns node with).
+     * Null when resolution is unavailable (no shared resolver yet, extraction
+     * in progress, headless test context): the guard then applies only its
+     * name-based literals. The catch is Throwable on purpose — IntelliJ's
+     * {@code Logger.error} escalates to AssertionError outside a running IDE.
+     */
+    private static File resolveBridgeDirForCwdGuard() {
+        try {
+            BridgeDirectoryResolver resolver = BridgePreloader.getSharedResolver();
+            return resolver != null ? resolver.findSdkDir() : null;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     public void prepareContextCollector(EditorContextCollector contextCollector) {
@@ -383,11 +403,18 @@ public class SessionSendService {
         final String runtimeSessionEpoch = state.getRuntimeSessionEpoch();
         final String currentModel = state.getModel();
         String projectBase = project != null ? project.getBasePath() : null;
-        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
-                state.getCwd(), projectBase);
+        // Non-clamping guard (same policy as gemini/CLI providers): a cwd
+        // outside the project can be a legitimate custom working directory
+        // (handleSetWorkingDirectory accepts any existing dir). When neither
+        // it nor the project base is acceptable, pass null onward — the JS
+        // side applies its own safe default, never the value just rejected.
+        File bridgeDir = resolveBridgeDirForCwdGuard();
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.selectSafeWorkingDirectory(
+                state.getCwd(), projectBase, bridgeDir);
         if (guardedCwd == null) {
-            guardedCwd = state.getCwd();
-        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            LOG.warn("[Lifecycle] sendToGrok cwd guard rejected unsafe cwd: " + state.getCwd()
+                    + " — sending without explicit cwd (JS-side default applies)");
+        } else if (!guardedCwd.equals(state.getCwd())) {
             LOG.warn("[Lifecycle] sendToGrok cwd guard: " + state.getCwd() + " -> " + guardedCwd);
             state.setCwd(guardedCwd);
         }
@@ -439,11 +466,18 @@ public class SessionSendService {
             effort = state.getReasoningEffort();
         }
         String projectBase = project != null ? project.getBasePath() : null;
+        // Non-clamping guard: a cwd outside the project can be a legitimate
+        // custom working directory (handleSetWorkingDirectory accepts any
+        // existing dir). When neither it nor the project base is acceptable,
+        // pass null onward — the JS side applies its own safe default, never
+        // the value just rejected.
+        File bridgeDir = resolveBridgeDirForCwdGuard();
         String guardedCwd = com.github.claudecodegui.util.PathUtils.selectSafeWorkingDirectory(
-                state.getCwd(), projectBase);
+                state.getCwd(), projectBase, bridgeDir);
         if (guardedCwd == null) {
-            guardedCwd = state.getCwd();
-        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            LOG.warn("[Lifecycle] sendToGemini cwd guard rejected unsafe cwd: " + state.getCwd()
+                    + " — sending without explicit cwd (JS-side default applies)");
+        } else if (!guardedCwd.equals(state.getCwd())) {
             LOG.warn("[Lifecycle] sendToGemini cwd guard: " + state.getCwd() + " -> " + guardedCwd);
             state.setCwd(guardedCwd);
         }
@@ -512,11 +546,17 @@ public class SessionSendService {
         int attachmentCount = attachments != null ? attachments.size() : 0;
 
         String projectBase = project != null ? project.getBasePath() : null;
-        String guardedCwd = com.github.claudecodegui.util.PathUtils.guardWorkingDirectory(
-                state.getCwd(), projectBase);
+        // Same non-clamping guard as gemini/grok: a clamping guard would
+        // silently break the custom-working-directory feature for CLI
+        // providers (handleSetWorkingDirectory accepts existing dirs outside
+        // the project). null falls through to the JS-side safe default.
+        File bridgeDir = resolveBridgeDirForCwdGuard();
+        String guardedCwd = com.github.claudecodegui.util.PathUtils.selectSafeWorkingDirectory(
+                state.getCwd(), projectBase, bridgeDir);
         if (guardedCwd == null) {
-            guardedCwd = state.getCwd();
-        } else if (state.getCwd() == null || !guardedCwd.equals(state.getCwd())) {
+            LOG.warn("[Lifecycle] sendToCli (" + provider + ") cwd guard rejected unsafe cwd: "
+                    + state.getCwd() + " — sending without explicit cwd (JS-side default applies)");
+        } else if (!guardedCwd.equals(state.getCwd())) {
             state.setCwd(guardedCwd);
         }
 

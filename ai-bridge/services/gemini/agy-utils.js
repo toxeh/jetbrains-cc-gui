@@ -6,7 +6,12 @@
 import { existsSync, accessSync, constants as fsConstants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, delimiter, dirname } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+import { resolveCliSpawn } from '../../utils/cli-path.js';
+
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_MAX_TOKENS = 200_000;
 
@@ -20,8 +25,11 @@ export function getAgyHome() {
  * Resolve agy binary.
  * ONLY the user-facing `agy` binary is allowed — never `agy.real`
  * (internal install artifact; forbidden).
- * Prefer AGY_PATH / GEMINI_CLI_PATH (if they point at `agy`), then
- * ~/.local/bin/agy, ~/.gemini/antigravity-cli/bin/agy, PATH.
+ * Prefer AGY_PATH / AGY_CLI_PATH, then ~/.local/bin/agy,
+ * ~/.gemini/antigravity-cli/bin/agy, ~/.antigravity/bin/agy, ~/bin/agy,
+ * PATH (agy.exe / agy.cmd on Windows). The home dirs mirror the Java
+ * detector's homeBinDirs AGY list — a dir one side probes and the other
+ * does not means "available" status with failing sends (envKeysFor rule).
  */
 function isForbiddenAgyName(path) {
   const norm = String(path || '').replace(/\\/g, '/');
@@ -38,11 +46,13 @@ function isExecutableBinary(path) {
   }
 }
 
-export function resolveAgyBinary() {
+export function resolveAgyBinary(platformId = process.platform) {
   // Explicit override:
   // - agy.real is FORBIDDEN: ignore and fall through to discover `agy`
   // - any other path: honor strictly (null if missing) so misconfig fails loudly
-  const explicit = (process.env.AGY_PATH || process.env.GEMINI_CLI_PATH || process.env.AGY_CLI_PATH || '').trim();
+  // GEMINI_CLI_PATH deliberately NOT honored: it names Google's gemini CLI
+  // in pre-existing setups, and spawning that with agy-only flags breaks.
+  const explicit = (process.env.AGY_PATH || process.env.AGY_CLI_PATH || '').trim();
   if (explicit) {
     if (!isForbiddenAgyName(explicit)) {
       return isExecutableBinary(explicit) ? explicit : null;
@@ -50,21 +60,40 @@ export function resolveAgyBinary() {
     // fall through — never invoke agy.real
   }
 
+  // Windows installs land as agy.exe / agy.cmd (npm shim); elsewhere agy.
+  // platformId is injectable for cross-platform unit tests (linux CI), same
+  // convention as cli-path's forceWindows flag.
+  const exeNames = platformId === 'win32' ? ['agy.exe', 'agy.cmd', 'agy'] : ['agy'];
+
   const candidates = [];
   const home = homedir();
   const agyHome = getAgyHome();
-  candidates.push(
-    join(home, '.local', 'bin', 'agy'),
-    join(agyHome, 'bin', 'agy'),
-    join(home, 'bin', 'agy'),
-    '/usr/local/bin/agy',
-    '/opt/homebrew/bin/agy',
-  );
+  for (const name of exeNames) {
+    candidates.push(
+      join(home, '.local', 'bin', name),
+      join(agyHome, 'bin', name),
+      // ~/.antigravity/bin is an install root the Java detector probes —
+      // keep the lists in lockstep (see the docblock above).
+      join(home, '.antigravity', 'bin', name),
+      join(home, 'bin', name),
+    );
+  }
+  // Unix-only install locations — on win32 these would probe the drive
+  // root (C:\usr\local\bin\agy), where a stray file could win resolution.
+  if (platformId !== 'win32') {
+    candidates.push('/usr/local/bin/agy', '/opt/homebrew/bin/agy');
+  }
 
   const pathEnv = process.env.PATH || '';
-  for (const dir of pathEnv.split(delimiter)) {
-    if (!dir) continue;
-    candidates.push(join(dir, 'agy'));
+  const pathDirs = pathEnv.split(delimiter).filter(Boolean);
+  // Name-major across directories (mirrors the home-candidate block above):
+  // every dir is probed for agy.exe before any dir is probed for the .cmd
+  // shim, so a stray npm shim in an earlier dir cannot shadow a real
+  // executable further down the PATH.
+  for (const name of exeNames) {
+    for (const dir of pathDirs) {
+      candidates.push(join(dir, name));
+    }
   }
 
   const seen = new Set();
@@ -309,7 +338,8 @@ export function composeAgyModelId(baseId, effort) {
  *
  * Strategy: always prefer a full model id with effort in the slug. Never rely
  * on a separate --effort flag for spawn (caller should pass effort: '').
- * Fast path — no `agy models` spawn (optional catalog can refine if provided).
+ * Fast path — no `agy models` spawn (agy-runner passes the cached families
+ * from getCachedAgyModelFamilies so bare ids resolve to offered tiers).
  *
  * @param {string} model family id or full slug
  * @param {string} [effort] preferred effort when model is a family base
@@ -368,9 +398,12 @@ export function resolveAgySpawnModel(model, effort = '', catalogOrFamilies = nul
     return { model: composeAgyModelId(raw, wantEffort), effort: '' };
   }
 
-  // Gemini flash/pro bare family always needs a default effort tier
+  // Gemini flash/pro bare family always needs a default effort tier. No
+  // catalog in reach — fall back to -high: every gemini family ships a
+  // -high tier, while some (e.g. gemini-3.1-pro) have no -medium at all
+  // and reject the invented slug outright.
   if (/^gemini-/i.test(raw)) {
-    return { model: `${raw}-medium`, effort: '' };
+    return { model: `${raw}-high`, effort: '' };
   }
 
   // gpt-oss bare family → medium slug
@@ -490,34 +523,99 @@ function effortLabel(effort) {
 
 /**
  * List models via `agy models` (id + human label per line).
- * @returns {Array<{id:string,label:string}>}
+ * Async on purpose: this runs inside the shared daemon, where a sync spawn
+ * would block the event loop (heartbeats + all providers) for up to 15s.
+ * @returns {Promise<Array<{id:string,label:string}>>}
  */
-export function listAgyModels() {
+export async function listAgyModels() {
   const bin = resolveAgyBinary();
   if (!bin) return [];
   try {
-    const r = spawnSync(bin, ['models'], {
+    // Route through the shared cmd.exe wrapper so a discovered Windows
+    // `agy.cmd` shim actually runs — a direct execFile of a .cmd throws
+    // EINVAL on patched Node (CVE-2024-27980). Posix: passthrough.
+    const invocation = resolveCliSpawn(bin, ['models'], {
       encoding: 'utf8',
       timeout: 15_000,
       env: buildAgyEnv(),
+      maxBuffer: 4 * 1024 * 1024,
     });
-    return parseAgyModelsOutput(String(r.stdout || ''));
+    const { stdout } = await execFileAsync(
+      invocation.file,
+      invocation.args,
+      invocation.options,
+    );
+    return parseAgyModelsOutput(String(stdout || ''));
   } catch {
     return [];
   }
 }
 
+// Last families catalog seen by this process (populated by the listModels
+// channel command). The send path reuses it to resolve bare family ids
+// against real effort tiers instead of re-spawning `agy models`
+// (spawnSync — blocks the daemon event loop) on every turn.
+let cachedAgyModelFamilies = null;
+
+/**
+ * Seed the catalog cache from an externally built families list.
+ * @param {Array<object>|null} families grouped families (groupAgyModelFamilies
+ *   shape); null/empty resets the cache (test-isolation seam — no production
+ *   caller passes null; the send path warms via buildAgyModelsCatalog)
+ */
+export function cacheAgyModelFamilies(families) {
+  cachedAgyModelFamilies = Array.isArray(families) && families.length > 0
+    ? families
+    : null;
+}
+
+/**
+ * @returns {Array<object>|null} cached families, or null when no catalog
+ * has been fetched in this process yet.
+ */
+export function getCachedAgyModelFamilies() {
+  return cachedAgyModelFamilies;
+}
+
 /**
  * Full catalog for the plugin UI: flat models + grouped families.
+ * Also refreshes the families cache above for the send path.
+ * @returns {Promise<{models: Array<{id:string,label:string}>, families: Array<object>, binary: string}>}
  */
-export function buildAgyModelsCatalog() {
-  const models = listAgyModels();
+export async function buildAgyModelsCatalog() {
+  const models = await listAgyModels();
   const families = groupAgyModelFamilies(models);
+  cachedAgyModelFamilies = families.length > 0 ? families : cachedAgyModelFamilies;
   return {
     models,
     families,
     binary: resolveAgyBinary() || '',
   };
+}
+
+/**
+ * Warm the families cache for a send turn when needed.
+ *
+ * The channel-manager is one-shot — one process per command — so the cache
+ * seeded by a listModels process is never visible to a later send process.
+ * Without this warm, `resolveAgySpawnModel` sees a null catalog in every
+ * production send and bare family ids fall back to the guessed `-high`
+ * slug instead of the family's real offered tiers.
+ *
+ * No-op for empty models (no --model flag to resolve), full effort slugs
+ * (nothing to look up) and when the cache is already warm; a failed
+ * `agy models` probe leaves the guess fallback.
+ * @param {string} model family id or full slug about to be spawned
+ */
+export async function warmAgyModelCatalogForModel(model) {
+  const { baseId, effort } = splitAgyModelId(String(model || ''));
+  if (!baseId || effort) return; // no model, or a full slug — the catalog adds nothing
+  if (getCachedAgyModelFamilies()) return;
+  try {
+    await buildAgyModelsCatalog();
+  } catch {
+    // probe failed — callers keep the safe -high fallback
+  }
 }
 
 export function normalizeUsageToSnakeCase(usage) {

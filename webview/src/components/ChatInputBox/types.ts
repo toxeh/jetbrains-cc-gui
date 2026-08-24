@@ -760,6 +760,21 @@ export function codexModelSupportsMaxEffort(modelId: string): boolean {
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /**
+ * Every effort tier the runtime accepts, including the gemini/agy-only
+ * 'thinking' tier (valid only inside gemini model slugs — gemini-3.5-flash
+ * -thinking — and the shared slot while the gemini provider is active).
+ * The single source of truth for runtime allowlists: duplicated literals
+ * drift and reopen the 'thinking' seam.
+ */
+export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'thinking'] as const;
+
+/**
+ * Tiers valid in the shared cross-provider reasoning slot — the gemini-only
+ * 'thinking' excluded (Java rejects it for claude/codex/CLI providers).
+ */
+export const REASONING_EFFORTS_SHARED = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/**
  * Codex execution speed mode.
  * Standard uses Codex defaults; Fast maps to service_tier=fast at send time.
  */

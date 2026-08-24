@@ -267,7 +267,11 @@ export function useGeminiProvider() {
       // Bare single-slug families (e.g. claude-sonnet-4-6) have empty effort
       const only = fam?.efforts?.length === 1 ? fam.efforts[0].id : '';
       if (only) return only as ReasoningEffort;
-      return 'medium';
+      // Unknown/unloaded family: 'high' — every gemini family ships a -high
+      // tier, while some (e.g. gemini-3.1-pro) have no -medium at all and
+      // reject the invented slug outright. Mirrors resolveAgySpawnModel's
+      // fallback in ai-bridge/services/gemini/agy-utils.js.
+      return 'high';
     },
     [geminiFamilies],
   );

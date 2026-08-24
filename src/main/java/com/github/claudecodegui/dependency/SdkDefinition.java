@@ -39,7 +39,7 @@ public enum SdkDefinition {
 
     /**
      * Gemini uses Antigravity CLI ({@code agy}) headless stream-json — not an npm SDK.
-     * Install externally; path via AGY_PATH / GEMINI_CLI_PATH or PATH.
+     * Install externally; path via AGY_PATH / AGY_CLI_PATH or PATH.
      */
     GEMINI_CLI(
         "gemini-cli",

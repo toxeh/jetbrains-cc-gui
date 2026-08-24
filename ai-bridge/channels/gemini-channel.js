@@ -62,7 +62,7 @@ export async function handleGeminiCommand(command, args, stdinData) {
     }
 
     case 'listModels': {
-      const catalog = buildAgyModelsCatalog();
+      const catalog = await buildAgyModelsCatalog();
       console.log(JSON.stringify({
         success: true,
         models: catalog.models,

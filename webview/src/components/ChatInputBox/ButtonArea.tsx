@@ -171,12 +171,13 @@ export const ButtonArea = ({
     if (!isDynamicProvider) return;
     // Gemini uses family list from get_gemini_models (geminiModels), not flat cliModels.
     // Only correct once a *real* catalog arrived. Static fallback lists
-    // (OPENCODE_MODELS = just "opencode-default", CODEX built-ins, …) must not
-    // clobber the user's choice — especially when ChatScreen remounts after
-    // leaving history and briefly shows the fallback before the cache/fetch
-    // lands.
+    // (geminiModels seeds from GEMINI_MODELS, OPENCODE_MODELS = just
+    // "opencode-default", CODEX built-ins, …) must not clobber the user's
+    // choice — especially when ChatScreen remounts after leaving history and
+    // briefly shows the fallback before the cache/fetch lands. geminiFamilies
+    // is empty until the live catalog lands, so it is the loaded gate.
     if (isGemini) {
-      if (!geminiModels || geminiModels.length === 0) return;
+      if (!geminiFamilies || geminiFamilies.length === 0) return;
     } else {
       if (!cliCatalogHasEntries) return;
       if (cliModelsLoading) return;
@@ -188,7 +189,17 @@ export const ButtonArea = ({
     const exists = availableModels.some((model: ModelInfo) =>
       model.id === selectedModel || model.id === selectedFamily);
     if (!exists) {
-      onModelSelect(availableModels[0].id);
+      // Gemini takes the positional first family; honoring the family's
+      // defaultModelId stays deferred (product refinement). CLI providers
+      // prefer their reported default — but only when the catalog actually
+      // offers it, else the selection is missing from the dropdown and this
+      // exists-check never converges.
+      const fallback = availableModels[0].id;
+      const cliDefault = cliDefaultModel
+        && availableModels.some((model: ModelInfo) => model.id === cliDefaultModel)
+        ? cliDefaultModel
+        : fallback;
+      onModelSelect(isGemini ? fallback : cliDefault);
     }
   }, [
     availableModels,
@@ -198,7 +209,7 @@ export const ButtonArea = ({
     cliDefaultModel,
     cliCatalogHasEntries,
     cliModelsLoading,
-    geminiModels,
+    geminiFamilies,
   ]);
 
   /**

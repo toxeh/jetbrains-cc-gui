@@ -11,6 +11,30 @@
 
 import { normalizeUsageToSnakeCase, extractAgyContextTokens } from './agy-utils.js';
 
+/**
+ * Render a tool_info.error value for the result body. It can be an object
+ * ({message,type} — or any shape like {code:'ENOENT'}), an array, a plain
+ * string, or another JSON value (number); anything must become readable text.
+ */
+function errToText(err) {
+  // Empty/whitespace-only string errors keep the pre-diff 'tool error'
+  // label — a bare trailing "Error: " line carries no diagnostic.
+  if (typeof err === 'string') return err.trim() ? err : 'tool error';
+  if (err && typeof err === 'object') {
+    // Only take message/type when they are strings themselves — an object
+    // message (String(obj) → "[object Object]") must reach the stringify
+    // branch instead.
+    if (typeof err.message === 'string' && err.message) return err.message;
+    if (typeof err.type === 'string' && err.type) return err.type;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      // non-serializable — fall through to the generic string
+    }
+  }
+  return String(err);
+}
+
 export class AgyEventNormalizer {
   constructor({ log = console.log, error = console.error } = {}) {
     this.log = log;
@@ -187,7 +211,12 @@ export class AgyEventNormalizer {
 
     const output = info.output != null ? String(info.output) : '';
     const err = info.error;
-    const isError = !!(err && (err.message || err.type));
+    // info.error can be anything present — an object ({message,type} or e.g.
+    // {code:'ENOENT'}), an array, a plain string, or another JSON value
+    // (number, ""). All must mark the result as failed, never as success:
+    // falsy-but-present values (0, "", false) are failures too.
+    const isError = err !== undefined && err !== null;
+    const errText = errToText(err);
 
     // Emit tool_result when tool completes or has output/error
     const isDone = state === 'DONE' || output || isError;
@@ -202,9 +231,16 @@ export class AgyEventNormalizer {
         summary = name;
       }
 
-      const body = isError
-        ? `${summary}\nError: ${err.message || err.type || 'tool error'}`
-        : (output ? `${summary}\n${output}`.slice(0, 8000) : summary);
+      let body;
+      if (isError) {
+        // Keep the error line inside the cap even when the summary alone
+        // would fill it — the error is the diagnostic; slicing the combined
+        // string from the front truncates exactly the part that matters.
+        const errLine = `\nError: ${errText}`.slice(0, 8000);
+        body = summary.slice(0, Math.max(0, 8000 - errLine.length)) + errLine;
+      } else {
+        body = output ? `${summary}\n${output}`.slice(0, 8000) : summary;
+      }
 
       this._emit(`[TOOL_RESULT] ${JSON.stringify({
         type: 'tool_result',

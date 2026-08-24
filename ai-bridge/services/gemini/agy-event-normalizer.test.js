@@ -140,6 +140,118 @@ test('result ERROR status records terminal error', () => {
   assert.equal(n._terminalError, 'auth failed');
 });
 
+test('falsy-but-present tool errors mark the result failed (0 / "" / false)', () => {
+  // The adjacent contract says every present error value — "another JSON
+  // value (number)" included — must mark the result failed; !!err marked
+  // 0/""/false as success.
+  for (const errValue of [0, '', false]) {
+    const { n, lines } = collect();
+    n.begin();
+    n.handleStreamEvent({
+      event: 'step_update',
+      step_update: {
+        step_index: 3,
+        state: 'DONE',
+        step_type: 'tool',
+        tool_name: 'run_command',
+        tool_info: { name: 'run_command', parameters: {}, error: errValue },
+      },
+    });
+    const line = lines.find((l) => l.startsWith('[TOOL_RESULT]'));
+    assert.ok(line, `no TOOL_RESULT emitted for error=${JSON.stringify(errValue)}`);
+    assert.equal(
+      JSON.parse(line.slice('[TOOL_RESULT] '.length)).is_error,
+      true,
+      `error=${JSON.stringify(errValue)} must be is_error`,
+    );
+  }
+});
+
+test('empty-string tool error renders the tool error label, not a bare Error line', () => {
+  // errToText('') must fall back to the pre-diff 'tool error' label —
+  // a trailing "Error: " with no diagnostic carries nothing.
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 3,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: { name: 'run_command', parameters: {}, error: '' },
+    },
+  });
+  const line = lines.find((l) => l.startsWith('[TOOL_RESULT]'));
+  assert.ok(line, 'no TOOL_RESULT emitted');
+  const parsed = JSON.parse(line.slice('[TOOL_RESULT] '.length));
+  assert.equal(parsed.is_error, true);
+  assert.match(parsed.content, /\nError: tool error$/);
+});
+
+test('absent or null tool error stays success', () => {
+  for (const toolInfo of [
+    { name: 'run_command', parameters: {}, output: 'done' },
+    { name: 'run_command', parameters: {}, output: 'done', error: null },
+  ]) {
+    const { n, lines } = collect();
+    n.begin();
+    n.handleStreamEvent({
+      event: 'step_update',
+      step_update: {
+        step_index: 5,
+        state: 'DONE',
+        step_type: 'tool',
+        tool_name: 'run_command',
+        tool_info: toolInfo,
+      },
+    });
+    const line = lines.find((l) => l.startsWith('[TOOL_RESULT]'));
+    assert.ok(line);
+    assert.equal(JSON.parse(line.slice('[TOOL_RESULT] '.length)).is_error, false);
+  }
+});
+
+test('object-valued error message renders as JSON, not [object Object]', () => {
+  // {message: {code: 1}} previously hit String(err.message) → "[object Object]"
+  // before the stringify fallback could run.
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 7,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: { name: 'run_command', parameters: {}, error: { message: { code: 1 } } },
+    },
+  });
+  const line = lines.find((l) => l.startsWith('[TOOL_RESULT]'));
+  assert.ok(line);
+  const payload = JSON.parse(line.slice('[TOOL_RESULT] '.length));
+  assert.ok(!payload.content.includes('[object Object]'), `body degenerated: ${payload.content}`);
+  assert.ok(payload.content.includes('"code"'), `expected the stringified object, got: ${payload.content}`);
+
+  // String messages keep passing through unchanged.
+  const n2lines = [];
+  const n2 = new AgyEventNormalizer({ log: (l) => n2lines.push(String(l)), error: () => {} });
+  n2.begin();
+  n2.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 8,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: { name: 'run_command', parameters: {}, error: { message: 'boom', type: 'EIO' } },
+    },
+  });
+  const line2 = n2lines.find((l) => l.startsWith('[TOOL_RESULT]'));
+  assert.ok(line2);
+  assert.ok(line2.includes('boom'));
+});
+
 test('checkpoint usage smaller than peak is not emitted', () => {
   const { n, lines } = collect();
   n.begin();
@@ -263,5 +375,151 @@ test('emits tool_use message and BLOCK_RESET when tool step update arrives', () 
   assert.ok(toolUseLine.includes('view_file'));
   assert.ok(toolUseLine.includes('/foo/bar.txt'));
   assert.ok(lines.includes('[BLOCK_RESET]'), 'BLOCK_RESET should be emitted for tool step');
+});
+
+function toolResultPayload(lines) {
+  const line = lines.find((l) => l.startsWith('[TOOL_RESULT]'));
+  assert.ok(line, 'expected a [TOOL_RESULT] line');
+  return JSON.parse(line.slice('[TOOL_RESULT] '.length));
+}
+
+test('string tool errors mark the result failed (AC18)', () => {
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 5,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: {
+        name: 'run_command',
+        parameters: { CommandLine: 'boom' },
+        error: 'command exited with code 1',
+      },
+    },
+  });
+  const payload = toolResultPayload(lines);
+  assert.equal(payload.is_error, true);
+  assert.ok(payload.content.includes('Error: command exited with code 1'));
+});
+
+test('non-object tool error values (number) mark the result failed', () => {
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 6,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: {
+        name: 'run_command',
+        parameters: { CommandLine: 'boom' },
+        error: 42,
+      },
+    },
+  });
+  const payload = toolResultPayload(lines);
+  assert.equal(payload.is_error, true);
+  assert.ok(payload.content.includes('42'));
+});
+
+test('huge tool error text is capped like normal output', () => {
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 7,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: {
+        name: 'run_command',
+        parameters: { CommandLine: 'flood' },
+        error: 'E'.repeat(50_000),
+      },
+    },
+  });
+  const payload = toolResultPayload(lines);
+  assert.equal(payload.is_error, true);
+  assert.ok(payload.content.length <= 8_100, `expected capped body, got ${payload.content.length}`);
+});
+
+test('array tool error values mark the result failed and render readably', () => {
+  // agy has no schema contract for tool_info.error — an array must not
+  // silently render as "success" or crash String coercion.
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 8,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: {
+        name: 'run_command',
+        parameters: { CommandLine: 'boom' },
+        error: ['exit 1'],
+      },
+    },
+  });
+  const payload = toolResultPayload(lines);
+  assert.equal(payload.is_error, true);
+  assert.ok(payload.content.includes('exit 1'), `expected array contents in body, got: ${payload.content}`);
+});
+
+test('object tool errors without message/type render via JSON (e.g. {code})', () => {
+  // {code:'ENOENT'} has neither .message nor .type — JSON.stringify keeps
+  // the diagnostic instead of collapsing to "[object Object]".
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 9,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'view_file',
+      tool_info: {
+        name: 'view_file',
+        parameters: { AbsolutePath: '/gone' },
+        error: { code: 'ENOENT' },
+      },
+    },
+  });
+  const payload = toolResultPayload(lines);
+  assert.equal(payload.is_error, true);
+  assert.ok(payload.content.includes('ENOENT'), `expected code in body, got: ${payload.content}`);
+  assert.ok(!payload.content.includes('[object Object]'));
+});
+
+test('error line survives the cap when the summary alone would fill it', () => {
+  // The error is the diagnostic; a front-truncated combined string would
+  // cut exactly the Error: line away and leave a wall of command text.
+  const { n, lines } = collect();
+  n.begin();
+  n.handleStreamEvent({
+    event: 'step_update',
+    step_update: {
+      step_index: 10,
+      state: 'DONE',
+      step_type: 'tool',
+      tool_name: 'run_command',
+      tool_info: {
+        name: 'run_command',
+        parameters: { CommandLine: 'S'.repeat(50_000) },
+        error: 'spawn failed',
+      },
+    },
+  });
+  const payload = toolResultPayload(lines);
+  assert.equal(payload.is_error, true);
+  assert.ok(payload.content.length <= 8_100, `expected capped body, got ${payload.content.length}`);
+  assert.ok(payload.content.endsWith('\nError: spawn failed'), 'Error line must be preserved at the end');
 });
 

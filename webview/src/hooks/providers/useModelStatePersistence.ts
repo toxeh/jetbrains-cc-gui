@@ -17,14 +17,15 @@ import {
   normalizeClaudeModelId,
   apply1MContextSuffix,
   strip1MContextSuffix,
+  composeGeminiAgyModelId,
   splitGeminiAgyModelId,
   toGeminiFamilyId,
+  REASONING_EFFORTS,
 } from '../../components/ChatInputBox/types';
 import type { CodexFastMode, PermissionMode, ReasoningEffort } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider, normalizeCliPermissionMode, OMP_ROLE_MODEL_IDS } from './cliProviders';
 
 const STORAGE_KEY = 'model-selection-state';
-const REASONING_VALUES = ['low', 'medium', 'high', 'xhigh', 'max', 'thinking'] as const;
 const CODEX_FAST_MODE_VALUES = ['normal', 'fast'] as const;
 
 const getCustomModels = (key: string): { id: string }[] => {
@@ -37,7 +38,7 @@ const getCustomModels = (key: string): { id: string }[] => {
 };
 
 const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
-  typeof value === 'string' && (REASONING_VALUES as readonly string[]).includes(value);
+  typeof value === 'string' && (REASONING_EFFORTS as readonly string[]).includes(value);
 
 const isCodexFastMode = (value: unknown): value is CodexFastMode =>
   typeof value === 'string' && (CODEX_FAST_MODE_VALUES as readonly string[]).includes(value);
@@ -192,6 +193,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       let restoredClaudeModel = DEFAULT_CLAUDE_MODEL_ID;
       let restoredCodexModel = CODEX_MODELS[0].id;
       let restoredGeminiModel = DEFAULT_GEMINI_MODEL_ID;
+      // Composed with restoredGeminiModel for the boot set_model sync — Java
+      // compares full agy slugs (gemini-3.5-flash-high), so syncing the bare
+      // family id would make shouldResetGeminiSessionOnModelChange wipe the
+      // --conversation resume id on every restart. Mirrors useCodexProvider's
+      // initial 'high'.
+      let restoredGeminiEffort: ReasoningEffort = 'high';
       let restoredClaudePermissionMode: PermissionMode = 'default';
       let restoredCodexPermissionMode: PermissionMode = 'default';
       let restoredGeminiPermissionMode: PermissionMode = 'default';
@@ -223,10 +230,15 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
       };
       const applyCodexModel = (modelId: string) => {
-        const customs = getCustomModels('codex-custom-models');
-        if (CODEX_MODELS.find(m => m.id === modelId) || customs.find(m => m.id === modelId)) {
-          restoredCodexModel = modelId;
-          setSelectedCodexModel(modelId);
+        // Codex catalogs are dynamic (config.toml `model` + model_catalog_json),
+        // so any non-empty saved id is accepted — same policy as CLI providers.
+        // A stale id is corrected by the catalog auto-select once the fetch lands.
+        if (typeof modelId === 'string' && modelId.trim().length > 0) {
+          // Store the trimmed id — the guard tests the trimmed form, so a
+          // whitespace-padded persisted id must not travel onward verbatim.
+          const trimmedId = modelId.trim();
+          restoredCodexModel = trimmedId;
+          setSelectedCodexModel(trimmedId);
         }
       };
       const applyGeminiModel = (modelId: string) => {
@@ -238,7 +250,15 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           restoredGeminiModel = baseId;
           setSelectedGeminiModel(baseId);
           if (effort && isReasoningEffort(effort)) {
-            setReasoningEffort(effort);
+            restoredGeminiEffort = effort;
+            // The saved gemini slug may embed a gemini-only tier ('thinking').
+            // This applier runs AFTER the reasoningEffort clamp above, so an
+            // unguarded setter would re-leak it into the shared slot of a
+            // non-gemini tab. Only a gemini tab takes the tier live; the
+            // restored value still feeds the slug compose on switch-back.
+            if (restoredProvider === 'gemini') {
+              setReasoningEffort(effort);
+            }
           }
         }
       };
@@ -327,7 +347,15 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         }
 
         if (isReasoningEffort(state.reasoningEffort)) {
-          setReasoningEffort(state.reasoningEffort);
+          restoredGeminiEffort = state.reasoningEffort;
+          // A gemini-only tier must not leak into the shared slot of a
+          // non-gemini tab (Java rejects it there); clamp like the provider
+          // switch does. The true value still feeds the gemini slug compose.
+          if (state.reasoningEffort === 'thinking' && restoredProvider !== 'gemini') {
+            setReasoningEffort('high');
+          } else {
+            setReasoningEffort(state.reasoningEffort);
+          }
         }
         if (isCodexFastMode(state.codexFastMode)) {
           restoredCodexFastMode = state.codexFastMode;
@@ -454,7 +482,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           const modelToSync = restoredProvider === 'codex'
             ? restoredCodexModel
             : restoredProvider === 'gemini'
-              ? restoredGeminiModel
+              // Full slug — see restoredGeminiEffort: Java compares against
+              // the session's agy slug, and a bare family id would force a
+              // session reset on boot.
+              ? composeGeminiAgyModelId(restoredGeminiModel, restoredGeminiEffort)
               : restoredProvider === 'grok'
                 ? restoredGrokModel
                 : restoredProvider === 'kimi'

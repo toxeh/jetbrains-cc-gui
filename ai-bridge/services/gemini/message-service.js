@@ -5,8 +5,15 @@
 
 import { runAgyTurn } from './agy-runner.js';
 import { AgyEventNormalizer } from './agy-event-normalizer.js';
-import { buildErrorPayload, isAgyAvailable, resolveAgyBinary } from './agy-utils.js';
+import { buildErrorPayload, isAgyAvailable, resolveAgyBinary, warmAgyModelCatalogForModel } from './agy-utils.js';
 import { selectWorkingDirectory } from '../../utils/path-utils.js';
+import {
+  buildReadPathPromptWithImages,
+  cleanupMaterializedImagePaths,
+  GROK_MAX_IMAGE_BYTES,
+  isImageAttachment,
+  materializeImageAttachments,
+} from '../../utils/cli-image-input.js';
 
 /**
  * @param {object|string} messageOrOptions Claude-shaped options bag or plain message
@@ -40,6 +47,7 @@ export async function sendMessage(messageOrOptions, sessionId = '', cwd = '', pe
     error: (...args) => console.error(...args),
   });
 
+  let imagePaths = [];
   try {
     if (!isAgyAvailable()) {
       throw new Error(
@@ -78,6 +86,52 @@ export async function sendMessage(messageOrOptions, sessionId = '', cwd = '', pe
       }
     }
 
+    // agy headless has no multimodal flag: materialize images to temp files
+    // and inject Read-tool references (same pattern as pi/omp). Non-image
+    // entries are skipped by materializeImageAttachments — say so instead
+    // of silently dropping the user's attachment.
+    if (Array.isArray(opts.attachments) && opts.attachments.length > 0) {
+      // Shared acceptance predicate — the counter must agree with what the
+      // materializer actually delivers (mediaType hints, data-URL mimes and
+      // att.path entries are images too), or valid attachments get
+      // misreported as "non-image … not delivered".
+      const nonImage = opts.attachments.filter((a) => !isImageAttachment(a)).length;
+      try {
+        imagePaths = await materializeImageAttachments(opts.attachments);
+        // Distinguish WHY an attachment was not delivered — a valid image
+        // over the size limit must not be told "not an image file". The limit
+        // text derives from the enforced constant so they can never diverge.
+        const maxMb = Math.round(GROK_MAX_IMAGE_BYTES / (1024 * 1024));
+        const failedImages = opts.attachments.length - nonImage - imagePaths.length;
+        const parts = [];
+        if (nonImage > 0) parts.push(`${nonImage} non-image attachment(s)`);
+        if (failedImages > 0) {
+          parts.push(`${failedImages} image attachment(s) with invalid data or over the ${maxMb} MB limit`);
+        }
+        if (parts.length > 0) {
+          console.error(`[AGY] attachments not delivered: ${parts.join('; ')}`);
+          // Surface the skip in the conversation itself — a daemon-only log
+          // is invisible to the user, who still sees their attachment chip.
+          finalMessage += `\n\n[System note: ${parts.join(' and ')} were not delivered — agy headless turns only support image files up to ${maxMb} MB.]`;
+        }
+        if (imagePaths.length > 0) {
+          finalMessage = buildReadPathPromptWithImages(finalMessage, imagePaths);
+        }
+      } catch (err) {
+        console.error('[AGY] failed to materialize image attachments:', err?.message || err);
+        // Same visibility rule as the skip note above: the user's attachment
+        // chips are gone and the model never sees the images — say so.
+        finalMessage += '\n\n[System note: image attachments could not be delivered — materialization failed.]';
+      }
+    }
+
+    // Warm the families catalog for bare family ids — the one-shot
+    // channel-manager process never sees a listModels process's cache,
+    // while the long-lived daemon keeps the module cache until restart
+    // (no TTL — staleness is tracked in deferred-work). Without a warm
+    // catalog the spawn path guesses a -high suffix.
+    await warmAgyModelCatalogForModel(modelId);
+
     const turn = await runAgyTurn({
       message: finalMessage,
       sessionId: sid,
@@ -109,6 +163,8 @@ export async function sendMessage(messageOrOptions, sessionId = '', cwd = '', pe
   } catch (error) {
     console.error('[DEBUG] Gemini/agy error:', error?.message || error);
     normalizer.finishError(error);
+  } finally {
+    await cleanupMaterializedImagePaths(imagePaths);
   }
 }
 

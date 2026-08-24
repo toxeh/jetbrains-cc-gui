@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'fs';
+import { join, delimiter } from 'path';
+import { tmpdir } from 'os';
 import {
   buildAgyArgs,
   mapPermissionMode,
@@ -16,6 +19,10 @@ import {
   resolveAgySpawnModel,
   groupAgyModelFamilies,
   stripEffortFromLabel,
+  warmAgyModelCatalogForModel,
+  cacheAgyModelFamilies,
+  getCachedAgyModelFamilies,
+  listAgyModels,
 } from './agy-utils.js';
 
 test('resolveAgyBinary honors explicit AGY_PATH without fallback', () => {
@@ -49,6 +56,27 @@ test('resolveAgyBinary never returns agy.real even if AGY_PATH points at it', ()
     if (resolved) {
       assert.ok(!/agy\.real$/i.test(resolved), `must not resolve agy.real, got ${resolved}`);
     }
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    if (prevG === undefined) delete process.env.GEMINI_CLI_PATH;
+    else process.env.GEMINI_CLI_PATH = prevG;
+    if (prevA === undefined) delete process.env.AGY_CLI_PATH;
+    else process.env.AGY_CLI_PATH = prevA;
+  }
+});
+
+test('resolveAgyBinary ignores GEMINI_CLI_PATH (Google gemini CLI)', () => {
+  const prev = process.env.AGY_PATH;
+  const prevG = process.env.GEMINI_CLI_PATH;
+  const prevA = process.env.AGY_CLI_PATH;
+  // An existing executable — must NOT be picked just because the var is set:
+  // in pre-existing setups it names Google's gemini CLI, which rejects agy flags.
+  process.env.GEMINI_CLI_PATH = process.execPath;
+  delete process.env.AGY_PATH;
+  delete process.env.AGY_CLI_PATH;
+  try {
+    assert.notEqual(resolveAgyBinary(), process.execPath);
   } finally {
     if (prev === undefined) delete process.env.AGY_PATH;
     else process.env.AGY_PATH = prev;
@@ -197,8 +225,10 @@ test('extractAgyContextTokens uses input+cache not total/output', () => {
 });
 
 test('resolveAgySpawnModel upgrades bare gemini family to effort slug', () => {
+  // No catalog in reach: fall back to -high (every gemini family ships it;
+  // some, like gemini-3.1-pro, have no -medium at all).
   assert.deepEqual(resolveAgySpawnModel('gemini-3.6-flash', ''), {
-    model: 'gemini-3.6-flash-medium',
+    model: 'gemini-3.6-flash-high',
     effort: '',
   });
   assert.deepEqual(resolveAgySpawnModel('gemini-3.6-flash', 'high'), {
@@ -222,6 +252,54 @@ test('resolveAgySpawnModel upgrades bare gemini family to effort slug', () => {
     model: 'claude-opus-4-6-thinking',
     effort: '',
   });
+});
+
+test('resolveAgySpawnModel prefers cached catalog families over suffix guessing', () => {
+  // Families shape produced by groupAgyModelFamilies (cached from listModels).
+  const families = [
+    {
+      id: 'gemini-3.1-pro',
+      defaultEffort: 'high',
+      defaultModelId: 'gemini-3.1-pro-high',
+      efforts: [
+        { id: 'low', label: 'Low', modelId: 'gemini-3.1-pro-low' },
+        { id: 'high', label: 'High', modelId: 'gemini-3.1-pro-high' },
+      ],
+    },
+  ];
+  // Requested effort not offered → family default wins; a bare -medium guess
+  // would invent a slug agy rejects (family has no medium tier).
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.1-pro', 'medium', families), {
+    model: 'gemini-3.1-pro-high',
+    effort: '',
+  });
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.1-pro', 'low', families), {
+    model: 'gemini-3.1-pro-low',
+    effort: '',
+  });
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.1-pro', '', families), {
+    model: 'gemini-3.1-pro-high',
+    effort: '',
+  });
+});
+
+test('agy model families cache round-trips through agy-runner resolution', async () => {
+  const { cacheAgyModelFamilies, getCachedAgyModelFamilies } = await import('./agy-utils.js');
+  assert.equal(getCachedAgyModelFamilies(), null, 'cache starts empty');
+  cacheAgyModelFamilies(null);
+  assert.equal(getCachedAgyModelFamilies(), null, 'null leaves an empty cache empty');
+  const families = [
+    { id: 'gemini-3.1-pro', defaultEffort: 'high', defaultModelId: 'gemini-3.1-pro-high',
+      efforts: [{ id: 'high', label: 'High', modelId: 'gemini-3.1-pro-high' }] },
+  ];
+  cacheAgyModelFamilies(families);
+  assert.deepEqual(getCachedAgyModelFamilies(), families);
+  assert.deepEqual(resolveAgySpawnModel('gemini-3.1-pro', '', getCachedAgyModelFamilies()), {
+    model: 'gemini-3.1-pro-high',
+    effort: '',
+  });
+  cacheAgyModelFamilies(null);
+  assert.equal(getCachedAgyModelFamilies(), null, 'null resets the cache (test-isolation seam)');
 });
 
 test('buildGeminiContextUsagePayload percentage', () => {
@@ -330,4 +408,175 @@ test('split/compose agy model ids', () => {
   });
   assert.equal(composeAgyModelId('gemini-3.5-flash', 'low'), 'gemini-3.5-flash-low');
   assert.equal(stripEffortFromLabel('Gemini 3.6 Flash (High)'), 'Gemini 3.6 Flash');
+});
+
+/**
+ * Isolates agy binary discovery so only the AGY_HOME/bin tree can match:
+ * clears overrides/env homes and points $HOME at an empty temp dir (os.homedir()
+ * reads $HOME on POSIX). Cross-platform win32 probing is exercised via the
+ * injectable platformId — same convention as cli-path's forceWindows flag.
+ */
+function withIsolatedAgyDiscovery(fn) {
+  const keys = ['AGY_PATH', 'AGY_CLI_PATH', 'GEMINI_CLI_PATH', 'AGY_HOME', 'ANTIGRAVITY_CLI_HOME', 'HOME'];
+  const saved = {};
+  for (const k of keys) saved[k] = process.env[k];
+  const dir = fs.mkdtempSync(join(tmpdir(), 'agy-discovery-'));
+  process.env.AGY_HOME = join(dir, 'agyhome');
+  process.env.HOME = join(dir, 'home');
+  delete process.env.AGY_PATH;
+  delete process.env.AGY_CLI_PATH;
+  delete process.env.GEMINI_CLI_PATH;
+  delete process.env.ANTIGRAVITY_CLI_HOME;
+  fs.mkdirSync(join(dir, 'home'), { recursive: true });
+  try {
+    return fn(join(dir, 'agyhome', 'bin'));
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function makeExecutable(filePath) {
+  fs.mkdirSync(join(filePath, '..'), { recursive: true });
+  fs.writeFileSync(filePath, '#!/bin/sh\n');
+  fs.chmodSync(filePath, 0o755);
+}
+
+test('resolveAgyBinary win32 probe prefers agy.exe over agy.cmd (cross-platform)', () => {
+  withIsolatedAgyDiscovery((binDir) => {
+    const exe = join(binDir, 'agy.exe');
+    const cmd = join(binDir, 'agy.cmd');
+    makeExecutable(exe);
+    makeExecutable(cmd);
+    assert.equal(resolveAgyBinary('win32'), exe);
+  });
+});
+
+test('resolveAgyBinary win32 probe discovers a lone agy.cmd npm shim', () => {
+  withIsolatedAgyDiscovery((binDir) => {
+    const cmd = join(binDir, 'agy.cmd');
+    makeExecutable(cmd);
+    assert.equal(resolveAgyBinary('win32'), cmd);
+  });
+});
+
+test('resolveAgyBinary win32 PATH scan is name-major across directories', () => {
+  // agy.exe in a LATER PATH dir must beat agy.cmd in an earlier one — the
+  // scan tries every dir for agy.exe before any dir for the shim, so a
+  // stray npm shim cannot shadow a real executable further down the PATH.
+  withIsolatedAgyDiscovery(() => {
+    const dirA = fs.mkdtempSync(join(tmpdir(), 'agy-path-a-'));
+    const dirB = fs.mkdtempSync(join(tmpdir(), 'agy-path-b-'));
+    const exe = join(dirB, 'agy.exe');
+    makeExecutable(join(dirA, 'agy.cmd'));
+    makeExecutable(exe);
+    const savedPath = process.env.PATH;
+    process.env.PATH = [dirA, dirB].join(delimiter);
+    try {
+      assert.equal(resolveAgyBinary('win32'), exe);
+    } finally {
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+      fs.rmSync(dirA, { recursive: true, force: true });
+      fs.rmSync(dirB, { recursive: true, force: true });
+    }
+  });
+});
+
+test('resolveAgyBinary non-win32 platforms never pick agy.cmd', () => {
+  withIsolatedAgyDiscovery((binDir) => {
+    const cmd = join(binDir, 'agy.cmd');
+    makeExecutable(cmd);
+    // A system agy elsewhere may legitimately resolve, but the .cmd shim
+    // must not be a candidate outside win32.
+    assert.notEqual(resolveAgyBinary('linux'), cmd);
+    assert.notEqual(resolveAgyBinary('darwin'), cmd);
+  });
+});
+
+test('resolveAgyBinary probes the ~/.antigravity/bin install dir', () => {
+  // The Java detector probes ~/.antigravity/bin (homeBinDirs AGY case);
+  // the resolver must find agy there too, else status says "available"
+  // while every send fails "not found".
+  withIsolatedAgyDiscovery(() => {
+    const homeBin = join(process.env.HOME, '.antigravity', 'bin', 'agy');
+    makeExecutable(homeBin);
+    assert.equal(resolveAgyBinary('linux'), homeBin);
+  });
+});
+
+// The positive case seeds the module-level families cache; reset first so
+// earlier tests in this file cannot mask the probe assertions.
+test('warmAgyModelCatalogForModel probes only for bare family ids', async () => {
+  cacheAgyModelFamilies(null);
+  const dir = fs.mkdtempSync(join(tmpdir(), 'agy-warm-'));
+  const bin = join(dir, 'agy-fake');
+  const logPath = join(dir, 'calls.log');
+  fs.writeFileSync(bin, `#!/usr/bin/env node
+const fs = require('fs');
+if (process.argv[2] === 'models') {
+  fs.appendFileSync(${JSON.stringify(logPath)}, 'models\\n');
+  console.log('gemini-3.5-flash-low Low');
+  process.exit(0);
+}
+process.exit(1);
+`, 'utf8');
+  fs.chmodSync(bin, 0o755);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    // Empty model and full slugs must not spawn `agy models` at all.
+    await warmAgyModelCatalogForModel('');
+    await warmAgyModelCatalogForModel('gemini-3.5-flash-high');
+    assert.equal(fs.existsSync(logPath), false, 'no `agy models` probe expected');
+
+    // Bare family id warms the cache from the fake catalog.
+    await warmAgyModelCatalogForModel('gemini-3.5-flash');
+    assert.equal(fs.existsSync(logPath), true, 'expected one `agy models` probe');
+    assert.ok(getCachedAgyModelFamilies(), 'expected the families cache seeded');
+
+    // Warm cache short-circuits further probes.
+    const sizeBefore = fs.statSync(logPath).size;
+    await warmAgyModelCatalogForModel('gemini-3.5-flash');
+    assert.equal(fs.statSync(logPath).size, sizeBefore, 'warm cache must not re-probe');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    // This test seeds the module-level families cache — reset it so later
+    // tests in this file cannot inherit a warm cache (the masking the
+    // file's leading comment warns about).
+    cacheAgyModelFamilies(null);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listAgyModels spawns the resolved binary and parses its output', async () => {
+  // End-to-end over the spawn plumbing (resolveCliSpawn invocation +
+  // execFileAsync): a broken composition returns [] via the catch and fails.
+  // Manual env isolation (not withIsolatedAgyDiscovery — its finally rmSync
+  // runs at the first internal await and deletes the fake binary mid-spawn;
+  // same manual idiom as the warmAgyModelCatalogForModel test above).
+  const dir = fs.mkdtempSync(join(tmpdir(), 'agy-list-'));
+  const bin = join(dir, 'agy-fake');
+  fs.writeFileSync(bin, '#!/bin/sh\n'
+    + 'echo "claude-sonnet-4-6  Claude Sonnet 4.6 (High)"\n'
+    + 'echo "gemini-3.6-flash  Gemini 3.6 Flash (Medium)"\n');
+  fs.chmodSync(bin, 0o755);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const models = await listAgyModels();
+    assert.deepEqual(
+      models.map((m) => m.id),
+      ['claude-sonnet-4-6', 'gemini-3.6-flash'],
+    );
+    assert.equal(models[1].label, 'Gemini 3.6 Flash (Medium)');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

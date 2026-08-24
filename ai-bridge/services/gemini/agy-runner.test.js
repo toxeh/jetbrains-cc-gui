@@ -69,6 +69,40 @@ test('runAgyTurn rejects when binary missing', async () => {
   }
 });
 
+test('runAgyTurn not-found hint names both AGY_PATH and AGY_CLI_PATH', async () => {
+  // The Java detector (CliStatusDetector) honors AGY_PATH and AGY_CLI_PATH —
+  // the hint must list both, or users following it stay broken.
+  const prev = process.env.AGY_PATH;
+  const prevG = process.env.GEMINI_CLI_PATH;
+  const prevA = process.env.AGY_CLI_PATH;
+  const prevPath = process.env.PATH;
+  process.env.AGY_PATH = '/nonexistent/agy-binary-xyz';
+  process.env.GEMINI_CLI_PATH = '/nonexistent/gemini';
+  process.env.AGY_CLI_PATH = '';
+  process.env.PATH = '';
+  try {
+    await assert.rejects(
+      () => runAgyTurn({ message: 'x' }),
+      (err) => {
+        assert.match(err.message, /not found/i);
+        assert.match(err.message, /AGY_PATH/);
+        assert.match(err.message, /AGY_CLI_PATH/);
+        // Setups that followed the old spec must be pointed at the cause.
+        assert.match(err.message, /GEMINI_CLI_PATH is deliberately ignored/);
+        return true;
+      },
+    );
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    if (prevG === undefined) delete process.env.GEMINI_CLI_PATH;
+    else process.env.GEMINI_CLI_PATH = prevG;
+    if (prevA === undefined) delete process.env.AGY_CLI_PATH;
+    else process.env.AGY_CLI_PATH = prevA;
+    process.env.PATH = prevPath;
+  }
+});
+
 test('runAgyTurn rejects hard failure with no partial output', async () => {
   const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
 console.error('authentication required');
@@ -138,7 +172,8 @@ process.exit(0);
     const { readFileSync } = await import('node:fs');
     const argv = JSON.parse(readFileSync(logPath, 'utf8'));
     assert.ok(argv.includes('--model'));
-    assert.ok(argv.includes('gemini-3.6-flash-medium'), 'got: ' + argv.join(' '));
+    // No cached catalog in tests → bare family falls back to -high.
+    assert.ok(argv.includes('gemini-3.6-flash-high'), 'got: ' + argv.join(' '));
     assert.ok(!argv.includes('--effort'), 'must not pass --effort, got: ' + argv.join(' '));
   } finally {
     if (prev === undefined) delete process.env.AGY_PATH;
@@ -172,6 +207,73 @@ process.exit(0);
     assert.match(turn.error, /not available in print mode/);
     // callers (message-service) throw on non-SUCCESS without response text
     assert.equal(turn.response, '');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function signalListenerCount() {
+  // Per-turn shutdown hooks: exit/SIGTERM/SIGINT. Stacked leftovers from
+  // earlier turns all run on the next signal (each calling process.exit(0)).
+  return process.listenerCount('exit')
+    + process.listenerCount('SIGTERM')
+    + process.listenerCount('SIGINT');
+}
+
+test('runAgyTurn removes signal listeners when the turn closes (AC4)', async () => {
+  const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
+console.log(JSON.stringify({ event: 'result', result: { conversation_id: 'c', status: 'SUCCESS', response: 'ok' } }));
+process.exit(0);
+`);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const before = signalListenerCount();
+    await runAgyTurn({ message: 'x' });
+    assert.equal(signalListenerCount(), before, 'close path must remove exit/SIGTERM/SIGINT hooks');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runAgyTurn removes signal listeners when the spawn errors (AC4)', async () => {
+  // Non-executable file → EACCES spawn error (never reaches close handling).
+  const dir = mkdtempSync(join(tmpdir(), 'agy-err-'));
+  const bin = join(dir, 'agy-noexec');
+  writeFileSync(bin, '#!/usr/bin/env node\n', { encoding: 'utf8' });
+  chmodSync(bin, 0o644);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const before = signalListenerCount();
+    await assert.rejects(() => runAgyTurn({ message: 'x' }));
+    assert.equal(signalListenerCount(), before, 'error path must remove exit/SIGTERM/SIGINT hooks');
+  } finally {
+    if (prev === undefined) delete process.env.AGY_PATH;
+    else process.env.AGY_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runAgyTurn watchdog removes signal listeners on timeout (AC4)', async () => {
+  // The watchdog path removes the hooks itself before rejecting; a stacked
+  // leftover here would exit(0) the daemon on the next signal.
+  const { dir, bin } = makeFakeAgy(`#!/usr/bin/env node
+setInterval(() => {}, 60_000); // hang forever — watchdog must reap us
+`);
+  const prev = process.env.AGY_PATH;
+  process.env.AGY_PATH = bin;
+  try {
+    const before = signalListenerCount();
+    await assert.rejects(
+      () => runAgyTurn({ message: 'x', turnTimeoutMs: 250 }),
+      /timed out/,
+    );
+    assert.equal(signalListenerCount(), before, 'timeout path must remove exit/SIGTERM/SIGINT hooks');
   } finally {
     if (prev === undefined) delete process.env.AGY_PATH;
     else process.env.AGY_PATH = prev;
