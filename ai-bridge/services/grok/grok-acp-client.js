@@ -1091,8 +1091,10 @@ export function isAutoApproveMode(permissionMode) {
  *   text:  { type: "text", text }
  *   image: { type: "image", mimeType: "image/png", data: "<base64>" }
  *
- * When the user only attaches images with empty text, inject
- * GROK_IMAGE_ONLY_FALLBACK_TEXT so the payload stays valid.
+ * When the user only attaches images with empty text AND at least one image
+ * actually loaded, inject GROK_IMAGE_ONLY_FALLBACK_TEXT so the payload stays
+ * valid. If every image failed to load, no image analysis is promised - the
+ * attachments note below names what was attached instead.
  */
 export function buildPromptBlocks({
   message,
@@ -1104,11 +1106,8 @@ export function buildPromptBlocks({
   const blocks = [];
   let text = message || '';
 
-  if (agentPrompt && String(agentPrompt).trim()) {
-    text =
-      `${text}\n\n## Agent Role and Instructions\n\n${String(agentPrompt).trim()}`;
-  }
-
+  // Load images first: the image-only fallback below is only honest when at
+  // least one image block actually made it into the payload.
   const { blocks: imageBlocks, loaded, errors } = buildGrokImageBlocks(
     Array.isArray(attachments) ? attachments : []
   );
@@ -1120,10 +1119,14 @@ export function buildPromptBlocks({
   if (loaded > 0) {
     console.error(`[Grok] embedding ${loaded} image block(s) into ACP prompt`);
   }
-  // Decide the image-only fallback before rules are appended. A rules file
-  // must not hide the request to look at the attached images.
+
   if (!String(text).trim() && loaded > 0) {
     text = GROK_IMAGE_ONLY_FALLBACK_TEXT;
+  }
+
+  if (agentPrompt && String(agentPrompt).trim()) {
+    text =
+      `${text}\n\n## Agent Role and Instructions\n\n${String(agentPrompt).trim()}`;
   }
 
   // Load user-global rules for Grok from ~/.grok/grok-rules.md (if exists).
@@ -1167,10 +1170,9 @@ export function buildPromptBlocks({
   const trimmedText = String(text || '').trim();
   if (trimmedText) {
     blocks.push({ type: 'text', text });
-  } else if (imageBlocks.length > 0) {
-    // Grok requires at least one text content block with multimodal payloads.
-    blocks.push({ type: 'text', text: GROK_IMAGE_ONLY_FALLBACK_TEXT });
   } else {
+    // Grok requires at least one text content block; an empty turn keeps an
+    // empty text block rather than promising images that are not there.
     blocks.push({ type: 'text', text: text || '' });
   }
 
