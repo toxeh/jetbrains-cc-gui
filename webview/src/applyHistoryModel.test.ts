@@ -25,6 +25,7 @@ function makeDeps(overrides: Partial<ApplyHistoryModelDeps> = {}): ApplyHistoryM
     setSelectedGrokModel: vi.fn(),
     setSelectedKimiModel: vi.fn(),
     setSelectedMiniMaxModel: vi.fn(),
+    setSelectedZcodeModel: vi.fn(),
     setSelectedOpenCodeModel: vi.fn(),
     setSelectedPiModel: vi.fn(),
     setSelectedDshModel: vi.fn(),
@@ -48,7 +49,8 @@ function expectOnlySetter(
 ) {
   const allSetters: Array<keyof ApplyHistoryModelDeps> = [
     'setSelectedClaudeModel', 'setSelectedCodexModel', 'setSelectedGrokModel',
-    'setSelectedKimiModel', 'setSelectedMiniMaxModel', 'setSelectedOpenCodeModel',
+    'setSelectedKimiModel', 'setSelectedMiniMaxModel', 'setSelectedZcodeModel',
+    'setSelectedOpenCodeModel',
     'setSelectedPiModel', 'setSelectedDshModel', 'setSelectedGeminiModel',
     'setSelectedOmpModel',
   ];
@@ -98,7 +100,7 @@ describe('createApplyHistoryModel — gemini history rows', () => {
 describe('createApplyHistoryModel — claude normalization preserved', () => {
   it('aliases a retired model id and strips [1m] for the slot', () => {
     const deps = makeDeps();
-    makeApply(deps)('claude', 'claude-opus-4-6[1m]');
+    makeApply(deps)('claude', 'claude-opus-4-8[1m]');
 
     expectOnlySetter(deps, 'setSelectedClaudeModel', 'claude-opus-5');
     // The bridge event re-applies the suffix per longContextEnabled (false

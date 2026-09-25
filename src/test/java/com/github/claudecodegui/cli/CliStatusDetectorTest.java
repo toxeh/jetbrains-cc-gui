@@ -21,12 +21,25 @@ public class CliStatusDetectorTest {
     @Test
     public void envKeysFor_everyToolUsesBinPathCliPathConvention() {
         for (CliToolId tool : CliToolId.values()) {
+            // ZCode has no PATH binary, so its override keys are the bundle
+            // file path rather than BIN/PATH/CLI_PATH.
+            if (tool == CliToolId.ZCODE) {
+                continue;
+            }
             String[] keys = CliStatusDetector.envKeysFor(tool);
-            String suffix = tool == CliToolId.GEMINI ? "GEMINI" : tool.getId().toUpperCase();
+            String suffix = tool.getId().toUpperCase();
             assertEquals(tool + " first env key", suffix + "_BIN", keys[0]);
             assertEquals(tool + " second env key", suffix + "_PATH", keys[1]);
             assertEquals(tool + " third env key", suffix + "_CLI_PATH", keys[2]);
         }
+    }
+
+    @Test
+    public void envKeysFor_zcodePointsAtTheBundleFile() {
+        assertArrayEquals(
+                new String[]{"ZCODE_CLI_PATH", "ZCODE_PATH"},
+                CliStatusDetector.envKeysFor(CliToolId.ZCODE)
+        );
     }
 
     @Test

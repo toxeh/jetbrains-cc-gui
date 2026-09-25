@@ -54,6 +54,12 @@ java {
     }
 }
 
+// JBR 21 starts an AppKit thread during the IDE test runner. From a session
+// without a window server that thread SIGSEGVs in libobjc. Headless skips it.
+tasks.withType(Test).configureEach {
+    systemProperty 'java.awt.headless', 'true'
+}
+
 // Configure custom JDK path if specified in local.properties
 if (localJavaHome) {
     def javaHomeDir = file(localJavaHome)

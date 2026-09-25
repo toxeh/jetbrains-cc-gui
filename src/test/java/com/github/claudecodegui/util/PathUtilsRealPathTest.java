@@ -16,7 +16,8 @@ public class PathUtilsRealPathTest {
 
     @Test
     public void resolvesSymlinkedProjectPathToPhysicalPath() throws IOException {
-        Path realDir = Files.createTempDirectory("pathutils-realpath-real");
+        // macOS tmp is /var -> /private/var. realPath() returns the physical path.
+        Path realDir = Files.createTempDirectory("pathutils-realpath-real").toRealPath();
         Path linkPath = Paths.get(realDir + "-link");
         try {
             boolean linkCreated;
