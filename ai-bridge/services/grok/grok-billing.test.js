@@ -56,6 +56,28 @@ test('billingToCapacity falls back to legacy monthly cents', () => {
   assert.equal(out.windows[0].id, 'current');
 });
 
+test('billingToCapacity shows 0% when a new period omits creditUsagePercent', () => {
+  const out = billingToCapacity({
+    config: {
+      currentPeriod: {
+        type: 'USAGE_PERIOD_TYPE_WEEKLY',
+        start: '2026-10-02T09:22:05Z',
+        end: '2026-10-09T09:22:05Z',
+      },
+      billingPeriodStart: '2026-10-02T09:22:05Z',
+      billingPeriodEnd: '2026-10-09T09:22:05Z',
+      isUnifiedBillingUser: true,
+    },
+    subscriptionTier: 'SuperGrok Heavy',
+  });
+  assert.equal(out.present, true);
+  assert.equal(out.capacity_pct, 0);
+  assert.equal(out.level, 'SuperGrok Heavy');
+  assert.equal(out.period_type, 'USAGE_PERIOD_TYPE_WEEKLY');
+  assert.equal(out.windows[0].used_pct, 0);
+  assert.equal(out.reset_at, '2026-10-09T09:22:05Z');
+});
+
 test('billingToCapacity hides the bar when no percent can be derived', () => {
   const out = billingToCapacity({ config: { onDemandEnabled: false } });
   assert.equal(out.present, false);

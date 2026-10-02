@@ -38,6 +38,13 @@ function unwrapBilling(raw) {
   return o;
 }
 
+function hasBillingPeriod(config) {
+  if (asObject(config.currentPeriod)) return true;
+  if (typeof config.billingPeriodEnd === 'string' && config.billingPeriodEnd) return true;
+  if (typeof config.billingPeriodStart === 'string' && config.billingPeriodStart) return true;
+  return false;
+}
+
 function unavailable(message) {
   return {
     present: false,
@@ -66,6 +73,11 @@ export function billingToCapacity(raw) {
     if (limit != null && limit > 0 && used != null) {
       pct = (used / limit) * 100;
     }
+  }
+  // A new weekly window omits creditUsagePercent while used is still zero.
+  // That snapshot is a real grok.com period, so the bar stays at 0% instead of hiding.
+  if (pct == null && hasBillingPeriod(config)) {
+    pct = 0;
   }
   if (pct == null) {
     return unavailable('billing missing creditUsagePercent');
