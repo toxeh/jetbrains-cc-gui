@@ -25,6 +25,10 @@ import {
   buildGrokImageBlocks,
   GROK_IMAGE_ONLY_FALLBACK_TEXT,
 } from '../../utils/cli-image-input.js';
+import {
+  isAskUserQuestionRequestMethod,
+  handleAskUserQuestionServerRequest,
+} from './grok-question-bridge.js';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -747,6 +751,16 @@ export async function runAcpTurn({
         });
         acp.respond(id, decision.response);
         return true;
+      }
+
+      if (isAskUserQuestionRequestMethod(method, params)) {
+        return await handleAskUserQuestionServerRequest({
+          method,
+          params,
+          id,
+          acp,
+          emit,
+        });
       }
 
       return false;
