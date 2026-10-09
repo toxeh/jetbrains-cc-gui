@@ -13,6 +13,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import {
   resolveGrokBinary,
+  resolveGrokAgentLaunch,
   selectGrokAuthMethodId,
   normalizeAuthMethod,
   applyGrokBaseUrlEnv,
@@ -274,10 +275,12 @@ export class GrokAcpClient {
     if (this.proc) return;
 
     const bin = resolveGrokBinary();
-    this.proc = spawn(bin, ['agent', 'stdio'], {
+    const launch = resolveGrokAgentLaunch(bin);
+    this.proc = spawn(launch.file, launch.args, {
       cwd: this.cwd,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(launch.windowsHide ? { windowsHide: true } : {}),
     });
 
     this.activeSessionId = null;

@@ -1,5 +1,6 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolveGrokAgentLaunch } from './grok-utils.js';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -81,6 +82,23 @@ function answerPendingQuestion() {
     }));
   }
 }
+
+test('windows launches a node-script Grok CLI through node.exe', () => {
+  const script = 'C:\\temp\\fake-grok.mjs';
+  const launch = resolveGrokAgentLaunch(script, 'win32');
+  assert.equal(launch.file, process.execPath);
+  assert.deepEqual(launch.args, [script, 'agent', 'stdio']);
+  assert.equal(launch.windowsHide, true);
+
+  const exe = resolveGrokAgentLaunch('C:\\grok\\grok.exe', 'win32');
+  assert.equal(exe.file, 'C:\\grok\\grok.exe');
+  assert.deepEqual(exe.args, ['agent', 'stdio']);
+  assert.equal(exe.windowsHide, false);
+
+  const unix = resolveGrokAgentLaunch('/tmp/fake-grok.mjs', 'linux');
+  assert.equal(unix.file, '/tmp/fake-grok.mjs');
+  assert.deepEqual(unix.args, ['agent', 'stdio']);
+});
 
 test('runAcpTurn answers _x.ai/ask_user_question with accepted, not the permission allow', async () => {
   const { runAcpTurn } = await import('./grok-acp-client.js');
