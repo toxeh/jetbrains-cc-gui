@@ -2423,6 +2423,100 @@ public class CodemossSettingsService {
         });
     }
 
+    // ==================== Local Translate Config ====================
+
+    public static final String LOCAL_TRANSLATE_KEY = "localTranslate";
+    public static final String DEFAULT_LOCAL_TRANSLATE_BASE_URL = "http://127.0.0.1:11434/v1";
+    public static final String DEFAULT_LOCAL_TRANSLATE_MODEL = "qwen2.5:3b";
+    public static final String LOCAL_TRANSLATE_SHORTCUT_CMD_ENTER = "cmdEnter";
+    public static final String LOCAL_TRANSLATE_SHORTCUT_SHIFT_ENTER = "shiftEnter";
+    public static final String DEFAULT_LOCAL_TRANSLATE_INSTRUCTION =
+            "Translate the prose into English. Do not change code or paths.";
+    private static final String CHAT_COMPLETIONS_SUFFIX = "/chat/completions";
+
+    /**
+     * Read the optional {@code localTranslate} block from {@code ~/.codemoss/config.json}.
+     *
+     * <p>The file is never written: an absent block simply yields the defaults with
+     * {@code enabled=false}. The returned object always has {@code enabled}, {@code baseUrl},
+     * {@code model}, {@code shortcut} and {@code instruction}; {@code apiKey} is present only
+     * when configured as a non-blank string.
+     */
+    public JsonObject getLocalTranslateConfig() throws IOException {
+        JsonObject root = readConfig();
+        JsonElement raw = root != null ? root.get(LOCAL_TRANSLATE_KEY) : null;
+        return normalizeLocalTranslateConfig(raw != null && raw.isJsonObject() ? raw.getAsJsonObject() : null);
+    }
+
+    /**
+     * Normalize a raw {@code localTranslate} block. Package-private static for unit tests.
+     */
+    static JsonObject normalizeLocalTranslateConfig(JsonObject raw) {
+        JsonObject result = new JsonObject();
+        boolean enabled = false;
+        if (raw != null && raw.has("enabled")) {
+            JsonElement e = raw.get("enabled");
+            enabled = e != null && e.isJsonPrimitive() && e.getAsJsonPrimitive().isBoolean() && e.getAsBoolean();
+        }
+        result.addProperty("enabled", enabled);
+        result.addProperty("baseUrl", normalizeLocalTranslateBaseUrl(readLocalTranslateString(raw, "baseUrl")));
+
+        String model = readLocalTranslateString(raw, "model");
+        result.addProperty("model", model == null || model.isBlank() ? DEFAULT_LOCAL_TRANSLATE_MODEL : model.strip());
+
+        String shortcut = readLocalTranslateString(raw, "shortcut");
+        shortcut = shortcut == null ? null : shortcut.strip();
+        result.addProperty("shortcut", LOCAL_TRANSLATE_SHORTCUT_SHIFT_ENTER.equals(shortcut)
+                ? LOCAL_TRANSLATE_SHORTCUT_SHIFT_ENTER
+                : LOCAL_TRANSLATE_SHORTCUT_CMD_ENTER);
+
+        // Only the ends are trimmed; inner spacing in a custom instruction is intentional.
+        String instruction = readLocalTranslateString(raw, "instruction");
+        result.addProperty("instruction", instruction == null || instruction.isBlank()
+                ? DEFAULT_LOCAL_TRANSLATE_INSTRUCTION
+                : instruction.strip());
+
+        String apiKey = readLocalTranslateString(raw, "apiKey");
+        if (apiKey != null && !apiKey.isBlank()) {
+            result.addProperty("apiKey", apiKey.strip());
+        }
+        return result;
+    }
+
+    /**
+     * Strip trailing slashes and a trailing {@code /chat/completions} so callers can append
+     * {@code /models} or {@code /chat/completions} without doubling the suffix.
+     */
+    static String normalizeLocalTranslateBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return DEFAULT_LOCAL_TRANSLATE_BASE_URL;
+        }
+        String url = stripTrailingSlashes(baseUrl.strip());
+        if (url.toLowerCase(java.util.Locale.ROOT).endsWith(CHAT_COMPLETIONS_SUFFIX)) {
+            url = stripTrailingSlashes(url.substring(0, url.length() - CHAT_COMPLETIONS_SUFFIX.length()));
+        }
+        return url.isEmpty() ? DEFAULT_LOCAL_TRANSLATE_BASE_URL : url;
+    }
+
+    private static String stripTrailingSlashes(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(0, end);
+    }
+
+    private static String readLocalTranslateString(JsonObject raw, String key) {
+        if (raw == null || !raw.has(key)) {
+            return null;
+        }
+        JsonElement e = raw.get(key);
+        if (e == null || !e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) {
+            return null;
+        }
+        return e.getAsString();
+    }
+
     // ==================== Prompt Enhancer Config Management ====================
 
     /**

@@ -9,10 +9,13 @@ import FileChangesList from './FileChangesList';
 import UndoConfirmDialog from './UndoConfirmDialog';
 import DiscardAllDialog from './DiscardAllDialog';
 import type { TabType, StatusPanelProps } from './types';
+import { useReplyTranslation } from '../../contexts/ReplyTranslationContext';
 import './StatusPanel.less';
 
 const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, currentSessionId, currentProvider, expanded = true, isStreaming = false, onUndoFile, onDiscardAll, onKeepAll }: StatusPanelProps) => {
   const { t } = useTranslation();
+  const { enabled: localTranslateEnabled, isAllShown, toggleAll } = useReplyTranslation();
+  const allShown = isAllShown();
   const [openPopover, setOpenPopover] = useState<TabType | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -361,6 +364,23 @@ const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, current
             </div>
           </div>
         </div>
+
+        {/* Session Translate All Globe */}
+        {localTranslateEnabled && (
+          <button
+            type="button"
+            className="status-panel-globe-btn"
+            aria-pressed={allShown}
+            aria-label={t(allShown ? 'localTranslate.replyAllHide' : 'localTranslate.replyAllShow')}
+            title={t(allShown ? 'localTranslate.replyAllHide' : 'localTranslate.replyAllShow')}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleAll();
+            }}
+          >
+            <span className="codicon codicon-globe" />
+          </button>
+        )}
       </div>
 
       {/* Popover Content */}

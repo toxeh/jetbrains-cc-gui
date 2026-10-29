@@ -24,6 +24,7 @@ import {
   useResizableChatInputBox,
 } from './index.js';
 import { useChatInputTextPipeline } from './useChatInputTextPipeline.js';
+import { useLocalTranslate } from './useLocalTranslate.js';
 import { SessionContext } from '../../../contexts/SessionContext.js';
 import { useUIState } from '../../../contexts/UIStateContext.js';
 import { useContextMenu } from '../../../hooks/useContextMenu.js';
@@ -47,6 +48,7 @@ interface UseChatInputControllerOptions
     | 'onAgentSelect'
     | 'onOpenAgentSettings'
     | 'onOpenPromptSettings'
+    | 'disabled'
   > {
   selectedModel: string;
   currentProvider: string;
@@ -88,6 +90,7 @@ export function useChatInputController({
   onAgentSelect,
   onOpenAgentSettings,
   onOpenPromptSettings,
+  disabled = false,
   t,
   ref,
 }: UseChatInputControllerOptions) {
@@ -259,6 +262,21 @@ export function useChatInputController({
     selectedModel,
   });
 
+  // Local prompt translation: replaces the draft, never sends.
+  const localTranslate = useLocalTranslate({
+    editableRef,
+    getTextContent,
+    invalidateCache,
+    adjustHeight,
+    setHasContent,
+    notifyInput,
+    sendShortcut,
+    currentProvider,
+    disabled,
+    addToast,
+    t,
+  });
+
   const handleOpenPromptEnhancerSettings = useCallback(() => {
     handleCloseEnhancerDialog();
     setSettingsInitialTab('promptEnhancer');
@@ -313,6 +331,8 @@ export function useChatInputController({
     completionSelectedRef,
     submittedOnEnterRef,
     handleSubmit,
+    translateShortcut: localTranslate.translateShortcut,
+    handleTranslate: localTranslate.handleTranslate,
   });
 
   useControlledValueSync({
@@ -343,6 +363,8 @@ export function useChatInputController({
     handleSubmit,
     handleEnhancePrompt,
     handleCompositionEnd,
+    translateShortcut: localTranslate.translateShortcut,
+    handleTranslate: localTranslate.handleTranslate,
   });
 
   const handleIdeaSend = useEffectEvent(() => {
@@ -449,6 +471,7 @@ export function useChatInputController({
     isEnhancing,
     handleEnhancePrompt,
     promptEnhancer,
+    localTranslate,
     handleModeSelect,
     handleModelSelect,
     inlineCompletion,

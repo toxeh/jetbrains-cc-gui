@@ -2182,6 +2182,25 @@
     "openSettingsTooltip": "プロンプト強化の設定を開く",
     "resolvingUsage": "実行設定を解決中…"
   },
+  "localTranslate": {
+    "tooltip": "ローカルモデルで下書きを翻訳",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Shift+Enter",
+    "failed": "ローカル翻訳に失敗しました",
+    "unreachable": "ローカルモデルサーバーに接続できません",
+    "timeout": "ローカルモデルが 15 秒以内に応答しませんでした",
+    "httpError": "ローカルモデルサーバーが HTTP {{status}} を返しました",
+    "invalidResponse": "ローカルモデルがテキストを返しませんでした",
+    "disabled": "設定でローカル翻訳が無効になっています",
+    "placeholderMismatch": "モデルが保護されたチップまたはコードを変更したため、下書きは変更されていません",
+    "draftChanged": "翻訳中に下書きが変更されたため、結果を破棄しました",
+    "replyShow": "翻訳",
+    "replyHide": "原文",
+    "replyAllShow": "すべて翻訳",
+    "replyAllHide": "原文を表示",
+    "cacheUnreadable": "保存された翻訳を読み込めませんでした"
+  },
   "fileContext": {
     "placeholder": "ファイルコンテキスト",
     "enableTitle": "ファイルコンテキストを有効にしますか？",

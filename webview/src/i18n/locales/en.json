@@ -2703,6 +2703,25 @@
     "openSettingsTooltip": "Open prompt enhancer settings",
     "resolvingUsage": "Resolving runtime config…"
   },
+  "localTranslate": {
+    "tooltip": "Translate draft with local model",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Shift+Enter",
+    "failed": "Local translation failed",
+    "unreachable": "Local model server is not reachable",
+    "timeout": "Local model did not answer within 15 seconds",
+    "httpError": "Local model server returned HTTP {{status}}",
+    "invalidResponse": "Local model returned no text",
+    "disabled": "Local translation is disabled in config",
+    "placeholderMismatch": "The model changed protected chips or code; draft left unchanged",
+    "draftChanged": "The draft changed during translation; result discarded",
+    "replyShow": "Translate",
+    "replyHide": "Original",
+    "replyAllShow": "Translate all",
+    "replyAllHide": "Show original",
+    "cacheUnreadable": "Saved translations could not be read"
+  },
   "fileContext": {
     "placeholder": "File Context",
     "enableTitle": "Enable File Context?",

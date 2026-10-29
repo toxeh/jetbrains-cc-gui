@@ -295,6 +295,7 @@ export const MessageItem = memo(function MessageItem({
           currentProvider={currentProvider}
           groupedBlocks={groupedBlocks}
           renderedBlockCount={bubbleBlocks.length}
+          lastSourceBlock={blocks[blocks.length - 1]}
           isMessageStreaming={isMessageStreaming}
           isThinking={isThinking}
           isLast={isLast}

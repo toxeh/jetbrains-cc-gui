@@ -39,7 +39,8 @@ function getCustomCodexModels(): ModelInfo[] {
 
 /**
  * ButtonArea - Bottom toolbar component
- * Contains mode selector, model selector, attachment button, prompt enhancer button, send/stop button
+ * Contains mode selector, model selector, attachment button, prompt enhancer button,
+ * local translate button (when its server is reachable), send/stop button
  */
 export const ButtonArea = ({
   disabled = false,
@@ -66,6 +67,12 @@ export const ButtonArea = ({
   onDshPresetChange,
   onOmpApprovalModeChange,
   onEnhancePrompt,
+  hasTextContent = false,
+  translateReachable = false,
+  isTranslating = false,
+  translateDisabled = false,
+  translateShortcutLabel = null,
+  onTranslate,
   alwaysThinkingEnabled = false,
   onToggleThinking,
   streamingEnabled = true,
@@ -270,6 +277,18 @@ export const ButtonArea = ({
     onEnhancePrompt?.();
   }, [onEnhancePrompt]);
 
+  /**
+   * Handle local translate button click. Rewrites the draft; never submits.
+   */
+  const handleTranslateClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onTranslate?.();
+  }, [onTranslate]);
+
+  const translateTooltip = translateShortcutLabel
+    ? `${t('localTranslate.tooltip')} (${translateShortcutLabel})`
+    : t('localTranslate.tooltip');
+
   // Collapse selector labels for every CLI when left cluster is about to hit the send cluster (10px).
   const buttonAreaRef = useRef<HTMLDivElement>(null);
   const buttonAreaLeftRef = useRef<HTMLDivElement>(null);
@@ -362,6 +381,20 @@ export const ButtonArea = ({
         >
           <span className={`codicon ${isEnhancing ? 'codicon-loading codicon-modifier-spin' : 'codicon-sparkle'}`} />
         </button>
+
+        {/* Local translate button: only while the local server answers the probe */}
+        {translateReachable && (
+          <button
+            type="button"
+            className="enhance-prompt-button local-translate-button has-tooltip"
+            onClick={handleTranslateClick}
+            disabled={translateDisabled || !hasTextContent || isTranslating}
+            data-tooltip={translateTooltip}
+            aria-label={t('localTranslate.tooltip')}
+          >
+            <span className={`codicon ${isTranslating ? 'codicon-loading codicon-modifier-spin' : 'codicon-globe'}`} />
+          </button>
+        )}
 
         {/* Send/Stop button */}
         {isLoading ? (

@@ -41,6 +41,11 @@ export function ChatInputBoxFooter({
   onDshPresetChange,
   onOmpApprovalModeChange,
   onEnhancePrompt,
+  hasTextContent = false,
+  translateReachable = false,
+  isTranslating = false,
+  translateShortcutLabel = null,
+  onTranslate,
   alwaysThinkingEnabled,
   onToggleThinking,
   streamingEnabled,
@@ -87,6 +92,12 @@ export function ChatInputBoxFooter({
   onDshPresetChange?: (preset: string) => void;
   onOmpApprovalModeChange?: (mode: OmpApprovalMode) => void;
   onEnhancePrompt: () => void;
+  /** Draft has text (attachments excluded); gates the translate button. */
+  hasTextContent?: boolean;
+  translateReachable?: boolean;
+  isTranslating?: boolean;
+  translateShortcutLabel?: string | null;
+  onTranslate?: () => void;
   alwaysThinkingEnabled?: boolean;
   onToggleThinking?: (enabled: boolean) => void;
   streamingEnabled?: boolean;
@@ -151,6 +162,12 @@ export function ChatInputBoxFooter({
         onDshPresetChange={onDshPresetChange}
         onOmpApprovalModeChange={onOmpApprovalModeChange}
         onEnhancePrompt={onEnhancePrompt}
+        hasTextContent={hasTextContent}
+        translateReachable={translateReachable}
+        isTranslating={isTranslating}
+        translateDisabled={disabled}
+        translateShortcutLabel={translateShortcutLabel}
+        onTranslate={onTranslate}
         alwaysThinkingEnabled={alwaysThinkingEnabled}
         onToggleThinking={onToggleThinking}
         streamingEnabled={streamingEnabled}

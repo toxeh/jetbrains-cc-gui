@@ -2190,6 +2190,25 @@
     "openSettingsTooltip": "Ouvrir les paramètres d'amélioration de prompt",
     "resolvingUsage": "Résolution de la configuration…"
   },
+  "localTranslate": {
+    "tooltip": "Traduire le brouillon avec le modèle local",
+    "shortcutCmdEnterMac": "⌘Entrée",
+    "shortcutCmdEnter": "Ctrl+Entrée",
+    "shortcutShiftEnter": "Maj+Entrée",
+    "failed": "La traduction locale a échoué",
+    "unreachable": "Le serveur du modèle local est injoignable",
+    "timeout": "Le modèle local n'a pas répondu en 15 secondes",
+    "httpError": "Le serveur du modèle local a renvoyé HTTP {{status}}",
+    "invalidResponse": "Le modèle local n'a renvoyé aucun texte",
+    "disabled": "La traduction locale est désactivée dans la configuration",
+    "placeholderMismatch": "Le modèle a modifié des puces ou du code protégés ; brouillon inchangé",
+    "draftChanged": "Le brouillon a changé pendant la traduction ; résultat ignoré",
+    "replyShow": "Traduire",
+    "replyHide": "Original",
+    "replyAllShow": "Tout traduire",
+    "replyAllHide": "Afficher l'original",
+    "cacheUnreadable": "Impossible de lire les traductions enregistrées"
+  },
   "fileContext": {
     "placeholder": "Contexte de fichier",
     "enableTitle": "Activer le contexte de fichier ?",

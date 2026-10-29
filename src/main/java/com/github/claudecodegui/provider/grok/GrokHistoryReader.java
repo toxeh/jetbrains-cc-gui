@@ -344,7 +344,7 @@ public class GrokHistoryReader {
         return true;
     }
 
-    private Path resolveSessionDir(String sessionId, String cwd) {
+    public Path resolveSessionDir(String sessionId, String cwd) {
         return resolveSessionDir(sessionId, cwd, () -> false);
     }
 

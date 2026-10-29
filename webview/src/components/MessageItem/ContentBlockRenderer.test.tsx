@@ -37,7 +37,15 @@ const t = ((key: string) => key) as unknown as React.ComponentProps<
 const tableBlock = (): ClaudeContentBlock =>
   ({ type: 'text', text: '| a |\n|---|\n| 1 |' }) as unknown as ClaudeContentBlock;
 
-function renderTextBlock({ isStreaming, isLastBlock }: { isStreaming: boolean; isLastBlock: boolean }) {
+function renderTextBlock({
+  isStreaming,
+  isLastBlock,
+  isLastSourceBlock,
+}: {
+  isStreaming: boolean;
+  isLastBlock: boolean;
+  isLastSourceBlock?: boolean;
+}) {
   markdownProps.isStreaming = undefined;
   return render(
     <ContentBlockRenderer
@@ -49,6 +57,7 @@ function renderTextBlock({ isStreaming, isLastBlock }: { isStreaming: boolean; i
       isThinking={false}
       isLastMessage={false}
       isLastBlock={isLastBlock}
+      isLastSourceBlock={isLastSourceBlock}
       t={t}
       onToggleThinking={() => {}}
       findToolResult={() => null}
@@ -171,6 +180,11 @@ describe('ContentBlockRenderer block-level streaming', () => {
 
   it('renders with the full pipeline once the message has stopped streaming', () => {
     renderTextBlock({ isStreaming: false, isLastBlock: true });
+    expect(markdownProps.isStreaming).toBe(false);
+  });
+
+  it('treats a closed text as finished when a later hidden source block exists', () => {
+    renderTextBlock({ isStreaming: true, isLastBlock: true, isLastSourceBlock: false });
     expect(markdownProps.isStreaming).toBe(false);
   });
 });

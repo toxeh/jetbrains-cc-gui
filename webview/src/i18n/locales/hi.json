@@ -2188,6 +2188,25 @@
     "openSettingsTooltip": "Open prompt enhancer settings",
     "resolvingUsage": "Resolving runtime config…"
   },
+  "localTranslate": {
+    "tooltip": "स्थानीय मॉडल से ड्राफ़्ट का अनुवाद करें",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Shift+Enter",
+    "failed": "स्थानीय अनुवाद विफल रहा",
+    "unreachable": "स्थानीय मॉडल सर्वर उपलब्ध नहीं है",
+    "timeout": "स्थानीय मॉडल ने 15 सेकंड में उत्तर नहीं दिया",
+    "httpError": "स्थानीय मॉडल सर्वर ने HTTP {{status}} लौटाया",
+    "invalidResponse": "स्थानीय मॉडल ने कोई टेक्स्ट नहीं लौटाया",
+    "disabled": "कॉन्फ़िग में स्थानीय अनुवाद अक्षम है",
+    "placeholderMismatch": "मॉडल ने सुरक्षित चिप्स या कोड बदल दिए; ड्राफ़्ट अपरिवर्तित रखा गया",
+    "draftChanged": "अनुवाद के दौरान ड्राफ़्ट बदल गया; परिणाम छोड़ दिया गया",
+    "replyShow": "अनुवाद करें",
+    "replyHide": "मूल",
+    "replyAllShow": "सभी का अनुवाद करें",
+    "replyAllHide": "मूल दिखाएं",
+    "cacheUnreadable": "सहेजे गए अनुवाद पढ़े नहीं जा सके"
+  },
   "fileContext": {
     "placeholder": "File Context",
     "enableTitle": "Enable File Context?",

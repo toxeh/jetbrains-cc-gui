@@ -84,8 +84,42 @@ public class PiHistoryReaderTest {
         });
         assertTrue(hasToolUse);
 
+        Path cache = cwdDir.resolve(sessionId + ".translated.json");
+        Path bak = cwdDir.resolve(sessionId + ".translated.json.bak");
+        Files.writeString(cache, "{}", StandardCharsets.UTF_8);
+        Files.writeString(bak, "bak", StandardCharsets.UTF_8);
+
         assertTrue(reader.deleteSession(sessionId, "C:/Users/83429/project"));
         assertTrue(reader.listSessionsForProject("C:/Users/83429/project").isEmpty());
+        assertFalse(Files.exists(cwdDir));
+    }
+
+    @Test
+    public void deleteSessionWithNeighborPreservesNeighborAndDirectory() throws Exception {
+        Path root = Files.createTempDirectory("pi-history-neighbor-test");
+        Path cwdDir = root.resolve("--C-Users-83429-project--");
+        Files.createDirectories(cwdDir);
+
+        String id1 = "019fe705-27fd-712e-a1be-f972ef3773f1";
+        String id2 = "019fe705-27fd-712e-a1be-f972ef3773f2";
+        Path file1 = cwdDir.resolve("2026-08-09T14-55-01-000Z_" + id1 + ".jsonl");
+        Path file2 = cwdDir.resolve("2026-08-09T14-55-02-000Z_" + id2 + ".jsonl");
+        Files.writeString(file1, "{\"type\":\"session\",\"id\":\"" + id1 + "\",\"cwd\":\"C:\\\\Users\\\\83429\\\\project\"}\n", StandardCharsets.UTF_8);
+        Files.writeString(file2, "{\"type\":\"session\",\"id\":\"" + id2 + "\",\"cwd\":\"C:\\\\Users\\\\83429\\\\project\"}\n", StandardCharsets.UTF_8);
+
+        Path cache1 = cwdDir.resolve(id1 + ".translated.json");
+        Path cache2 = cwdDir.resolve(id2 + ".translated.json");
+        Files.writeString(cache1, "{}", StandardCharsets.UTF_8);
+        Files.writeString(cache2, "{}", StandardCharsets.UTF_8);
+
+        PiHistoryReader reader = new PiHistoryReader(root, new Gson());
+        assertTrue(reader.deleteSession(id1, "C:/Users/83429/project"));
+
+        assertFalse(Files.exists(file1));
+        assertFalse(Files.exists(cache1));
+        assertTrue(Files.exists(file2));
+        assertTrue(Files.exists(cache2));
+        assertTrue(Files.isDirectory(cwdDir));
     }
 
     @Test

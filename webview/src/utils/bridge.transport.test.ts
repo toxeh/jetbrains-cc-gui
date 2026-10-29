@@ -13,6 +13,13 @@ describe('local bridge dispatch', () => {
     expect(undoFileChanges('/fixture.ts', 'M', [])).toBe(true);
     expect(received).toHaveBeenCalledWith('undo_file_changes:{"filePath":"/fixture.ts","status":"M","operations":[]}');
   });
+  it('json-stringifies an object payload before handing it to the native bridge', () => {
+    const received = vi.fn();
+    window.sendToJava = received;
+    expect(sendBridgeEvent('translate_reply', { id: 1, text: 'Hi' })).toBe(true);
+    expect(received).toHaveBeenCalledWith('translate_reply:{"id":1,"text":"Hi"}');
+  });
+
   it('turns a native bridge exception into a refused dispatch so the caller can retry', () => {
     window.sendToJava = vi.fn(() => { throw new Error('fixture unavailable'); });
     expect(sendBridgeEvent('codex_interaction_response', 'decision')).toBe(false);

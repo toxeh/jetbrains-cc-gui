@@ -66,10 +66,18 @@ public class MiniMaxHistoryReader {
         this(defaultMiniMaxHome(), new Gson());
     }
 
-    MiniMaxHistoryReader(Path minimaxHome, Gson gson) {
+    public MiniMaxHistoryReader(Path minimaxHome, Gson gson) {
         this.minimaxHome = minimaxHome;
         this.sessionsRoot = minimaxHome.resolve(Paths.get("v2", "sessions"));
         this.gson = gson;
+    }
+
+    public Path sessionDirectory(String sessionId, String projectPath) {
+        try {
+            return resolveSessionDir(sessionId, projectPath);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private static Path defaultMiniMaxHome() {
