@@ -19,9 +19,12 @@ export interface ContentBlockRendererProps {
   isThinking: boolean;
   isLastMessage: boolean;
   isLastBlock?: boolean;
+  /** Last block in the unfiltered message, including hidden tools. */
+  isLastSourceBlock?: boolean;
   t: TFunction;
   onToggleThinking: () => void;
   findToolResult: (toolId: string | undefined, messageIndex: number) => ToolResultBlock | null | undefined;
+  displayText?: string;
 }
 
 export function ContentBlockRenderer({
@@ -33,9 +36,11 @@ export function ContentBlockRenderer({
   isThinking,
   isLastMessage,
   isLastBlock = false,
+  isLastSourceBlock,
   t,
   onToggleThinking,
   findToolResult,
+  displayText,
 }: ContentBlockRendererProps): React.ReactElement | null {
   // `isStreaming` arriving here is message-level: it stays true for the whole
   // assistant turn, including tool round-trips and the wait for tool results.
@@ -46,14 +51,16 @@ export function ContentBlockRenderer({
   // moment a later block such as a tool call arrives, instead of waiting for
   // the entire turn to end. The two renderers are height-aligned (breaks:
   // false), so switching between them stays invisible.
-  const isActivelyStreaming = isStreaming && isLastBlock;
+  const isRenderedTail = isStreaming && isLastBlock;
+  const isTokenTail = isStreaming && (isLastSourceBlock ?? isLastBlock);
 
   if (block.type === 'text') {
     return (
       <TextBlock
         block={block}
         messageType={messageType}
-        isStreaming={isActivelyStreaming}
+        isStreaming={isTokenTail}
+        displayText={displayText}
       />
     );
   }
@@ -74,7 +81,7 @@ export function ContentBlockRenderer({
         isThinkingExpanded={isThinkingExpanded}
         isLastMessage={isLastMessage}
         isLastBlock={isLastBlock}
-        isActivelyStreaming={isActivelyStreaming}
+        isActivelyStreaming={isRenderedTail}
         t={t}
         onToggleThinking={onToggleThinking}
       />

@@ -170,8 +170,9 @@ const callBridge = (payload: string) => {
   return false;
 };
 
-export const sendBridgeEvent = (event: string, content = '') => {
-  return callBridge(`${event}:${content}`);
+export const sendBridgeEvent = (event: string, content: any = '') => {
+  const contentStr = typeof content === 'object' && content !== null ? JSON.stringify(content) : String(content ?? '');
+  return callBridge(`${event}:${contentStr}`);
 };
 
 export const resolveFilePath = (filePath?: string) => {

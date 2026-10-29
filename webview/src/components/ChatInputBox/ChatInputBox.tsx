@@ -126,6 +126,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       isEnhancing,
       handleEnhancePrompt,
       promptEnhancer,
+      localTranslate,
       handleModeSelect,
       handleModelSelect,
       inlineCompletion,
@@ -156,6 +157,7 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
       onAgentSelect,
       onOpenAgentSettings,
       onOpenPromptSettings,
+      disabled,
       t,
       ref,
     });
@@ -259,6 +261,11 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
           onCodexFastModeChange={onCodexFastModeChange}
           onDshPresetChange={onDshPresetChange}
           onEnhancePrompt={handleEnhancePrompt}
+          hasTextContent={hasContent}
+          translateReachable={localTranslate.reachable}
+          isTranslating={localTranslate.isTranslating}
+          translateShortcutLabel={localTranslate.shortcutLabel}
+          onTranslate={localTranslate.handleTranslate}
           alwaysThinkingEnabled={alwaysThinkingEnabled}
           onToggleThinking={onToggleThinking}
           streamingEnabled={streamingEnabled}

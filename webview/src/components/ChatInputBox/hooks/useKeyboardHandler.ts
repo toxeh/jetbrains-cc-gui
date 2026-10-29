@@ -6,10 +6,12 @@ import {
   isEnterKey,
   isImeStillComposing,
   isSendKey,
+  isTranslateKey,
   releaseEnterKeyUp,
   triageEnterKeyDown,
 } from '../utils/enterKeyGuard.js';
 import type { EnterKeyRefs } from '../utils/enterKeyGuard.js';
+import type { TranslateShortcut } from '../utils/localTranslate.js';
 
 interface CompletionWithKeyDown {
   isOpen: boolean;
@@ -40,6 +42,10 @@ export interface UseKeyboardHandlerOptions extends EnterKeyRefs {
   /** Inline history completion (Tab to apply) */
   inlineCompletion?: InlineCompletionHandler;
   handleSubmit: () => void;
+  /** Local translate chord owner (null when the feature is off). */
+  translateShortcut?: TranslateShortcut | null;
+  /** Rewrite the draft through the local model; never sends. */
+  handleTranslate?: () => void;
 }
 
 /**
@@ -49,6 +55,7 @@ export interface UseKeyboardHandlerOptions extends EnterKeyRefs {
  * - Completion dropdown navigation
  * - History navigation (when input empty)
  * - Send shortcut (Enter / Cmd+Enter) when native capture did not already send
+ * - Local translate chord when native capture did not already claim it
  * - Preventing IME "confirm enter" false send
  */
 export function useKeyboardHandler({
@@ -66,6 +73,8 @@ export function useKeyboardHandler({
   completionSelectedRef,
   submittedOnEnterRef,
   handleSubmit,
+  translateShortcut = null,
+  handleTranslate,
 }: UseKeyboardHandlerOptions) {
   const enterKeyRefs = useMemo<EnterKeyRefs>(
     () => ({ submittedOnEnterRef, completionSelectedRef, isComposingRef, lastCompositionEndTimeRef }),
@@ -81,7 +90,8 @@ export function useKeyboardHandler({
         if (e.defaultPrevented) return;
         // While the IME may still be confirming its candidate, neither the
         // completion menus nor the send path may consume the key.
-        const verdict = triageEnterKeyDown(e, e.nativeEvent.isComposing, sendShortcut, enterKeyRefs);
+        const verdict = triageEnterKeyDown(
+          e, e.nativeEvent.isComposing, sendShortcut, enterKeyRefs, translateShortcut);
         if (verdict !== 'open') return;
       }
       if (isImeStillComposing(enterKeyRefs, e.nativeEvent.isComposing)) {
@@ -129,7 +139,14 @@ export function useKeyboardHandler({
 
       if (handleHistoryKeyDown(e)) return;
 
-      if (!enterKey || !isSendKey(sendShortcut, e)) return;
+      if (enterKey && isTranslateKey(sendShortcut, translateShortcut, e)) {
+        // An open completion menu keeps the chord, even when it declined this key.
+        claimEnterPress(e, enterKeyRefs);
+        if (!completions.some((completion) => completion.isOpen)) handleTranslate?.();
+        return;
+      }
+
+      if (!enterKey || !isSendKey(sendShortcut, e, translateShortcut)) return;
 
       // SDK readiness is judged inside handleSubmit so that this fallback path
       // gives the same toast and install prompt as the native capture path.
@@ -149,15 +166,17 @@ export function useKeyboardHandler({
       enterKeyRefs,
       completionSelectedRef,
       handleSubmit,
+      translateShortcut,
+      handleTranslate,
     ]
   );
 
   const onKeyUp = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (!isEnterKey(e.key, e.nativeEvent.keyCode)) return;
-      releaseEnterKeyUp(e, sendShortcut, enterKeyRefs);
+      releaseEnterKeyUp(e, sendShortcut, enterKeyRefs, translateShortcut);
     },
-    [sendShortcut, enterKeyRefs]
+    [sendShortcut, enterKeyRefs, translateShortcut]
   );
 
   return { onKeyDown, onKeyUp };

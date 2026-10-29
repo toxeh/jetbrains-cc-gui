@@ -1100,6 +1100,18 @@ export interface ButtonAreaProps {
   onDshPresetChange?: (preset: string) => void;
   /** Enhance prompt callback */
   onEnhancePrompt?: () => void;
+  /** Whether the draft has text (attachments excluded) */
+  hasTextContent?: boolean;
+  /** Local translate is enabled and its server answered the probe: show the translate button */
+  translateReachable?: boolean;
+  /** A local translate call is in flight */
+  isTranslating?: boolean;
+  /** The chat input itself is disabled (independent of the assistant streaming) */
+  translateDisabled?: boolean;
+  /** Label of the chord that translates, or null when only the button does */
+  translateShortcutLabel?: string | null;
+  /** Rewrite the draft through the local model; never sends */
+  onTranslate?: () => void;
   /** Whether always thinking enabled */
   alwaysThinkingEnabled?: boolean;
   /** Toggle thinking mode */

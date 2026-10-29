@@ -55,6 +55,12 @@ export function useContextActions() {
           }
           break;
         }
+        case 'translate': {
+          // Handled by the composer listener (useNativeEventCapture) through a ref,
+          // so this first-commit effect never captures a stale translate callback.
+          document.dispatchEvent(new CustomEvent('ideaTranslate'));
+          break;
+        }
       }
     };
 

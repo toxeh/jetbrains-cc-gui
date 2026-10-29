@@ -249,8 +249,109 @@ public class OpenCodeHistoryReaderTest {
         assertTrue(hasThinking);
         assertTrue(hasTool);
 
+        Path sessionCache = root.resolve(sessionId + ".translated.json");
+        Path sessionBak = root.resolve(sessionId + ".translated.json.bak");
+        Path otherCache = root.resolve("ses_other.translated.json");
+        Files.writeString(sessionCache, "{}", StandardCharsets.UTF_8);
+        Files.writeString(sessionBak, "bak", StandardCharsets.UTF_8);
+        Files.writeString(otherCache, "{}", StandardCharsets.UTF_8);
+
         assertTrue(reader.deleteSession(sessionId, projectPath));
         assertTrue(reader.listSessionsForProject(projectPath).isEmpty());
+
+        assertFalse("Deleted session cache must be removed", Files.exists(sessionCache));
+        assertFalse("Deleted session .bak cache must be removed", Files.exists(sessionBak));
+        assertTrue("Other session cache must remain", Files.exists(otherCache));
+        assertTrue("opencode.db must remain", Files.exists(db));
+    }
+
+    @Test
+    public void deleteLegacyJsonWhenDatabaseExistsRemovesCacheBesideDatabase() throws Exception {
+        Path root = Files.createTempDirectory("oc-legacy-del-test");
+        Path storage = root.resolve("storage");
+        Path db = root.resolve("opencode.db");
+        Files.writeString(db, "", StandardCharsets.UTF_8);
+
+        String sessionId = "ses_json_only";
+        String projectHash = "hash1";
+        Path sessionJson = storage.resolve("session").resolve(projectHash).resolve(sessionId + ".json");
+        Files.createDirectories(sessionJson.getParent());
+        Files.writeString(sessionJson, """
+                {
+                  "id": "%s",
+                  "directory": "/tmp/proj",
+                  "title": "Legacy JSON Only"
+                }
+                """.formatted(sessionId), StandardCharsets.UTF_8);
+
+        Path cacheBesideDb = root.resolve(sessionId + ".translated.json");
+        Files.writeString(cacheBesideDb, "{}", StandardCharsets.UTF_8);
+
+        OpenCodeHistoryReader reader = new OpenCodeHistoryReader(storage, db, new Gson());
+        assertTrue(reader.deleteSession(sessionId, "/tmp/proj"));
+
+        assertFalse("Cache beside database must be removed", Files.exists(cacheBesideDb));
+        assertTrue("opencode.db must not be removed", Files.exists(db));
+        assertFalse("Legacy session json must be removed", Files.exists(sessionJson));
+    }
+
+    @Test
+    public void messageOnlyCleanupLeavesCacheBesideDatabase() throws Exception {
+        Path root = Files.createTempDirectory("oc-msg-only-del");
+        Path storage = root.resolve("storage");
+        Path db = root.resolve("opencode.db");
+        Files.writeString(db, "", StandardCharsets.UTF_8);
+
+        String sessionId = "ses_msg_only";
+        Path msg = storage.resolve("message").resolve(sessionId).resolve("msg_1.json");
+        Files.createDirectories(msg.getParent());
+        Files.writeString(msg, "{\"id\":\"msg_1\"}", StandardCharsets.UTF_8);
+
+        Path cache = root.resolve(sessionId + ".translated.json");
+        Path bak = root.resolve(sessionId + ".translated.json.bak");
+        Files.writeString(cache, "{}", StandardCharsets.UTF_8);
+        Files.writeString(bak, "bak", StandardCharsets.UTF_8);
+
+        OpenCodeHistoryReader reader = new OpenCodeHistoryReader(storage, db, new Gson());
+        assertTrue(reader.deleteSession(sessionId, "/tmp/proj"));
+
+        assertTrue("Message-only cleanup must keep the cache beside opencode.db", Files.isRegularFile(cache));
+        assertTrue("Message-only cleanup must keep the cache bak", Files.isRegularFile(bak));
+        assertFalse(Files.exists(msg));
+        assertTrue(Files.exists(db));
+    }
+
+    @Test
+    public void bakIsRemovedWhenTranslatedJsonDeleteFails() throws Exception {
+        Path root = Files.createTempDirectory("oc-bak-del");
+        Path storage = root.resolve("storage");
+        Path db = root.resolve("opencode.db");
+        Files.writeString(db, "", StandardCharsets.UTF_8);
+
+        String sessionId = "ses_bak_only";
+        Path sessionJson = storage.resolve("session").resolve("hash1").resolve(sessionId + ".json");
+        Files.createDirectories(sessionJson.getParent());
+        Files.writeString(sessionJson, """
+                {
+                  "id": "%s",
+                  "directory": "/tmp/proj",
+                  "title": "Bak"
+                }
+                """.formatted(sessionId), StandardCharsets.UTF_8);
+
+        Path cacheDir = root.resolve(sessionId + ".translated.json");
+        Files.createDirectories(cacheDir);
+        Files.writeString(cacheDir.resolve("keep"), "x", StandardCharsets.UTF_8);
+        Path bak = root.resolve(sessionId + ".translated.json.bak");
+        Files.writeString(bak, "bak", StandardCharsets.UTF_8);
+
+        OpenCodeHistoryReader reader = new OpenCodeHistoryReader(storage, db, new Gson());
+        assertTrue(reader.deleteSession(sessionId, "/tmp/proj"));
+
+        assertTrue("A non-empty cache directory must survive a failed delete", Files.isDirectory(cacheDir));
+        assertFalse("Bak must still be removed when the cache delete fails", Files.exists(bak));
+        assertFalse(Files.exists(sessionJson));
+        assertTrue(Files.exists(db));
     }
 
     @Test

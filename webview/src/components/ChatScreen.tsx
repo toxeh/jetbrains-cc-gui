@@ -21,6 +21,7 @@ import { useMessages } from '../contexts/MessagesContext';
 import { useSession } from '../contexts/SessionContext';
 import { useUIState } from '../contexts/UIStateContext';
 import { extractMarkdownContent } from '../utils/copyUtils';
+import { ReplyTranslationProvider } from '../contexts/ReplyTranslationContext';
 import type { ClaudeMessage, TodoItem, ToolResultBlock } from '../types';
 import type { useMessageProcessing, useFileChanges, useSubagents, useFileChangesManagement, useModelProviderState, useMessageQueue } from '../hooks';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
@@ -269,7 +270,12 @@ export const ChatScreen = ({
   }, [setCurrentView, setSettingsInitialTab]);
 
   return (
-    <>
+    <ReplyTranslationProvider
+      currentSessionId={currentSessionId}
+      currentProvider={currentProvider}
+      messages={mergedMessages}
+      getContentBlocks={getContentBlocks}
+    >
       <div className="messages-shell">
         <MessageAnchorRail
           messages={mergedMessages}
@@ -449,6 +455,6 @@ export const ChatScreen = ({
           onLongContextChange={onLongContextChange}
         />
       </div>
-    </>
+    </ReplyTranslationProvider>
   );
 };

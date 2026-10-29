@@ -225,11 +225,23 @@ public class MiniMaxHistoryReaderTest {
         Path home = Files.createTempDirectory("minimax-history-test");
         Path sessionDir = writeSession(home, "10-20-30-000-session_del",
                 snapshot("mvs_del", "/repo", "t", "[]"));
+        Path delCache = sessionDir.resolve("mvs_del.translated.json");
+        Files.writeString(delCache, "{}", StandardCharsets.UTF_8);
+
+        Path keepDir = home.resolve("v2").resolve("sessions")
+                .resolve("2025").resolve("08").resolve("26")
+                .resolve("10-20-30-001-session_keep");
+        Files.createDirectories(keepDir);
+        Files.writeString(keepDir.resolve("snapshot.json"), snapshot("mvs_keep", "/repo", "t2", "[]"), StandardCharsets.UTF_8);
+        Path keepCache = keepDir.resolve("mvs_keep.translated.json");
+        Files.writeString(keepCache, "{}", StandardCharsets.UTF_8);
 
         MiniMaxHistoryReader reader = new MiniMaxHistoryReader(home, new Gson());
         assertTrue(reader.deleteSession("mvs_del", "/repo"));
         assertFalse(Files.exists(sessionDir));
-        // Empty YYYY/MM/DD chain is pruned; the sessions root itself stays.
+        assertFalse(Files.exists(delCache));
+        assertTrue(Files.isRegularFile(keepCache));
+        // Empty YYYY/MM/DD chain for 2026 is pruned; the sessions root itself stays.
         assertFalse(Files.exists(home.resolve("v2").resolve("sessions").resolve("2026")));
         assertTrue(Files.isDirectory(home.resolve("v2").resolve("sessions")));
 

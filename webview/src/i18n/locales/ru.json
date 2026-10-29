@@ -2000,6 +2000,25 @@
     "openSettingsTooltip": "Открыть настройки улучшения промпта",
     "resolvingUsage": "Определение конфигурации…"
   },
+  "localTranslate": {
+    "tooltip": "Перевести черновик локальной моделью",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Shift+Enter",
+    "failed": "Локальный перевод не удался",
+    "unreachable": "Сервер локальной модели недоступен",
+    "timeout": "Локальная модель не ответила за 15 секунд",
+    "httpError": "Сервер локальной модели вернул HTTP {{status}}",
+    "invalidResponse": "Локальная модель не вернула текст",
+    "disabled": "Локальный перевод отключён в конфигурации",
+    "placeholderMismatch": "Модель изменила защищённые чипы или код; черновик не изменён",
+    "draftChanged": "Черновик изменился во время перевода; результат отброшен",
+    "replyShow": "Перевести",
+    "replyHide": "Оригинал",
+    "replyAllShow": "Перевести всё",
+    "replyAllHide": "Показать оригинал",
+    "cacheUnreadable": "Не удалось прочитать сохранённые переводы"
+  },
   "fileContext": {
     "placeholder": "Файловый контекст",
     "enableTitle": "Включить файловый контекст?",

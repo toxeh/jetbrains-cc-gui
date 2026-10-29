@@ -1263,4 +1263,25 @@ interface Window {
           };
         }
   ) => void;
+
+  /**
+   * Loaded assistant reply translations cache callback.
+   * Payload: JSON string or object { sessionId, entries } or { sessionId, unreadable: true }.
+   */
+  updateReplyTranslationFile?: (
+    payload: string | {
+      sessionId?: string;
+      entries?: Record<string, { russian: string; shown: boolean }>;
+      unreadable?: boolean;
+    }
+  ) => void;
+
+  /**
+   * Result of translating an assistant reply text block.
+   * Payload: JSON string or object { id, success, hash, text, error }
+   */
+  updateReplyTranslation?: (
+    payload: string | { id?: number | string; success?: boolean; hash?: string; text?: string; error?: string }
+  ) => void;
 }
+

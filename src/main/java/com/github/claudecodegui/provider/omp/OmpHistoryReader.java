@@ -55,9 +55,17 @@ public class OmpHistoryReader {
         this(defaultSessionsRoot(), new Gson());
     }
 
-    OmpHistoryReader(Path sessionsRoot, Gson gson) {
+    public OmpHistoryReader(Path sessionsRoot, Gson gson) {
         this.sessionsRoot = sessionsRoot;
         this.gson = gson;
+    }
+
+    public Path sessionFile(String sessionId, String projectPath) {
+        try {
+            return resolveSessionFile(sessionId, projectPath);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private static Path defaultSessionsRoot() {
@@ -294,8 +302,13 @@ public class OmpHistoryReader {
         if (file == null || !Files.isRegularFile(file)) {
             return false;
         }
-        Files.deleteIfExists(file);
+        String trimmed = sessionId.trim();
         Path parent = file.getParent();
+        if (parent != null) {
+            Files.deleteIfExists(parent.resolve(trimmed + ".translated.json"));
+            Files.deleteIfExists(parent.resolve(trimmed + ".translated.json.bak"));
+        }
+        Files.deleteIfExists(file);
         if (parent != null && Files.isDirectory(parent)) {
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(parent)) {
                 if (!stream.iterator().hasNext()) {

@@ -1979,6 +1979,25 @@
     "openSettingsTooltip": "Abrir configuración del mejorador de prompts",
     "resolvingUsage": "Resolviendo configuración…"
   },
+  "localTranslate": {
+    "tooltip": "Traducir borrador con el modelo local",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Mayús+Enter",
+    "failed": "La traducción local falló",
+    "unreachable": "No se puede acceder al servidor del modelo local",
+    "timeout": "El modelo local no respondió en 15 segundos",
+    "httpError": "El servidor del modelo local devolvió HTTP {{status}}",
+    "invalidResponse": "El modelo local no devolvió texto",
+    "disabled": "La traducción local está desactivada en la configuración",
+    "placeholderMismatch": "El modelo modificó etiquetas o código protegidos; el borrador no se cambió",
+    "draftChanged": "El borrador cambió durante la traducción; se descartó el resultado",
+    "replyShow": "Traducir",
+    "replyHide": "Original",
+    "replyAllShow": "Traducir todo",
+    "replyAllHide": "Mostrar original",
+    "cacheUnreadable": "No se pudieron leer las traducciones guardadas"
+  },
   "fileContext": {
     "placeholder": "Contexto de archivo",
     "enableTitle": "¿Habilitar contexto de archivo?",
