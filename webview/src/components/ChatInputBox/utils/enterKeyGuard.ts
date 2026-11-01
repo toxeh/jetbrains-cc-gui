@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react';
 import type { SendShortcut } from '../types.js';
+import type { TranslateShortcut } from './localTranslate.js';
 
 /**
  * How long after compositionend a plain Enter may still be the IME's own
@@ -25,6 +26,8 @@ interface EnterKeyModifiers {
   shiftKey: boolean;
   metaKey: boolean;
   ctrlKey: boolean;
+  /** Absent on synthetic events. Alt is never part of the translate chord. */
+  altKey?: boolean;
 }
 
 /** The slice of a keyboard event the guard needs; native and React events both satisfy it. */
@@ -39,7 +42,37 @@ export function isEnterKey(key: string, keyCode: number | undefined): boolean {
   return key === 'Enter' || keyCode === 13;
 }
 
-export function isSendKey(sendShortcut: SendShortcut, e: EnterKeyModifiers): boolean {
+/**
+ * Local translate owns this Enter chord. Mirrors SendShortcutDecision on the
+ * Java side: Cmd/Ctrl+Enter belongs to translate in Enter-to-send mode; in
+ * Cmd/Ctrl+Enter mode send keeps Cmd/Ctrl+Enter and Shift+Enter translates.
+ * Shift+Enter belongs to translate in both modes when configured as shiftEnter.
+ * `translateShortcut` is null when the feature is off.
+ */
+export function isTranslateKey(
+  sendShortcut: SendShortcut,
+  translateShortcut: TranslateShortcut | null | undefined,
+  e: EnterKeyModifiers,
+): boolean {
+  if (e.altKey) return false;
+  if (translateShortcut === 'cmdEnter') {
+    if (sendShortcut === 'cmdEnter') {
+      return e.shiftKey && !e.metaKey && !e.ctrlKey;
+    }
+    return (e.metaKey || e.ctrlKey) && !e.shiftKey;
+  }
+  if (translateShortcut === 'shiftEnter') {
+    return e.shiftKey && !e.metaKey && !e.ctrlKey;
+  }
+  return false;
+}
+
+export function isSendKey(
+  sendShortcut: SendShortcut,
+  e: EnterKeyModifiers,
+  translateShortcut: TranslateShortcut | null = null,
+): boolean {
+  if (isTranslateKey(sendShortcut, translateShortcut, e)) return false;
   return sendShortcut === 'cmdEnter' ? e.metaKey || e.ctrlKey : !e.shiftKey;
 }
 
@@ -72,8 +105,14 @@ export function isImeStillHoldingEnter(
   return now - refs.lastCompositionEndTimeRef.current < COMPOSITION_END_GUARD_MS;
 }
 
-function isExplicitNewlineKey(sendShortcut: SendShortcut, e: EnterKeyModifiers): boolean {
+export function isExplicitNewlineKey(
+  sendShortcut: SendShortcut,
+  e: EnterKeyModifiers,
+  translateShortcut: TranslateShortcut | null = null,
+): boolean {
   if (!e.shiftKey) return false;
+  // A Shift+Enter owned by local translate is a translate request, not a newline.
+  if (isTranslateKey(sendShortcut, translateShortcut, e)) return false;
   // Shift+Enter is the explicit newline gesture in Enter mode. In Cmd/Ctrl+Enter
   // mode it remains a newline unless the send modifier is held as well.
   return sendShortcut === 'enter' || !(e.metaKey || e.ctrlKey);
@@ -83,21 +122,24 @@ function isExplicitNewlineKey(sendShortcut: SendShortcut, e: EnterKeyModifiers):
  * Bookkeeping every Enter keydown runs before anyone acts on it.
  *
  * A fresh press forgets the previous one, so a keyup that never arrived cannot
- * wedge the input. Holding the key repeats keydown: a held send key or a held
- * completion confirmation is swallowed so it cannot turn into a send once the
- * IME commits or the menu closes, while a held newline key keeps repeating.
+ * wedge the input. Holding the key repeats keydown: a held send key, a held
+ * translate key, or a held completion confirmation is swallowed so it cannot turn
+ * into a send once the IME commits or the menu closes, while a held newline key
+ * keeps repeating.
  */
 export function triageEnterKeyDown(
   e: EnterKeyEvent,
   eventIsComposing: boolean,
   sendShortcut: SendShortcut,
   refs: EnterKeyRefs,
+  translateShortcut: TranslateShortcut | null = null,
 ): EnterKeyDownVerdict {
   if (!e.repeat) {
     refs.submittedOnEnterRef.current = false;
     refs.completionSelectedRef.current = false;
   } else if (
-    isSendKey(sendShortcut, e) ||
+    isSendKey(sendShortcut, e, translateShortcut) ||
+    isTranslateKey(sendShortcut, translateShortcut, e) ||
     refs.completionSelectedRef.current ||
     refs.submittedOnEnterRef.current
   ) {
@@ -108,7 +150,7 @@ export function triageEnterKeyDown(
   // An explicit Shift+Enter newline is never an IME confirmation. In Cmd/Ctrl
   // mode, Cmd/Ctrl+Shift+Enter is still a send key and remains guarded.
   if (
-    !isExplicitNewlineKey(sendShortcut, e) &&
+    !isExplicitNewlineKey(sendShortcut, e, translateShortcut) &&
     isImeStillHoldingEnter(sendShortcut, refs, eventIsComposing, e.metaKey || e.ctrlKey)
   ) {
     // Let the IME confirm, but keep the held key from becoming a new action after commit.
@@ -147,8 +189,11 @@ export function releaseEnterKeyUp(
   e: EnterKeyModifiers & { preventDefault: () => void },
   sendShortcut: SendShortcut,
   refs: Pick<EnterKeyRefs, 'submittedOnEnterRef' | 'completionSelectedRef'>,
+  translateShortcut: TranslateShortcut | null = null,
 ): void {
-  if (isSendKey(sendShortcut, e)) e.preventDefault();
+  if (isSendKey(sendShortcut, e, translateShortcut) || isTranslateKey(sendShortcut, translateShortcut, e)) {
+    e.preventDefault();
+  }
   releaseEnterPress(refs);
 }
 

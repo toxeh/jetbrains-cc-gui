@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type { TFunction } from 'i18next';
-import type { ClaudeMessage, ToolResultBlock } from '../../types';
+import type { ClaudeContentBlock, ClaudeMessage, ToolResultBlock } from '../../types';
 
 import MarkdownBlock from '../MarkdownBlock';
 import { ProviderNotConfiguredCard } from './ProviderNotConfiguredCard';
@@ -62,6 +62,7 @@ interface GroupedBlockViewProps {
   onToggleThinking: (blockIndex: number) => void;
   findToolResult: (toolId: string | undefined, messageIndex: number) => ToolResultBlock | null | undefined;
   t: TFunction;
+  lastSourceBlock?: ClaudeContentBlock;
 }
 
 const GroupedBlockView = memo(function GroupedBlockView({
@@ -76,6 +77,7 @@ const GroupedBlockView = memo(function GroupedBlockView({
   onToggleThinking,
   findToolResult,
   t,
+  lastSourceBlock,
 }: GroupedBlockViewProps) {
   if (grouped.type === 'read_group') {
     const readItems = grouped.blocks.map((b) => {
@@ -182,6 +184,7 @@ const GroupedBlockView = memo(function GroupedBlockView({
             isThinking={isThinking}
             isLastMessage={isLast}
             isLastBlock={grouped.startIndex === renderedBlockCount - 1}
+            isLastSourceBlock={grouped.blocks[0] === lastSourceBlock}
             t={t}
             onToggleThinking={() => {}}
             findToolResult={findToolResult}
@@ -226,6 +229,7 @@ const GroupedBlockView = memo(function GroupedBlockView({
         isThinking={isThinking}
         isLastMessage={isLast}
         isLastBlock={blockIndex === renderedBlockCount - 1}
+        isLastSourceBlock={block === lastSourceBlock}
         t={t}
         onToggleThinking={() => onToggleThinking(blockIndex)}
         findToolResult={findToolResult}
@@ -247,6 +251,7 @@ interface GroupedBlocksRendererProps {
   currentProvider?: string;
   groupedBlocks: GroupedBlock[];
   renderedBlockCount: number;
+  lastSourceBlock?: ClaudeContentBlock;
   isMessageStreaming: boolean;
   isThinking: boolean;
   isLast: boolean;
@@ -269,6 +274,7 @@ export const GroupedBlocksRenderer = memo(function GroupedBlocksRenderer({
   currentProvider,
   groupedBlocks,
   renderedBlockCount,
+  lastSourceBlock,
   isMessageStreaming,
   isThinking,
   isLast,
@@ -328,6 +334,7 @@ export const GroupedBlocksRenderer = memo(function GroupedBlocksRenderer({
           onToggleThinking={onToggleThinking}
           findToolResult={findToolResult}
           t={t}
+          lastSourceBlock={lastSourceBlock}
         />
       ))}
     </>

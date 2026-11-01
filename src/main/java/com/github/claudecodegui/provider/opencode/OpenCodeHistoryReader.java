@@ -71,10 +71,36 @@ public class OpenCodeHistoryReader {
     /**
      * Test constructor that can point storage and database at independent fixtures.
      */
-    OpenCodeHistoryReader(Path storageRoot, Path databasePath, Gson gson) {
+    public OpenCodeHistoryReader(Path storageRoot, Path databasePath, Gson gson) {
         this.storageRoot = storageRoot;
         this.databasePath = databasePath;
         this.gson = gson;
+    }
+
+    public Path cacheAnchor(String sessionId) {
+        if (!isSafeSessionId(sessionId)) {
+            return null;
+        }
+        String trimmed = sessionId.trim();
+        if (databasePath != null && Files.isRegularFile(databasePath)) {
+            return databasePath;
+        }
+        Path sessionRoot = storageRoot != null ? storageRoot.resolve("session") : null;
+        if (sessionRoot == null || !Files.isDirectory(sessionRoot)) {
+            return null;
+        }
+        List<Path> matches = new ArrayList<>();
+        try (Stream<Path> stream = Files.walk(sessionRoot, 2)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().equals(trimmed + ".json"))
+                    .forEach(matches::add);
+        } catch (Exception ignored) {
+            return null;
+        }
+        if (matches.size() == 1) {
+            return matches.get(0);
+        }
+        return null;
     }
 
     private static Path defaultStorageRoot() {
@@ -476,7 +502,11 @@ public class OpenCodeHistoryReader {
             // FK cascades remove message/part rows when present.
             try (PreparedStatement ps = conn.prepareStatement("DELETE FROM session WHERE id = ?")) {
                 ps.setString(1, sessionId.trim());
-                return ps.executeUpdate() > 0;
+                boolean deleted = ps.executeUpdate() > 0;
+                if (deleted) {
+                    deleteCacheFiles(databasePath.getParent(), sessionId.trim());
+                }
+                return deleted;
             }
         } catch (Exception e) {
             LOG.warn("[OpenCodeHistoryReader] SQLite delete failed for " + sessionId + ": " + e.getMessage());
@@ -896,20 +926,22 @@ public class OpenCodeHistoryReader {
         }
         String id = sessionId.trim();
         boolean deleted = deleteSessionFromDatabase(id);
-        deleted = deleteSessionFromJsonStorage(id) || deleted;
-        return deleted;
+        return deleteSessionFromJsonStorage(id) || deleted;
     }
 
     private boolean deleteSessionFromJsonStorage(String id) throws IOException {
         boolean deleted = false;
-        Path sessionRoot = storageRoot.resolve("session");
-        if (Files.isDirectory(sessionRoot)) {
+        Path sessionRoot = storageRoot != null ? storageRoot.resolve("session") : null;
+        if (sessionRoot != null && Files.isDirectory(sessionRoot)) {
             try (Stream<Path> files = Files.walk(sessionRoot, 2)) {
                 List<Path> matches = files
                         .filter(p -> Files.isRegularFile(p) && p.getFileName().toString().equals(id + ".json"))
                         .toList();
                 for (Path match : matches) {
                     Files.deleteIfExists(match);
+                    deleteCacheFiles(match.getParent(), id);
+                    // Before the message walk: message-only cleanup must not remove this cache.
+                    deleteDatabaseSiblingCache(id);
                     deleted = true;
                 }
             }
@@ -937,6 +969,26 @@ public class OpenCodeHistoryReader {
             }
         }
         return deleted;
+    }
+
+    private void deleteDatabaseSiblingCache(String id) {
+        if (databasePath != null && Files.isRegularFile(databasePath)) {
+            deleteCacheFiles(databasePath.getParent(), id);
+        }
+    }
+
+    private static void deleteCacheFiles(Path dir, String id) {
+        if (dir == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(dir.resolve(id + ".translated.json"));
+        } catch (IOException ignored) {
+        }
+        try {
+            Files.deleteIfExists(dir.resolve(id + ".translated.json.bak"));
+        } catch (IOException ignored) {
+        }
     }
 
     private static void deleteRecursively(Path root) throws IOException {

@@ -4,27 +4,47 @@ import type React from 'react';
 import { useKeyboardHandler } from './useKeyboardHandler.js';
 import type { UseKeyboardHandlerOptions } from './useKeyboardHandler.js';
 import { useNativeEventCapture } from './useNativeEventCapture.js';
+import { useContextActions } from '../../../hooks/useContextActions.js';
+import type { TranslateShortcut } from '../utils/localTranslate.js';
 
 function mountKeyboard(options: {
   sendShortcut?: 'enter' | 'cmdEnter';
   completionOpen?: boolean;
   recentlyComposing?: boolean;
+  translateShortcut?: TranslateShortcut | null;
+  withContextActions?: boolean;
 } = {}) {
   const handleSubmit = vi.fn();
   const handleSelect = vi.fn();
+  const handleTranslate = vi.fn();
   let shared: UseKeyboardHandlerOptions;
-  const controls = { open: () => {} };
+  const controls = {
+    open: () => {},
+    setSendShortcut: (_value: 'enter' | 'cmdEnter') => {},
+    setTranslateShortcut: (_value: TranslateShortcut | null) => {},
+  };
+
+  function ContextActions() {
+    useContextActions();
+    return null;
+  }
 
   function Fixture() {
     const editableRef = useRef<HTMLDivElement>(null);
     const [completionOpen, setCompletionOpen] = useState(options.completionOpen ?? false);
+    const [sendShortcut, setSendShortcut] = useState<'enter' | 'cmdEnter'>(
+      options.sendShortcut ?? 'enter',
+    );
+    const [translateShortcut, setTranslateShortcut] = useState<TranslateShortcut | null>(
+      options.translateShortcut ?? null,
+    );
     const closed = { isOpen: false, handleKeyDown: () => false };
     shared = {
       isComposingRef: useRef(false),
       lastCompositionEndTimeRef: useRef(Date.now() - (options.recentlyComposing ? 0 : 1000)),
       completionSelectedRef: useRef(false),
       submittedOnEnterRef: useRef(false),
-      sendShortcut: options.sendShortcut ?? 'enter',
+      sendShortcut,
       fileCompletion: {
         isOpen: completionOpen,
         handleKeyDown: (event) => {
@@ -41,6 +61,8 @@ function mountKeyboard(options: {
       handleMacCursorMovement: () => false,
       handleHistoryKeyDown: () => false,
       handleSubmit,
+      translateShortcut,
+      handleTranslate,
     };
     const { onKeyDown, onKeyUp } = useKeyboardHandler(shared);
     useNativeEventCapture({
@@ -50,15 +72,25 @@ function mountKeyboard(options: {
       handleCompositionEnd: () => {},
     });
     controls.open = () => setCompletionOpen(true);
-    return createElement('div', { ref: editableRef, tabIndex: 0, onKeyDown, onKeyUp });
+    controls.setSendShortcut = setSendShortcut;
+    controls.setTranslateShortcut = setTranslateShortcut;
+    return createElement(
+      'div',
+      null,
+      createElement('div', { ref: editableRef, tabIndex: 0, onKeyDown, onKeyUp }),
+      options.withContextActions ? createElement(ContextActions) : null,
+    );
   }
 
   const view = render(createElement(Fixture));
   return {
-    el: view.container.firstElementChild as HTMLDivElement,
+    el: view.container.firstElementChild!.firstElementChild as HTMLDivElement,
     handleSubmit,
     handleSelect,
+    handleTranslate,
     open: () => controls.open(),
+    setSendShortcut: (value: 'enter' | 'cmdEnter') => controls.setSendShortcut(value),
+    setTranslateShortcut: (value: TranslateShortcut | null) => controls.setTranslateShortcut(value),
     get state() { return shared; },
   };
 }
@@ -711,5 +743,116 @@ describe('useNativeEventCapture', () => {
     el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }));
 
     expect(submittedOnEnterRef.current).toBe(false);
+  });
+
+  describe('local translate chord', () => {
+    it('translates on Cmd/Ctrl+Enter in Enter mode instead of sending', () => {
+      const fixture = mountKeyboard({ sendShortcut: 'enter', translateShortcut: 'cmdEnter' });
+      dispatchEnter(fixture.el, 'keydown', { metaKey: true });
+      dispatchEnter(fixture.el, 'keyup', { metaKey: true });
+      dispatchEnter(fixture.el, 'keydown', { ctrlKey: true });
+      dispatchEnter(fixture.el, 'keyup', { ctrlKey: true });
+
+      expect(fixture.handleTranslate).toHaveBeenCalledTimes(2);
+      expect(fixture.handleSubmit).not.toHaveBeenCalled();
+
+      dispatchEnter(fixture.el, 'keydown');
+      expect(fixture.handleSubmit).toHaveBeenCalledTimes(1);
+      expect(fixture.handleTranslate).toHaveBeenCalledTimes(2);
+    });
+
+    it('translates on Shift+Enter when the translate shortcut is shiftEnter', () => {
+      const fixture = mountKeyboard({ sendShortcut: 'enter', translateShortcut: 'shiftEnter' });
+      const event = dispatchEnter(fixture.el, 'keydown', { shiftKey: true });
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(fixture.handleTranslate).toHaveBeenCalledTimes(1);
+      expect(fixture.handleSubmit).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { translateShortcut: 'cmdEnter' as const, metaKey: true, shiftKey: false },
+      { translateShortcut: 'shiftEnter' as const, metaKey: false, shiftKey: true },
+    ])('neither translates nor sends while a completion menu is open ($translateShortcut)', (options) => {
+      const fixture = mountKeyboard({
+        sendShortcut: 'enter',
+        translateShortcut: options.translateShortcut,
+        completionOpen: true,
+      });
+      dispatchEnter(fixture.el, 'keydown', { metaKey: options.metaKey, shiftKey: options.shiftKey });
+
+      expect(fixture.handleTranslate).not.toHaveBeenCalled();
+      expect(fixture.handleSubmit).not.toHaveBeenCalled();
+    });
+
+    it('routes to translate when the shortcut turns on after the first render', () => {
+      const fixture = mountKeyboard({ sendShortcut: 'enter', translateShortcut: null });
+      act(() => { fixture.setTranslateShortcut('cmdEnter'); });
+
+      dispatchEnter(fixture.el, 'keydown', { metaKey: true });
+
+      expect(fixture.handleTranslate).toHaveBeenCalledTimes(1);
+      expect(fixture.handleSubmit).not.toHaveBeenCalled();
+    });
+
+    it('keeps Cmd/Ctrl+Enter as send and Shift+Enter as translate when sendShortcut changes to cmdEnter after mount', () => {
+      const fixture = mountKeyboard({ sendShortcut: 'enter', translateShortcut: null });
+      act(() => {
+        fixture.setSendShortcut('cmdEnter');
+        fixture.setTranslateShortcut('cmdEnter');
+      });
+
+      dispatchEnter(fixture.el, 'keydown', { metaKey: true });
+      dispatchEnter(fixture.el, 'keyup', { metaKey: true });
+
+      expect(fixture.handleSubmit).toHaveBeenCalledTimes(1);
+      expect(fixture.handleTranslate).not.toHaveBeenCalled();
+
+      dispatchEnter(fixture.el, 'keydown', { shiftKey: true });
+      dispatchEnter(fixture.el, 'keyup', { shiftKey: true });
+
+      expect(fixture.handleTranslate).toHaveBeenCalledTimes(1);
+      expect(fixture.handleSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    it('translates once on the IDE keymap action while the composer has focus', () => {
+      const fixture = mountKeyboard({ translateShortcut: 'shiftEnter', withContextActions: true });
+      act(() => { fixture.el.focus(); });
+
+      act(() => { window.execContextAction?.('translate'); });
+
+      expect(fixture.handleTranslate).toHaveBeenCalledTimes(1);
+      expect(fixture.handleSubmit).not.toHaveBeenCalled();
+    });
+
+    it('ignores the IDE keymap action while a completion menu is open', () => {
+      const fixture = mountKeyboard({ translateShortcut: 'shiftEnter', withContextActions: true, completionOpen: true });
+      act(() => { fixture.el.focus(); });
+
+      act(() => { window.execContextAction?.('translate'); });
+
+      expect(fixture.handleTranslate).not.toHaveBeenCalled();
+    });
+
+    it('ignores the IDE keymap action during IME composition', () => {
+      const fixture = mountKeyboard({ translateShortcut: 'shiftEnter', withContextActions: true });
+      act(() => { fixture.el.focus(); });
+      fixture.state.isComposingRef.current = true;
+
+      act(() => { window.execContextAction?.('translate'); });
+
+      expect(fixture.handleTranslate).not.toHaveBeenCalled();
+    });
+
+    it('ignores the IDE keymap action when focus is outside the composer', () => {
+      const fixture = mountKeyboard({ translateShortcut: 'shiftEnter', withContextActions: true });
+      const other = document.createElement('input');
+      document.body.appendChild(other);
+      act(() => { other.focus(); });
+
+      act(() => { window.execContextAction?.('translate'); });
+
+      expect(fixture.handleTranslate).not.toHaveBeenCalled();
+    });
   });
 });

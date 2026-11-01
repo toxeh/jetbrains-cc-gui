@@ -2144,6 +2144,25 @@
     "openSettingsTooltip": "Abrir configurações do aprimorador de prompt",
     "resolvingUsage": "Resolvendo configuração…"
   },
+  "localTranslate": {
+    "tooltip": "Traduzir rascunho com o modelo local",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Shift+Enter",
+    "failed": "A tradução local falhou",
+    "unreachable": "O servidor do modelo local não está acessível",
+    "timeout": "O modelo local não respondeu em 15 segundos",
+    "httpError": "O servidor do modelo local retornou HTTP {{status}}",
+    "invalidResponse": "O modelo local não retornou texto",
+    "disabled": "A tradução local está desativada na configuração",
+    "placeholderMismatch": "O modelo alterou chips ou código protegidos; rascunho mantido",
+    "draftChanged": "O rascunho mudou durante a tradução; resultado descartado",
+    "replyShow": "Traduzir",
+    "replyHide": "Original",
+    "replyAllShow": "Traduzir tudo",
+    "replyAllHide": "Mostrar original",
+    "cacheUnreadable": "Não foi possível ler as traduções salvas"
+  },
   "fileContext": {
     "placeholder": "Contexto do Arquivo",
     "enableTitle": "Ativar Contexto do Arquivo?",

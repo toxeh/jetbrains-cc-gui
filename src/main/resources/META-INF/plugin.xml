@@ -230,6 +230,12 @@
             <keyboard-shortcut keymap="macOS" first-keystroke="shift ENTER"/>
         </action>
 
+        <!-- Chat tool window local translate action (no default shortcut; dynamically managed by SendShortcutSync) -->
+        <action id="ClaudeCodeGUI.ChatTranslateAction"
+                class="com.github.claudecodegui.action.ChatTranslateAction"
+                text="Translate Draft with Local Model (Chat Window)"
+                description="Rewrite the chat draft with the local OpenAI-compatible model configured in localTranslate"/>
+
         <!--
           Hide CC GUI Panel. A standalone action with NO default keyboard shortcut: users may bind one
           in Settings | Keymap to hide the tool window while focus is in the IDE (e.g. the editor).

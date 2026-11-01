@@ -301,7 +301,7 @@ public class KimiHistoryReader {
         return true;
     }
 
-    private Path resolveSessionDir(String sessionId, String cwd) throws IOException {
+    public Path resolveSessionDir(String sessionId, String cwd) throws IOException {
         return resolveSessionDir(sessionId, cwd, () -> false);
     }
 

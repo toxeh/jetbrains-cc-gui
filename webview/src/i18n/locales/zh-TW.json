@@ -2072,6 +2072,25 @@
     "openSettingsTooltip": "開啟增強提示詞設定",
     "resolvingUsage": "正在解析執行設定…"
   },
+  "localTranslate": {
+    "tooltip": "使用本機模型翻譯草稿",
+    "shortcutCmdEnterMac": "⌘Enter",
+    "shortcutCmdEnter": "Ctrl+Enter",
+    "shortcutShiftEnter": "Shift+Enter",
+    "failed": "本機翻譯失敗",
+    "unreachable": "無法連線至本機模型服務",
+    "timeout": "本機模型在 15 秒內未回應",
+    "httpError": "本機模型服務回傳 HTTP {{status}}",
+    "invalidResponse": "本機模型未回傳文字",
+    "disabled": "設定中已停用本機翻譯",
+    "placeholderMismatch": "模型修改了受保護的標籤或程式碼，草稿保持不變",
+    "draftChanged": "翻譯期間草稿已變更，結果已捨棄",
+    "replyShow": "翻譯",
+    "replyHide": "原文",
+    "replyAllShow": "全部翻譯",
+    "replyAllHide": "顯示原文",
+    "cacheUnreadable": "無法讀取已儲存的翻譯"
+  },
   "fileContext": {
     "placeholder": "檔案上下文",
     "enableTitle": "開啟檔案上下文？",

@@ -5,11 +5,13 @@ import {
   claimEnterPress,
   isEnterKey,
   isSendKey,
+  isTranslateKey,
   releaseEnterKeyUp,
   releaseEnterPress,
   triageEnterKeyDown,
 } from '../utils/enterKeyGuard.js';
 import type { EnterKeyRefs } from '../utils/enterKeyGuard.js';
+import type { TranslateShortcut } from '../utils/localTranslate.js';
 
 interface CompletionOpenLike {
   isOpen: boolean;
@@ -26,6 +28,10 @@ export interface UseNativeEventCaptureOptions extends EnterKeyRefs {
   handleSubmit: () => void;
   handleEnhancePrompt: () => void;
   handleCompositionEnd: () => void;
+  /** Local translate chord owner (null when the feature is off). */
+  translateShortcut?: TranslateShortcut | null;
+  /** Rewrite the draft through the local model; never sends. */
+  handleTranslate?: () => void;
 }
 
 function isAnyCompletionOpen(options: UseNativeEventCaptureOptions): boolean {
@@ -46,6 +52,7 @@ function isAnyCompletionOpen(options: UseNativeEventCaptureOptions): boolean {
  * `defaultPrevented`. It also covers:
  * - beforeinput insertParagraph that JCEF delivers without a keydown (Enter-to-send mode)
  * - prompt enhancer shortcut (Cmd+/)
+ * - local translate chord and the IDE `ideaTranslate` event
  */
 export function useNativeEventCapture(options: UseNativeEventCaptureOptions): void {
   const { editableRef, sendShortcut, handleSubmit, handleEnhancePrompt } = options;
@@ -60,9 +67,18 @@ export function useNativeEventCapture(options: UseNativeEventCaptureOptions): vo
   // command. The ref follows committed renders only, so a suspended render
   // cannot flip the menu open before that render commits.
   const completionOpenRef = useRef(false);
+  // Same JCEF limit again: sendShortcut and the translate shortcut can change
+  // after mount (when settings or the first probe arrive), so a first-frame
+  // effect event would still see the initial 'enter' / off defaults.
+  const sendShortcutRef = useRef<SendShortcut>(sendShortcut);
+  const handleTranslateRef = useRef(options.handleTranslate);
+  const translateShortcutRef = useRef<TranslateShortcut | null>(options.translateShortcut ?? null);
   useLayoutEffect(() => {
     handleSubmitRef.current = handleSubmit;
     completionOpenRef.current = isAnyCompletionOpen(options);
+    sendShortcutRef.current = sendShortcut;
+    handleTranslateRef.current = options.handleTranslate;
+    translateShortcutRef.current = options.translateShortcut ?? null;
   });
 
   // Effect Events only swap their implementation on commit, so the listeners
@@ -85,7 +101,9 @@ export function useNativeEventCapture(options: UseNativeEventCaptureOptions): vo
     if (!isEnterKey(ev.key, ev.keyCode)) return;
     if (!ev.repeat) enterWasComposingRef.current = ev.isComposing;
 
-    const verdict = triageEnterKeyDown(ev, ev.isComposing, sendShortcut, options);
+    const currentSendShortcut = sendShortcutRef.current;
+    const translateShortcut = translateShortcutRef.current;
+    const verdict = triageEnterKeyDown(ev, ev.isComposing, currentSendShortcut, options, translateShortcut);
     if (verdict === 'awaitingIme') {
       // Keep the native candidate confirmation, but don't let React reclassify
       // this same press if the composition guard expires during propagation.
@@ -96,7 +114,14 @@ export function useNativeEventCapture(options: UseNativeEventCaptureOptions): vo
     // Open completion menus read Enter through the React handler.
     // completionOpenRef, not the effect-event options: JCEF can keep this
     // callback on the first frame, where every menu is still closed.
-    if (completionOpenRef.current || !isSendKey(sendShortcut, ev)) return;
+    if (completionOpenRef.current) return;
+
+    if (isTranslateKey(currentSendShortcut, translateShortcut, ev)) {
+      claimEnterPress(ev, options);
+      handleTranslateRef.current?.();
+      return;
+    }
+    if (!isSendKey(currentSendShortcut, ev, translateShortcut)) return;
 
     claimEnterPress(ev, options);
     handleSubmitRef.current();
@@ -105,11 +130,11 @@ export function useNativeEventCapture(options: UseNativeEventCaptureOptions): vo
   const onNativeKeyUp = useEffectEvent((ev: KeyboardEvent) => {
     if (!isEnterKey(ev.key, ev.keyCode)) return;
     enterWasComposingRef.current = false;
-    releaseEnterKeyUp(ev, sendShortcut, options);
+    releaseEnterKeyUp(ev, sendShortcutRef.current, options, translateShortcutRef.current);
   });
 
   const onNativeBeforeInput = useEffectEvent((ev: InputEvent) => {
-    catchStrayEnter(ev, sendShortcut, options, completionOpenRef.current, () => {
+    catchStrayEnter(ev, sendShortcutRef.current, options, completionOpenRef.current, () => {
       handleSubmitRef.current();
     });
     if (
@@ -147,4 +172,22 @@ export function useNativeEventCapture(options: UseNativeEventCaptureOptions): vo
       el.removeEventListener('blur', onBlur);
     };
   }, [editableRef]);
+
+  // ChatTranslateAction (IDE keymap) → execContextAction('translate') → ideaTranslate.
+  // Reads refs only, never an effect event: JCEF would keep the first commit.
+  // An open completion menu keeps the chord, and a live IME composition owns Enter.
+  // Like the 'newline' action, it only acts when focus is in the composer: a keymap
+  // chord pressed in another webview field must not rewrite the draft.
+  const isComposingRef = options.isComposingRef;
+  useEffect(() => {
+    const onIdeaTranslate = () => {
+      const el = editableRef.current;
+      const active = document.activeElement;
+      if (!el || !active || (active !== el && !el.contains(active))) return;
+      if (completionOpenRef.current || isComposingRef.current) return;
+      handleTranslateRef.current?.();
+    };
+    document.addEventListener('ideaTranslate', onIdeaTranslate);
+    return () => document.removeEventListener('ideaTranslate', onIdeaTranslate);
+  }, [editableRef, isComposingRef]);
 }
