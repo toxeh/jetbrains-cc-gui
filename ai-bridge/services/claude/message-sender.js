@@ -38,6 +38,7 @@ import { MAX_SEND_ERROR_LENGTH, prependSdkStderr, redactSecrets } from './messag
 import { createPreToolUseHook } from './permission-mode.js';
 import { loadMcpServersConfigAsRecord } from './mcp-status/config-loader.js';
 import { setActiveQueryResult } from './message-session-registry.js';
+import { isSparcRouterCommand, startSparcRouterLiveTail } from '../../utils/sparc-router-live.js';
 import {
   normalizeStreamDelta,
   resolveSnapshotDelta,
@@ -276,6 +277,29 @@ function processStreamMessage(msg, state, logPrefix) {
           emitThinkingDelta(block.thinking || block.text || '', state, i);
         } else if (block.type === 'tool_use') {
           console.log('[TOOL_USE]', JSON.stringify({ id: block.id, name: block.name }));
+          if (block.id && isSparcRouterCommand(block.input)) {
+            if (!state.activeSparcRouterTails) {
+              state.activeSparcRouterTails = new Map();
+            }
+            if (!state.activeSparcRouterTails.has(block.id)) {
+              const toolUseId = block.id;
+              const tail = startSparcRouterLiveTail({
+                cwd: state.workingDirectory || '',
+                startedAtMs: Date.now(),
+                onUpdate: ({ content: liveText }) => {
+                  if (!state.activeSparcRouterTails?.has(toolUseId)) return;
+                  console.log('[TOOL_RESULT]', JSON.stringify(truncateToolResultBlock({
+                    type: 'tool_result',
+                    tool_use_id: toolUseId,
+                    content: liveText,
+                    is_error: false,
+                    is_streaming: true,
+                  })));
+                },
+              });
+              state.activeSparcRouterTails.set(toolUseId, tail);
+            }
+          }
         }
       }
     } else if (typeof content === 'string') {
@@ -296,6 +320,15 @@ function processStreamMessage(msg, state, logPrefix) {
     if (Array.isArray(content)) {
       for (const block of content) {
         if (block.type === 'tool_result') {
+          if (block.tool_use_id && state.activeSparcRouterTails?.has(block.tool_use_id)) {
+            const tail = state.activeSparcRouterTails.get(block.tool_use_id);
+            state.activeSparcRouterTails.delete(block.tool_use_id);
+            try {
+              tail.stop();
+            } catch {
+              // ignore
+            }
+          }
           console.log('[TOOL_RESULT]', JSON.stringify(truncateToolResultBlock(block)));
         }
       }
@@ -365,7 +398,18 @@ async function executeWithRetry({ createQueryResult, streamingEnabled, resumeSes
       currentSessionId: resumeSessionId, lastEmittedSessionId: null, messageCount: 0, hasStreamEvents: false,
       lastAssistantContent: '', lastThinkingContent: '', accumulatedUsage: null,
       streamingEnabled, streamStarted: outerStreamState.streamStarted,
-      streamEnded: outerStreamState.streamEnded, queryResult: null
+      streamEnded: outerStreamState.streamEnded, queryResult: null,
+      workingDirectory, activeSparcRouterTails: new Map(),
+    };
+    const stopAllSparcTails = () => {
+      for (const tail of state.activeSparcRouterTails.values()) {
+        try {
+          tail.stop();
+        } catch {
+          // ignore
+        }
+      }
+      state.activeSparcRouterTails.clear();
     };
 
     if (retryAttempt > 0) {
@@ -421,9 +465,12 @@ async function executeWithRetry({ createQueryResult, streamingEnabled, resumeSes
       break;
 
     } catch (retryError) {
+      stopAllSparcTails();
       outerStreamState.streamStarted = state.streamStarted;
       outerStreamState.accumulatedUsage = state.accumulatedUsage;
       throw retryError;
+    } finally {
+      stopAllSparcTails();
     }
   }
 }

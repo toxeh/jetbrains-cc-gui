@@ -468,6 +468,10 @@ export class AcpTerminalHost {
           terminalId,
           exitCode: state.exitCode,
           signal: state.signal,
+          output: state.chunks.join(''),
+          command: state.command,
+          args,
+          cwd,
         });
         resolve({ exitCode: state.exitCode, signal: state.signal });
       };
@@ -498,7 +502,21 @@ export class AcpTerminalHost {
     });
 
     const onData = (buf) => {
-      this.#append(state, buf.toString('utf8'));
+      const text = buf.toString('utf8');
+      this.#append(state, text);
+      try {
+        this.onEvent('output', {
+          terminalId,
+          byteLength: state.byteLength,
+          chunk: text,
+          output: state.chunks.join(''),
+          command: state.command,
+          args,
+          cwd,
+        });
+      } catch {
+        // ignore listener errors
+      }
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);

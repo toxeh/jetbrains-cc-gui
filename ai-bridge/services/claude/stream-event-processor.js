@@ -1,5 +1,6 @@
 import { emitAccumulatedUsage, mergeUsage } from '../../utils/usage-utils.js';
 import { truncateErrorContent, truncateToolResultBlock } from './message-output-filter.js';
+import { isSparcRouterCommand, startSparcRouterLiveTail } from '../../utils/sparc-router-live.js';
 import {
   normalizeStreamDelta,
   resolveSnapshotDelta,
@@ -35,8 +36,22 @@ export function createTurnState(requestContext, runtime) {
     textBlockContentByIndex: new Map(),
     thinkingBlockContentByIndex: new Map(),
     finalSessionId: requestContext.requestedSessionId || runtime?.sessionId || '',
-    accumulatedUsage: null
+    accumulatedUsage: null,
+    cwd: requestContext?.options?.cwd || runtime?.cwd || '',
+    activeSparcRouterTails: new Map(),
   };
+}
+
+export function stopTurnSparcRouterTails(turnState) {
+  if (!turnState?.activeSparcRouterTails) return;
+  for (const tail of turnState.activeSparcRouterTails.values()) {
+    try {
+      tail.stop();
+    } catch {
+      // ignore
+    }
+  }
+  turnState.activeSparcRouterTails.clear();
 }
 
 export function processStreamEvent(msg, turnState) {
@@ -113,6 +128,28 @@ export function processMessageContent(msg, turnState) {
           process.stdout.write('[BLOCK_RESET]\n');
         }
         emitSnapshotThinking(thinking, turnState, i);
+      } else if (block.type === 'tool_use' && block.id && isSparcRouterCommand(block.input)) {
+        if (!turnState.activeSparcRouterTails) {
+          turnState.activeSparcRouterTails = new Map();
+        }
+        if (!turnState.activeSparcRouterTails.has(block.id)) {
+          const toolUseId = block.id;
+          const tail = startSparcRouterLiveTail({
+            cwd: turnState.cwd || '',
+            startedAtMs: Date.now(),
+            onUpdate: ({ content: liveText }) => {
+              if (!turnState.activeSparcRouterTails?.has(toolUseId)) return;
+              console.log('[TOOL_RESULT]', JSON.stringify(truncateToolResultBlock({
+                type: 'tool_result',
+                tool_use_id: toolUseId,
+                content: liveText,
+                is_error: false,
+                is_streaming: true,
+              })));
+            },
+          });
+          turnState.activeSparcRouterTails.set(toolUseId, tail);
+        }
       }
     }
   } else if (typeof content === 'string') {
@@ -161,12 +198,21 @@ function emitSnapshotThinking(thinkingText, turnState, blockIndex) {
   turnState.lastThinkingContent = thinkingText;
 }
 
-export function processToolResultMessages(msg) {
+export function processToolResultMessages(msg, turnState) {
   if (msg.type !== 'user') return;
   const content = msg.message?.content ?? msg.content;
   if (!Array.isArray(content)) return;
   for (const block of content) {
     if (block.type === 'tool_result') {
+      if (block.tool_use_id && turnState?.activeSparcRouterTails?.has(block.tool_use_id)) {
+        const tail = turnState.activeSparcRouterTails.get(block.tool_use_id);
+        turnState.activeSparcRouterTails.delete(block.tool_use_id);
+        try {
+          tail.stop();
+        } catch {
+          // ignore
+        }
+      }
       console.log('[TOOL_RESULT]', JSON.stringify(truncateToolResultBlock(block)));
     }
   }

@@ -611,10 +611,9 @@ public class ClaudeMessageHandler implements MessageCallback {
 
             // Check if the message contains a tool_result
             if (messageParser.hasToolResult(userMsg)) {
-                // This is a user message with tool_result; add it to the message list
-                Message toolResultMessage = new Message(Message.Type.USER, "[tool_result]", userMsg);
-                state.addMessage(toolResultMessage);
-                LOG.debug("Added tool_result user message to state");
+                // Upsert by tool_use_id so intermediate streaming tool_result updates are replaced in-place
+                upsertToolResultMessage(extractToolUseId(userMsg), userMsg);
+                LOG.debug("Upserted tool_result user message in state");
                 callbackHandler.notifyMessageUpdate(state.getMessages());
                 return;
             }
@@ -684,9 +683,8 @@ public class ClaudeMessageHandler implements MessageCallback {
                 rawUser.addProperty("type", "user");
                 rawUser.add("message", messageObj);
 
-                // Create the user message and add it to the message list
-                Message toolResultMessage = new Message(Message.Type.USER, "[tool_result]", rawUser);
-                state.addMessage(toolResultMessage);
+                // Upsert the user message by tool_use_id so streaming progress updates in-place
+                upsertToolResultMessage(toolUseId, rawUser);
 
                 LOG.debug("Tool result received for tool_use_id: " + toolUseId);
                 callbackHandler.notifyMessageUpdate(state.getMessages());
@@ -694,6 +692,44 @@ public class ClaudeMessageHandler implements MessageCallback {
         } catch (Exception e) {
             LOG.warn("Failed to parse tool_result JSON: " + e.getMessage());
         }
+    }
+
+    private String extractToolUseId(JsonObject rawUser) {
+        if (rawUser == null || !rawUser.has("message") || !rawUser.get("message").isJsonObject()) {
+            return null;
+        }
+        JsonObject messageObj = rawUser.getAsJsonObject("message");
+        if (!messageObj.has("content") || !messageObj.get("content").isJsonArray()) {
+            return null;
+        }
+        JsonArray contentArr = messageObj.getAsJsonArray("content");
+        for (int i = 0; i < contentArr.size(); i++) {
+            if (!contentArr.get(i).isJsonObject()) {
+                continue;
+            }
+            JsonObject block = contentArr.get(i).getAsJsonObject();
+            if (block.has("type") && "tool_result".equals(block.get("type").getAsString())
+                    && block.has("tool_use_id") && !block.get("tool_use_id").isJsonNull()) {
+                return block.get("tool_use_id").getAsString();
+            }
+        }
+        return null;
+    }
+
+    private void upsertToolResultMessage(String toolUseId, JsonObject rawUser) {
+        if (toolUseId != null && !toolUseId.isEmpty()) {
+            List<Message> messages = state.getMessagesReference();
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                Message existing = messages.get(i);
+                if (existing.type == Message.Type.USER
+                        && "[tool_result]".equals(existing.content)
+                        && toolUseId.equals(extractToolUseId(existing.raw))) {
+                    existing.raw = rawUser;
+                    return;
+                }
+            }
+        }
+        state.addMessage(new Message(Message.Type.USER, "[tool_result]", rawUser));
     }
 
     /**

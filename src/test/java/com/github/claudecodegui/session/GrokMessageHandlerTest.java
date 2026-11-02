@@ -600,4 +600,24 @@ public class GrokMessageHandlerTest {
         assertEquals("Exactly one ledger entry per turn", 1, lines.size());
         return com.google.gson.JsonParser.parseString(lines.get(0)).getAsJsonObject();
     }
+
+    @Test
+    public void streamingToolResultUpsertsInPlaceByToolUseId() {
+        SessionState state = new SessionState();
+        CallbackHandler callbacks = new CallbackHandler();
+        callbacks.setCallback(new RecordingCallback());
+        GrokMessageHandler handler = new GrokMessageHandler(state, callbacks);
+
+        handler.onMessage("tool_result",
+                "{\"type\":\"tool_result\",\"tool_use_id\":\"sparc-1\",\"content\":\"[SPARC-AUTO] ▶ STAGE START | stage=tdd\",\"is_error\":false,\"is_streaming\":true}");
+        handler.onMessage("tool_result",
+                "{\"type\":\"tool_result\",\"tool_use_id\":\"sparc-1\",\"content\":\"[SPARC-AUTO] ✔ STAGE END | stage=tdd\\nDONE\",\"is_error\":false}");
+
+        List<Message> toolResults = state.getMessages().stream()
+                .filter(m -> m.type == ClaudeSession.Message.Type.USER && "[tool_result]".equals(m.content))
+                .toList();
+        assertEquals("Streaming and final tool_result for same tool_use_id must upsert in place", 1, toolResults.size());
+        String rawStr = toolResults.get(0).raw.toString();
+        assertTrue("Upserted tool_result must contain latest content", rawStr.contains("STAGE END"));
+    }
 }

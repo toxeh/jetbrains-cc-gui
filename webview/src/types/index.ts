@@ -71,6 +71,7 @@ export interface ToolResultBlock {
     type?: string; url?: string; data?: string; media_type?: string;
   } }>;
   is_error?: boolean;
+  is_streaming?: boolean;
   [key: string]: unknown;
 }
 

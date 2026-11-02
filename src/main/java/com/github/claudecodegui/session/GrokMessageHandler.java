@@ -249,8 +249,7 @@ public class GrokMessageHandler implements MessageCallback {
             }
 
             if (hasToolResult(msgJson)) {
-                Message toolResultMessage = new Message(Message.Type.USER, "[tool_result]", msgJson);
-                state.addMessage(toolResultMessage);
+                upsertToolResultMessage(extractToolUseId(msgJson), msgJson);
                 callbackHandler.notifyMessageUpdate(state.getMessages());
                 return;
             }
@@ -441,12 +440,49 @@ public class GrokMessageHandler implements MessageCallback {
             rawUser.addProperty("type", "user");
             rawUser.add("message", messageObj);
 
-            Message toolResultMessage = new Message(Message.Type.USER, "[tool_result]", rawUser);
-            state.addMessage(toolResultMessage);
+            upsertToolResultMessage(toolUseId, rawUser);
             callbackHandler.notifyMessageUpdate(state.getMessages());
         } catch (Exception e) {
             LOG.warn("Failed to parse Grok tool_result: " + e.getMessage());
         }
+    }
+
+    private String extractToolUseId(JsonObject rawUser) {
+        if (rawUser == null || !rawUser.has("message") || !rawUser.get("message").isJsonObject()) {
+            return null;
+        }
+        JsonObject messageObj = rawUser.getAsJsonObject("message");
+        if (!messageObj.has("content") || !messageObj.get("content").isJsonArray()) {
+            return null;
+        }
+        JsonArray contentArr = messageObj.getAsJsonArray("content");
+        for (int i = 0; i < contentArr.size(); i++) {
+            if (!contentArr.get(i).isJsonObject()) {
+                continue;
+            }
+            JsonObject block = contentArr.get(i).getAsJsonObject();
+            if (block.has("type") && "tool_result".equals(block.get("type").getAsString())
+                    && block.has("tool_use_id") && !block.get("tool_use_id").isJsonNull()) {
+                return block.get("tool_use_id").getAsString();
+            }
+        }
+        return null;
+    }
+
+    private void upsertToolResultMessage(String toolUseId, JsonObject rawUser) {
+        if (toolUseId != null && !toolUseId.isEmpty()) {
+            List<Message> messages = state.getMessagesReference();
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                Message existing = messages.get(i);
+                if (existing.type == Message.Type.USER
+                        && "[tool_result]".equals(existing.content)
+                        && toolUseId.equals(extractToolUseId(existing.raw))) {
+                    existing.raw = rawUser;
+                    return;
+                }
+            }
+        }
+        state.addMessage(new Message(Message.Type.USER, "[tool_result]", rawUser));
     }
 
     private void handleUsage(String content) {

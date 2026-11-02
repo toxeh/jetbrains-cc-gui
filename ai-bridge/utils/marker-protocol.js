@@ -57,22 +57,31 @@ export function emitToolUseMessage({ id, name, input }) {
   });
 }
 
-export function emitToolResultMessage({ toolUseId, content, isError = false }) {
+export function emitToolResultMessage({ toolUseId, content, isError = false, isStreaming = false }) {
   const text = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+  const block = {
+    type: 'tool_result',
+    tool_use_id: toolUseId || 'tool-1',
+    is_error: Boolean(isError),
+    content: text,
+  };
+  if (isStreaming) {
+    block.is_streaming = true;
+  }
   emitMessageMarker({
     type: 'user',
     message: {
       role: 'user',
-      content: [
-        {
-          type: 'tool_result',
-          tool_use_id: toolUseId || 'tool-1',
-          is_error: Boolean(isError),
-          content: text,
-        },
-      ],
+      content: [block],
     },
   });
+}
+
+export function emitStatus(text) {
+  const clean = String(text ?? '').trim();
+  if (clean) {
+    console.log(`[STATUS] ${clean}`);
+  }
 }
 
 // Leading "@" is guarded the same way as leading "-": pi/omp (parseArgs in

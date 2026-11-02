@@ -218,14 +218,20 @@ async function createRuntime(params, { log } = {}) {
   // if the runtime was ever created under bypass, and live mode changes were ignored.)
   const live = {
     permissionMode: normalizePermissionMode(params.permissionMode),
+    onTerminalEvent: null,
   };
 
   const terminalHost = new AcpTerminalHost({
     defaultCwd: workCwd,
     env,
     onEvent: (event, data) => {
-      // terminal events can be logged; not emitted as tags for UI in v1
+      // terminal events can be logged and forwarded to active turn normalizer
       if (log) log('[GROK-TERM]', event);
+      if (typeof live.onTerminalEvent === 'function') {
+        try {
+          live.onTerminalEvent(event, data);
+        } catch {}
+      }
     },
     authorizeCreate: async (info) => {
       const mode = live.permissionMode || 'default';
@@ -406,6 +412,17 @@ async function executeTurn(runtime, params, normalizer) {
     const originalOnNotif = runtime.client.onNotification;
     const originalOnFsWrite = runtime.client.onFsWrite;
     const originalOnServerRequest = runtime.client.onServerRequest;
+    const originalOnTerminalEvent = runtime._livePermission
+      ? runtime._livePermission.onTerminalEvent
+      : null;
+    if (runtime._livePermission) {
+      runtime._livePermission.onTerminalEvent = (event, data) => {
+        emit('terminal', { event, ...(data || {}) });
+        if (typeof originalOnTerminalEvent === 'function') {
+          try { originalOnTerminalEvent(event, data); } catch {}
+        }
+      };
+    }
     runtime.client.onNotification = (method, p) => {
       const usage = usageFromNotification(method, p);
       if (usage) rememberUsageOnRuntime(runtime, usage);
@@ -479,6 +496,9 @@ async function executeTurn(runtime, params, normalizer) {
       runtime.client.onNotification = originalOnNotif;
       runtime.client.onFsWrite = originalOnFsWrite;
       runtime.client.onServerRequest = originalOnServerRequest;
+      if (runtime._livePermission) {
+        runtime._livePermission.onTerminalEvent = originalOnTerminalEvent;
+      }
     }
   } catch (err) {
     normalizer.finishError(err);
