@@ -445,7 +445,9 @@ public class CodexMessageHandler implements MessageCallback {
                 return;
             }
 
-            if (!replaceOptimisticUserMessage(parsed) && !upsertNativeMessage(parsed)) {
+            if (!replaceOptimisticUserMessage(parsed)
+                    && !upsertNativeMessage(parsed)
+                    && !upsertToolResultMessage(parsed)) {
                 state.addMessage(parsed);
             }
             callbackHandler.notifyMessageUpdate(state.getMessages());
@@ -454,6 +456,49 @@ public class CodexMessageHandler implements MessageCallback {
         } catch (Exception e) {
             LOG.warn("Failed to parse user message: " + e.getMessage());
         }
+    }
+
+    private boolean upsertToolResultMessage(Message parsed) {
+        if (parsed == null || parsed.type != Message.Type.USER || !"[tool_result]".equals(parsed.content)) {
+            return false;
+        }
+        String toolUseId = extractToolUseId(parsed.raw);
+        if (toolUseId == null || toolUseId.isEmpty()) {
+            return false;
+        }
+        java.util.List<Message> messages = state.getMessagesReference();
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message existing = messages.get(i);
+            if (existing.type == Message.Type.USER
+                    && "[tool_result]".equals(existing.content)
+                    && toolUseId.equals(extractToolUseId(existing.raw))) {
+                existing.raw = parsed.raw;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String extractToolUseId(com.google.gson.JsonObject rawUser) {
+        if (rawUser == null || !rawUser.has("message") || !rawUser.get("message").isJsonObject()) {
+            return null;
+        }
+        com.google.gson.JsonObject messageObj = rawUser.getAsJsonObject("message");
+        if (!messageObj.has("content") || !messageObj.get("content").isJsonArray()) {
+            return null;
+        }
+        com.google.gson.JsonArray contentArr = messageObj.getAsJsonArray("content");
+        for (int i = 0; i < contentArr.size(); i++) {
+            if (!contentArr.get(i).isJsonObject()) {
+                continue;
+            }
+            com.google.gson.JsonObject block = contentArr.get(i).getAsJsonObject();
+            if (block.has("type") && "tool_result".equals(block.get("type").getAsString())
+                    && block.has("tool_use_id") && !block.get("tool_use_id").isJsonNull()) {
+                return block.get("tool_use_id").getAsString();
+            }
+        }
+        return null;
     }
 
     private boolean replaceOptimisticUserMessage(Message nativeMessage) {

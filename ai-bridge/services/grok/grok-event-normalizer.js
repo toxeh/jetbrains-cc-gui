@@ -15,6 +15,10 @@ import {
   normalizeGrokTurnUsage,
   normalizeUsageToSnakeCase,
 } from './grok-utils.js';
+import {
+  isSparcRouterCommand,
+  startSparcRouterLiveTail,
+} from '../../utils/sparc-router-live.js';
 
 /** Paragraph break between reply segments in the plain-text success result. */
 const REPLY_SEGMENT_SEPARATOR = '\n\n';
@@ -40,6 +44,8 @@ export class GrokEventNormalizer {
      */
     this.toolCalls = new Map();
     this.editSeq = 0;
+    this.liveTails = new Map();
+    this.terminalToolMap = new Map();
     /** Last normalized snake_case context usage for this turn (attached to final [MESSAGE]). */
     this.lastUsage = null;
     /** Whole-turn usage normalized to Claude turnUsage schema (emitted on [RESULT]). */
@@ -49,6 +55,8 @@ export class GrokEventNormalizer {
   }
 
   begin() {
+    this.#stopAllLiveTails();
+    this.terminalToolMap.clear();
     this.toolCalls.clear();
     this.editSeq = 0;
     this.textSegments = [];
@@ -92,12 +100,17 @@ export class GrokEventNormalizer {
         this.#recordFsWrite(payload || {});
         break;
 
+      case 'terminal':
+        this.#handleTerminalEvent(payload || {});
+        break;
+
       default:
         break;
     }
   }
 
   finishSuccess(sessionId, resultText) {
+    this.#stopAllLiveTails();
     const finalSessionId = sessionId || this.sessionId || `grok-${Date.now()}`;
     if (!this.sessionId) {
       this.#emit(`[SESSION_ID] ${finalSessionId}`);
@@ -150,6 +163,7 @@ export class GrokEventNormalizer {
   }
 
   finishError(error) {
+    this.#stopAllLiveTails();
     // Still flush booked edits so a failed turn that already wrote files is
     // counted — but only entries with execution evidence (an observed fs_write
     // or an explicit permission allow). Pending entries (permission requested,
@@ -356,10 +370,146 @@ export class GrokEventNormalizer {
     });
 
     const done = isTerminalToolStatus(status) || rawOutput != null;
-    // Emit mid-stream when we already have usable edit payload (nice-to-have).
+    const hasNonEditInput = !isFileEditTool(name) && input && Object.keys(input).length > 0;
+    // Emit mid-stream when we already have usable edit payload or non-edit command input.
     // Turn-end flush still guarantees correctness if this is skipped.
-    if (done || hasUsableEditPayload(input)) {
+    if (done || hasUsableEditPayload(input) || hasNonEditInput) {
       this.#emitBookedEdit(toolCallId, { forceResult: done });
+    }
+    if (!done && isSparcRouterCommand(input)) {
+      this.#ensureSparcLiveTail(toolCallId, input);
+    } else if (done) {
+      this.#stopLiveTail(toolCallId);
+    }
+  }
+
+  #ensureSparcLiveTail(toolCallId, input) {
+    if (!toolCallId || this.liveTails.has(toolCallId)) return;
+    const handle = startSparcRouterLiveTail({
+      toolInput: input,
+      onUpdate: (update) => {
+        const text = typeof update === 'string' ? update : update?.content || '';
+        if (!text) return;
+        const prev = this.toolCalls.get(toolCallId);
+        if (prev?.emittedResult) return;
+        if (prev) {
+          this.toolCalls.set(toolCallId, {
+            ...prev,
+            rawOutput: text,
+            streamedResult: true,
+          });
+        }
+        this.#emit(
+          `[TOOL_RESULT] ${JSON.stringify({
+            type: 'tool_result',
+            tool_use_id: toolCallId,
+            content: text,
+            is_error: false,
+            is_streaming: true,
+          })}`,
+        );
+      },
+    });
+    if (handle) {
+      this.liveTails.set(toolCallId, handle);
+    }
+  }
+
+  #stopLiveTail(toolCallId) {
+    const handle = this.liveTails.get(toolCallId);
+    if (handle) {
+      this.liveTails.delete(toolCallId);
+      try {
+        handle.stop();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  #stopAllLiveTails() {
+    for (const handle of this.liveTails.values()) {
+      try {
+        handle.stop();
+      } catch {
+        // ignore
+      }
+    }
+    this.liveTails.clear();
+  }
+
+  #handleTerminalEvent(payload) {
+    const { event, terminalId, command, args, commandLine, output, exitCode } = payload || {};
+    if (!terminalId) return;
+
+    let toolCallId = this.terminalToolMap.get(terminalId) || '';
+    if (!toolCallId) {
+      for (const [id, tc] of this.toolCalls.entries()) {
+        if (!isFileEditTool(tc.name) && !tc.emittedResult) {
+          toolCallId = id;
+          break;
+        }
+      }
+      if (toolCallId) {
+        this.terminalToolMap.set(terminalId, toolCallId);
+      }
+    }
+
+    const cmdString =
+      commandLine ||
+      [command, ...(Array.isArray(args) ? args : [])].filter(Boolean).join(' ');
+    const cmdInput = cmdString ? { command: cmdString } : {};
+
+    if (!toolCallId && (event === 'create' || event === 'output')) {
+      toolCallId = `terminal-${terminalId}`;
+      this.terminalToolMap.set(terminalId, toolCallId);
+      this.#bookFileEdit(toolCallId, {
+        name: 'Bash',
+        input: cmdInput,
+        status: 'in_progress',
+        syntheticTerminal: true,
+      });
+      this.#emitBookedEdit(toolCallId, { forceResult: false });
+    }
+    if (!toolCallId) return;
+
+    if (event === 'create' && isSparcRouterCommand(cmdInput)) {
+      this.#ensureSparcLiveTail(toolCallId, cmdInput);
+    } else if (event === 'output' && typeof output === 'string' && output.trim()) {
+      const prev = this.toolCalls.get(toolCallId);
+      if (prev && !prev.emittedResult) {
+        this.toolCalls.set(toolCallId, {
+          ...prev,
+          rawOutput: output,
+          streamedResult: true,
+        });
+        this.#emit(
+          `[TOOL_RESULT] ${JSON.stringify({
+            type: 'tool_result',
+            tool_use_id: toolCallId,
+            content: output,
+            is_error: false,
+            is_streaming: true,
+          })}`,
+        );
+      }
+    } else if (event === 'exit') {
+      this.#stopLiveTail(toolCallId);
+      const prev = this.toolCalls.get(toolCallId);
+      if (prev && !prev.emittedResult) {
+        const finalOutput =
+          typeof output === 'string' && output.trim()
+            ? output
+            : prev.rawOutput;
+        this.toolCalls.set(toolCallId, {
+          ...prev,
+          rawOutput: finalOutput,
+          status: exitCode === 0 || exitCode == null ? 'completed' : 'failed',
+        });
+        if (prev.syntheticTerminal) {
+          this.#emitBookedEdit(toolCallId, { forceResult: true });
+        }
+      }
     }
   }
 
@@ -539,7 +689,12 @@ export class GrokEventNormalizer {
    */
   #flushFileEditLedger({ assumeSuccess = true } = {}) {
     for (const [id, tc] of this.toolCalls.entries()) {
-      if (!isFileEditTool(tc.name)) continue;
+      if (!isFileEditTool(tc.name)) {
+        if (tc.emittedUse && !tc.emittedResult && (tc.streamedResult || tc.rawOutput != null)) {
+          this.#emitBookedEdit(id, { forceResult: true });
+        }
+        continue;
+      }
       const input = normalizeEditToolInput(tc.input || {}, []);
       if (!toolPath(input) && !hasUsableEditPayload(input)) continue;
 

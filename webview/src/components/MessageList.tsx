@@ -59,8 +59,9 @@ function extractToolResultPreview(result: ToolResultBlock | null | undefined): s
       .join('\n');
   }
 
-  const preview = text.length > 200 ? text.slice(0, 200) : text;
-  return `${result.is_error === true ? 'error' : 'ok'}:${text.length}:${preview}`;
+  const preview = text.length > 200 ? `${text.slice(0, 100)}..${text.slice(-100)}` : text;
+  const status = result.is_streaming === true ? 'streaming' : (result.is_error === true ? 'error' : 'ok');
+  return `${status}:${text.length}:${preview}`;
 }
 
 function getMessageToolResultSignature(

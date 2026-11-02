@@ -75,12 +75,17 @@ import {
   emitJsonStringMarker,
   emitSendError,
   emitSessionId,
+  emitStatus,
   emitToolResultMessage,
   emitToolUseMessage,
   emitUsage,
   endStream,
   isNonEmptySessionId,
 } from '../../utils/marker-protocol.js';
+import {
+  isSparcRouterCommand,
+  startSparcRouterLiveTail,
+} from '../../utils/sparc-router-live.js';
 import {
   getRealHomeDir,
   isBridgeDirectory,
@@ -1669,6 +1674,17 @@ export async function sendMessage({
       thinkingPollTimer = null;
     }
   };
+  const activeSparcRouterTails = new Map();
+  const stopAllSparcRouterTails = () => {
+    for (const tail of activeSparcRouterTails.values()) {
+      try {
+        tail.stop();
+      } catch {
+        // ignore
+      }
+    }
+    activeSparcRouterTails.clear();
+  };
   try {
     // EVERYTHING between beginStream() and the spawn stays inside this try:
     // a throw here (CLI resolution, path/attachment work, ...) must still
@@ -1951,6 +1967,7 @@ export async function sendMessage({
     // close every unresolved tool_use with an error result before the stream
     // ends.
     const flushUnresolvedTools = () => {
+      stopAllSparcRouterTails();
       const notice = extractHeadlessDenyNotice(stderrText);
       for (const id of emittedToolUseIds) {
         if (emittedToolResultIds.has(id)) continue;
@@ -2235,12 +2252,41 @@ export async function sendMessage({
               emittedToolUseIds.add(toolIndex);
               emitToolUseMessage({ id: toolIndex, name: toolName, input: toolParams });
             }
+            if (step.state === 'ACTIVE' && isSparcRouterCommand(toolParams) && !activeSparcRouterTails.has(toolIndex)) {
+              const tail = startSparcRouterLiveTail({
+                cwd: workCwd,
+                startedAtMs: Date.now(),
+                onUpdate: ({ content, latestSummary }) => {
+                  if (emittedToolResultIds.has(toolIndex)) return;
+                  resetIdleReapTimer();
+                  emitToolResultMessage({
+                    toolUseId: toolIndex,
+                    content,
+                    isError: false,
+                    isStreaming: true,
+                  });
+                  if (latestSummary) {
+                    emitStatus(latestSummary);
+                  }
+                },
+              });
+              activeSparcRouterTails.set(toolIndex, tail);
+            }
             if ((step.state === 'DONE' || step.state === 'ERROR') && !emittedToolResultIds.has(toolIndex)) {
+              let liveRouterText = '';
+              if (activeSparcRouterTails.has(toolIndex)) {
+                const tail = activeSparcRouterTails.get(toolIndex);
+                activeSparcRouterTails.delete(toolIndex);
+                liveRouterText = tail.stop() || '';
+              }
               emittedToolResultIds.add(toolIndex);
               const err = step.tool_info?.error;
               let resultText = err?.message
                 ? `${err.type || 'TOOL_ERROR'}: ${err.message}`
                 : extractToolResultText(step.tool_info?.output);
+              if (!String(resultText || '').trim() && liveRouterText) {
+                resultText = liveRouterText;
+              }
               let isError = step.state === 'ERROR' || Boolean(step.tool_info?.isError || step.tool_info?.error);
               // A soft-denied command arrives as DONE with an empty output.
               // The explanation is on stderr; attach it when it is already here.
@@ -2411,6 +2457,7 @@ export async function sendMessage({
     clearIdleReapTimer();
     clearPostResultKillTimer();
     stopThinkingPoll();
+    stopAllSparcRouterTails();
     emitStreamEndOnce();
     await cleanupMaterializedImagePaths(imagePaths);
   }

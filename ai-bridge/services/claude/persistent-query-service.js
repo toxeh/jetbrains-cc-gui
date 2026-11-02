@@ -63,6 +63,7 @@ import {
   processStreamEvent,
   processToolResultMessages,
   shouldOutputMessage,
+  stopTurnSparcRouterTails,
 } from './stream-event-processor.js';
 import { generateSessionTitle } from '../session-title-service.js';
 import { getClaudeCliPathOverride } from '../../utils/claude-cli-path.js';
@@ -402,7 +403,7 @@ _runtimeCleanupTimer.unref();
       // In streaming mode, this overwrites any intermediate [USAGE] values sent during streaming.
       // The Java backend (ClaudeMessageHandler.handleAssistantMessage) relies on this for correct totals.
       emitUsageTag(msg);
-      processToolResultMessages(msg);
+      processToolResultMessages(msg, turnState);
 
       if (msg?.type === 'system' && msg.session_id) {
         turnState.finalSessionId = msg.session_id;
@@ -467,6 +468,7 @@ _runtimeCleanupTimer.unref();
       }
     }
   } finally {
+    stopTurnSparcRouterTails(turnState);
     endRuntimeTurn(runtime);
     if (runtime.permissionModeState) {
       runtime.permissionModeState.executionScope = '';

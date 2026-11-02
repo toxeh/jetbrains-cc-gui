@@ -75,6 +75,9 @@ public abstract class MarkerCliBridge extends BaseSDKBridge {
         } else if (line.startsWith("[USAGE]")) {
             String usageJson = line.substring("[USAGE]".length()).trim();
             callback.onMessage("usage", usageJson);
+        } else if (line.startsWith("[STATUS]")) {
+            String status = line.substring("[STATUS]".length()).trim();
+            callback.onMessage("status", status);
         } else if (line.startsWith("[MESSAGE]")) {
             String jsonStr = line.substring("[MESSAGE]".length()).trim();
             try {
