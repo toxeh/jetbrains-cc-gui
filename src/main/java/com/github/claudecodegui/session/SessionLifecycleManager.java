@@ -86,7 +86,7 @@ public class SessionLifecycleManager {
     }
 
     /**
-     * Create a new session, interrupting the old one first.
+     * Interrupts the active session and creates a new session while preserving provider, permission mode, and model.
      */
     public void createNewSession() {
         LOG.info("Creating new session...");
@@ -117,8 +117,8 @@ public class SessionLifecycleManager {
             });
 
             ClaudeSession newSession = createDefaultSession();
-            newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(previousProvider);
+            newSession.setPermissionMode(previousPermissionMode);
             // Verbatim copy: the live value was already sanitized when set (migrated
             // on restore, or an explicit custom id via set_model), so re-migrating
             // here could only rewrite a user's custom model behind their back.
@@ -140,7 +140,9 @@ public class SessionLifecycleManager {
     }
 
     /**
-     * Create a new session from a template, interrupting the old one first.
+     * Interrupts the active session and creates a new session configured from the specified template.
+     *
+     * @param template Session template providing provider, permission mode, model, reasoning effort, and working directory
      */
     public void createNewSessionFromTemplate(SessionTemplate template) {
         LOG.info("Creating new session from template: " + template.getName());
@@ -167,11 +169,11 @@ public class SessionLifecycleManager {
             ClaudeSession newSession = createDefaultSession();
 
             // Apply template settings
-            if (template.getPermissionMode() != null) {
-                newSession.setPermissionMode(template.getPermissionMode());
-            }
             if (template.getProvider() != null) {
                 newSession.setProvider(template.getProvider());
+            }
+            if (template.getPermissionMode() != null) {
+                newSession.setPermissionMode(template.getPermissionMode());
             }
             if (template.getModel() != null) {
                 // Templates hold an explicit user choice (possibly a custom model id),
@@ -216,9 +218,12 @@ public class SessionLifecycleManager {
     }
 
     /**
-     * Load a history session by ID, provider, and optional model from the history row.
+     * Interrupts the active session and loads a persisted history session with the resolved provider, permission mode, and model.
      *
-     * @param model when non-blank, restores that model instead of keeping the previous UI selection
+     * @param sessionId Persisted session identifier to load
+     * @param projectPath Project or working directory path associated with the history session
+     * @param provider Provider identifier to activate, or null or blank to retain the previous provider
+     * @param model Model identifier from the history entry, or null or blank to retain the previous model
      */
     public void loadHistorySession(String sessionId, String projectPath, String provider, String model) {
         LOG.info("Loading history session: " + sessionId + " from project: " + projectPath);
@@ -260,8 +265,8 @@ public class SessionLifecycleManager {
                 .thenRun(() -> {
 
             ClaudeSession newSession = createDefaultSession();
-            newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
+            newSession.setPermissionMode(previousPermissionMode);
             // Verbatim: a payload model comes from the webview, which is the authority
             // on custom ids and already applied retired-id migration where it is safe;
             // a fallback previousModel is a live value that was sanitized when set.

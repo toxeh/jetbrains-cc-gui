@@ -1667,14 +1667,16 @@ public class ClaudeChatWindow {
         return sessionLifecycleManager;
     }
 
+    /**
+     * Restores persisted provider, permission mode, model, reasoning effort, and session binding into the current tab session.
+     *
+     * @param savedState Persisted tab session state to restore, or null when no saved state exists
+     */
     public void restorePersistedTabSessionState(TabStateService.TabSessionState savedState) {
         if (savedState == null || session == null) {
             return;
         }
 
-        if (savedState.permissionMode != null && !savedState.permissionMode.trim().isEmpty()) {
-            session.setPermissionMode(savedState.permissionMode);
-        }
         if (savedState.provider != null && !savedState.provider.trim().isEmpty()) {
             session.setProvider(savedState.provider);
             // HandlerContext keeps its own currentProvider (read by
@@ -1688,6 +1690,9 @@ public class ClaudeChatWindow {
             if (handlerContext != null) {
                 handlerContext.setCurrentProvider(savedState.provider);
             }
+        }
+        if (savedState.permissionMode != null && !savedState.permissionMode.trim().isEmpty()) {
+            session.setPermissionMode(savedState.permissionMode);
         }
         if (savedState.model != null && !savedState.model.trim().isEmpty()) {
             session.setModel(savedState.model);

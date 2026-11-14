@@ -1,14 +1,19 @@
 package com.github.claudecodegui.session;
 
+import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.provider.claude.ClaudeSDKBridge;
 import com.github.claudecodegui.provider.common.MarkerCliBridge;
 import com.github.claudecodegui.provider.common.MessageCallback;
 import com.github.claudecodegui.provider.common.SDKResult;
 import com.github.claudecodegui.provider.zcode.ZcodeSDKBridge;
+import com.github.claudecodegui.settings.TabStateService;
+import com.github.claudecodegui.ui.ChatWindowDelegate;
+import com.github.claudecodegui.ui.toolwindow.ClaudeChatWindow;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.project.Project;
 import org.junit.Test;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -18,6 +23,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
@@ -604,5 +610,74 @@ public class SessionSendServiceTest {
 
         assertNull(state.getError());
         assertTrue(claudeBridge.sendCalled);
+    }
+
+    /** AC-4: ClaudeChatWindow.restorePersistedTabSessionState applies savedState.provider before permissionMode. */
+    @Test
+    public void restorePersistedTabSessionStatePreservesGeminiSandboxAndDropsNonGeminiSandbox() throws Exception {
+        Field unsafeField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+        unsafeField.setAccessible(true);
+        sun.misc.Unsafe unsafe = (sun.misc.Unsafe) unsafeField.get(null);
+
+        ClaudeChatWindow chatWindow = (ClaudeChatWindow) unsafe.allocateInstance(ClaudeChatWindow.class);
+
+        ClaudeSession session = new ClaudeSession(null, null, null, null);
+        Field sessionField = ClaudeChatWindow.class.getDeclaredField("session");
+        sessionField.setAccessible(true);
+        sessionField.set(chatWindow, session);
+
+        HandlerContext handlerContext = new HandlerContext(null, null, null, null, null);
+        Field handlerContextField = ClaudeChatWindow.class.getDeclaredField("handlerContext");
+        handlerContextField.setAccessible(true);
+        handlerContextField.set(chatWindow, handlerContext);
+
+        Field restoredHistoryField = ClaudeChatWindow.class.getDeclaredField("restoredHistory");
+        restoredHistoryField.setAccessible(true);
+        Constructor<?> restoredHistoryCtor = restoredHistoryField.getType().getDeclaredConstructor();
+        restoredHistoryCtor.setAccessible(true);
+        restoredHistoryField.set(chatWindow, restoredHistoryCtor.newInstance());
+
+        ChatWindowDelegate chatWindowDelegate = (ChatWindowDelegate) unsafe.allocateInstance(ChatWindowDelegate.class);
+        Field delegateField = ClaudeChatWindow.class.getDeclaredField("chatWindowDelegate");
+        delegateField.setAccessible(true);
+        delegateField.set(chatWindow, chatWindowDelegate);
+
+        Field schedulerField = ChatWindowDelegate.class.getDeclaredField("unreadUiScheduler");
+        schedulerField.setAccessible(true);
+        schedulerField.set(chatWindowDelegate, (Consumer<Runnable>) runnable -> {});
+
+        Field hostField = ChatWindowDelegate.class.getDeclaredField("host");
+        hostField.setAccessible(true);
+        ChatWindowDelegate.DelegateHost delegateHost = (ChatWindowDelegate.DelegateHost) Proxy.newProxyInstance(
+                ChatWindowDelegate.DelegateHost.class.getClassLoader(),
+                new Class<?>[]{ChatWindowDelegate.DelegateHost.class},
+                (proxy, method, args) -> {
+                    if (method.getReturnType() == boolean.class) {
+                        return false;
+                    }
+                    return null;
+                }
+        );
+        hostField.set(chatWindowDelegate, delegateHost);
+
+        TabStateService.TabSessionState geminiState = new TabStateService.TabSessionState();
+        geminiState.provider = "gemini";
+        geminiState.permissionMode = "sandbox";
+        geminiState.sessionId = "gemini-tab-1";
+
+        chatWindow.restorePersistedTabSessionState(geminiState);
+
+        assertEquals("gemini", session.getProvider());
+        assertEquals("sandbox", session.getPermissionMode());
+
+        TabStateService.TabSessionState codexState = new TabStateService.TabSessionState();
+        codexState.provider = "codex";
+        codexState.permissionMode = "sandbox";
+        codexState.sessionId = "codex-tab-2";
+
+        chatWindow.restorePersistedTabSessionState(codexState);
+
+        assertEquals("codex", session.getProvider());
+        assertEquals("default", session.getPermissionMode());
     }
 }
