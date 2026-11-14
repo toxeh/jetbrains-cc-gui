@@ -33,10 +33,11 @@ import static org.junit.Assert.fail;
 public class SessionMessageOrchestratorTest {
 
     private Application previousApplication;
+    private java.nio.file.Path isolatedSettingsDir;
 
     /** Keep streamed status changes independent of a running IDE. */
     @Before
-    public void stubNotificationDispatch() {
+    public void stubNotificationDispatch() throws Exception {
         previousApplication = ApplicationManager.getApplication();
         Application application = (Application) Proxy.newProxyInstance(Application.class.getClassLoader(),
                 new Class<?>[]{Application.class}, (proxy, method, arguments) -> {
@@ -46,11 +47,25 @@ public class SessionMessageOrchestratorTest {
                     return null;
                 });
         ApplicationManager.setApplication(application);
+
+        isolatedSettingsDir = java.nio.file.Files.createTempDirectory("orchestrator-claude-settings");
+        java.nio.file.Path dummySettings = isolatedSettingsDir.resolve("settings.json");
+        java.nio.file.Files.writeString(dummySettings, "{}");
+        com.github.claudecodegui.provider.ClaudeContextWindowOverrideProvider.setInstanceForTests(
+                com.github.claudecodegui.provider.ClaudeContextWindowOverrideProvider.createForTests(dummySettings));
     }
 
     /** Leave subsequent tests with the application they started with. */
     @After
     public void restoreApplication() {
+        com.github.claudecodegui.provider.ClaudeContextWindowOverrideProvider.setInstanceForTests(null);
+        if (isolatedSettingsDir != null) {
+            try {
+                java.nio.file.Files.deleteIfExists(isolatedSettingsDir.resolve("settings.json"));
+                java.nio.file.Files.deleteIfExists(isolatedSettingsDir);
+            } catch (Exception ignored) {
+            }
+        }
         ApplicationManager.setApplication(previousApplication);
     }
 
